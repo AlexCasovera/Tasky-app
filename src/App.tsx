@@ -6,7 +6,10 @@ export default function App() {
   const [selectedTask, setSelectedTask] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
 
-  // Form State for Builder / Editor
+  // ADMIN TEAM MEMBER FILTER STATE
+  const [activeEmployeeFilters, setActiveEmployeeFilters] = useState(['Alex M.', 'Adrian R.', 'Marc S.']);
+
+  // Form State for Task Builder / Editor
   const [taskTitle, setTaskTitle] = useState('');
   const [taskDesc, setTaskDesc] = useState('');
   const [selectedAssignees, setSelectedAssignees] = useState([]);
@@ -19,13 +22,22 @@ export default function App() {
   // Recurrence Engine States
   const [recurrenceType, setRecurrenceType] = useState('once');
   const [activeDays, setActiveDays] = useState(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+  const [generationTime, setGenerationTime] = useState('13:00');
   const [cadenceDays, setCadenceDays] = useState(14);
+
+  // Task Chaining States
+  const [enableChaining, setEnableChaining] = useState(false);
+  const [chainTaskTitle, setChainTaskTitle] = useState('');
 
   // Proof of Work Controls
   const [requiresPhoto, setRequiresPhoto] = useState(false);
   const [requiresComment, setRequiresComment] = useState(false);
+
+  // Admin Notification Settings
+  const [notifyOnComplete, setNotifyOnComplete] = useState(true);
+  const [notifyOnComment, setNotifyOnComment] = useState(false);
   
-  // Execution State inside Modal
+  // Execution & Audit State inside Modal
   const [executionComment, setExecutionComment] = useState('');
   const [photoUploaded, setPhotoUploaded] = useState(false);
   const [additionalNote, setAdditionalNote] = useState('');
@@ -33,14 +45,14 @@ export default function App() {
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const timeSlots = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17]; // 8 AM to 5 PM
   
-  // Team Member Identity Configuration (Colors & Avatars)
+  // Team Member Configurations
   const teamMembers = [
     { name: 'Alex M.', initials: 'AM', color: 'bg-[#E63946]', border: 'border-red-600', badge: 'bg-red-100 text-red-800' },
     { name: 'Adrian R.', initials: 'AR', color: 'bg-[#7209B7]', border: 'border-purple-600', badge: 'bg-purple-100 text-purple-800' },
     { name: 'Marc S.', initials: 'MS', color: 'bg-[#0077B6]', border: 'border-blue-600', badge: 'bg-blue-100 text-blue-800' }
   ];
 
-  // In-Memory Task Database with Time Grid Coordinates
+  // In-Memory Task List
   const [tasks, setTasks] = useState([
     {
       id: 1,
@@ -51,11 +63,13 @@ export default function App() {
       dayOfWeek: 'Fri',
       dayOfMonth: 4,
       startHour: 9,
-      duration: 2, // Spans 9:00 AM - 11:00 AM
+      duration: 2,
       timeLabel: '09:00 AM - 11:00 AM',
       priority: 'High',
       requiresPhoto: false,
       requiresComment: true,
+      chaining: false,
+      chainTitle: '',
       type: 'timed',
       status: 'pending',
       comments: ['Admin created task.']
@@ -69,11 +83,13 @@ export default function App() {
       dayOfWeek: 'Fri',
       dayOfMonth: 4,
       startHour: 14,
-      duration: 1.5, // Spans 2:00 PM - 3:30 PM
+      duration: 1.5,
       timeLabel: '02:00 PM - 03:30 PM',
       priority: 'Medium',
       requiresPhoto: false,
       requiresComment: false,
+      chaining: true,
+      chainTitle: 'Send Schedule Update Notice',
       type: 'timed',
       status: 'pending',
       comments: []
@@ -87,11 +103,13 @@ export default function App() {
       dayOfWeek: 'Fri',
       dayOfMonth: 4,
       startHour: 11,
-      duration: 2, // Spans 11:00 AM - 1:00 PM
+      duration: 2,
       timeLabel: '11:00 AM - 01:00 PM',
       priority: 'Low',
       requiresPhoto: false,
       requiresComment: true,
+      chaining: false,
+      chainTitle: '',
       type: 'timed',
       status: 'pending',
       comments: []
@@ -110,13 +128,15 @@ export default function App() {
       priority: 'Routine',
       requiresPhoto: true,
       requiresComment: false,
+      chaining: false,
+      chainTitle: '',
       type: 'flexible',
       status: 'pending',
       comments: []
     }
   ]);
 
-  // Helper Functions
+  // Reset Task Builder
   const resetForm = () => {
     setTaskTitle('');
     setTaskDesc('');
@@ -127,8 +147,30 @@ export default function App() {
     setTaskStartHour(9);
     setTaskDuration(2);
     setRecurrenceType('once');
+    setActiveDays(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+    setGenerationTime('13:00');
+    setCadenceDays(14);
+    setEnableChaining(false);
+    setChainTaskTitle('');
     setRequiresPhoto(false);
     setRequiresComment(false);
+    setNotifyOnComplete(true);
+    setNotifyOnComment(false);
+  };
+
+  const toggleEmployeeFilter = (memberName) => {
+    if (activeEmployeeFilters.includes(memberName)) {
+      if (activeEmployeeFilters.length === 1) return; // Prevent disabling all
+      setActiveEmployeeFilters(activeEmployeeFilters.filter(m => m !== memberName));
+    } else {
+      setActiveEmployeeFilters([...activeEmployeeFilters, memberName]);
+    }
+  };
+
+  const toggleDay = (day) => {
+    setActiveDays(prev => 
+      prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+    );
   };
 
   const getMemberConfig = (name) => {
@@ -172,6 +214,8 @@ export default function App() {
       priority: taskPriority,
       requiresPhoto,
       requiresComment,
+      chaining: enableChaining,
+      chainTitle: chainTaskTitle,
       type: hasSpecificTime ? 'timed' : 'flexible',
       status: 'pending',
       comments: []
@@ -202,26 +246,80 @@ export default function App() {
 
   const handleCompleteTask = (id) => {
     if (selectedTask.requiresPhoto && !photoUploaded) return alert('Photo upload required.');
-    if (selectedTask.requiresComment && !executionComment.trim()) return alert('Execution note required.');
+    if (selectedTask.requiresComment && !executionComment.trim()) return alert('Execution notes required.');
 
-    setTasks(tasks.map(t => {
+    let updatedTasks = tasks.map(t => {
       if (t.id === id) {
         const newComments = executionComment.trim() ? [...t.comments, `${userRole === 'admin' ? 'Admin' : 'Assignee'}: ${executionComment}`] : t.comments;
         return { ...t, status: 'completed', comments: newComments };
       }
       return t;
-    }));
+    });
+
+    // Handle Task Chaining logic: Auto-generate next task
+    if (selectedTask.chaining && selectedTask.chainTitle.trim()) {
+      const chainedTask = {
+        id: Date.now() + 1,
+        title: selectedTask.chainTitle,
+        desc: `Follow-up task chained from completed task: "${selectedTask.title}"`,
+        assignees: selectedTask.assignees,
+        date: selectedTask.date,
+        dayOfWeek: 'Fri',
+        dayOfMonth: 4,
+        startHour: null,
+        duration: null,
+        timeLabel: 'All-Day',
+        priority: 'Medium',
+        requiresPhoto: false,
+        requiresComment: false,
+        chaining: false,
+        chainTitle: '',
+        type: 'flexible',
+        status: 'pending',
+        comments: ['Auto-generated via Task Chaining rule.']
+      };
+      updatedTasks = [chainedTask, ...updatedTasks];
+      alert(`Task marked complete! Follow-up chained task "${selectedTask.chainTitle}" has been deployed.`);
+    }
+
+    setTasks(updatedTasks);
     setSelectedTask(null);
   };
 
-  // Filter team columns based on role simulation
+  const handleAppendNote = (id) => {
+    if (!additionalNote.trim()) return;
+    setTasks(tasks.map(t => {
+      if (t.id === id) {
+        return {
+          ...t,
+          comments: [...t.comments, `${userRole === 'admin' ? 'Admin Note' : 'Assignee Note'}: ${additionalNote}`]
+        };
+      }
+      return t;
+    }));
+    setAdditionalNote('');
+    setSelectedTask(prev => ({
+      ...prev,
+      comments: [...prev.comments, `${userRole === 'admin' ? 'Admin Note' : 'Assignee Note'}: ${additionalNote}`]
+    }));
+  };
+
+  const handleReopenTask = (id) => {
+    setTasks(tasks.map(t => t.id === id ? { ...t, status: 'pending' } : t));
+    setSelectedTask(null);
+  };
+
+  // Determine Visible Columns / Assignees based on Role & Admin Filter
   const visibleMembers = userRole === 'admin' 
-    ? teamMembers 
+    ? teamMembers.filter(m => activeEmployeeFilters.includes(m.name))
     : teamMembers.filter(m => m.name === 'Adrian R.');
 
-  const visibleTasks = userRole === 'admin'
-    ? tasks
-    : tasks.filter(t => t.assignees.includes('Adrian R.'));
+  const visibleTasks = tasks.filter(t => {
+    const isAssigneeMatch = userRole === 'admin' 
+      ? t.assignees.some(a => activeEmployeeFilters.includes(a))
+      : t.assignees.includes('Adrian R.');
+    return isAssigneeMatch;
+  });
 
   return (
     <div className="min-h-screen bg-[#A9B1A6] p-4 sm:p-8 font-sans text-[#333333]">
@@ -234,7 +332,7 @@ export default function App() {
             <button 
               onClick={() => setUserRole('admin')}
               className={`px-3 py-1 rounded font-bold transition ${userRole === 'admin' ? 'bg-[#A9B1A6] text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>
-              Admin View (All Columns)
+              Admin View
             </button>
             <button 
               onClick={() => setUserRole('assignee')}
@@ -243,12 +341,12 @@ export default function App() {
             </button>
           </div>
           <span className="text-gray-400 italic">
-            {userRole === 'admin' ? 'Full Dispatch Center' : 'Personal Schedule Only'}
+            {userRole === 'admin' ? 'Master Dispatch & Operation Rules' : 'Personal Assigned Tasks Only'}
           </span>
         </div>
 
-        {/* TOP HEADER & VIEW NAVIGATION TABS */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 border-b border-gray-300 pb-4">
+        {/* TOP HEADER & CONTROLS */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 border-b border-gray-300 pb-4">
           <div>
             <h1 className="text-3xl font-serif font-bold">Command Center</h1>
             <p className="text-xs text-gray-500 mt-0.5">Friday, September 4, 2026</p>
@@ -289,12 +387,44 @@ export default function App() {
           </div>
         </div>
 
+        {/* ADMIN TEAM MEMBER FILTER TOGGLE BAR */}
+        {userRole === 'admin' && currentView !== 'create' && (
+          <div className="bg-white p-2.5 rounded-lg border border-gray-200 mb-4 flex items-center justify-between shadow-2xs">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-gray-500">Filter Visible Team:</span>
+              <div className="flex gap-1.5">
+                {teamMembers.map(m => {
+                  const isActive = activeEmployeeFilters.includes(m.name);
+                  return (
+                    <button
+                      key={m.name}
+                      onClick={() => toggleEmployeeFilter(m.name)}
+                      className={`text-xs px-2.5 py-1 rounded-full font-bold border transition flex items-center gap-1.5 ${
+                        isActive 
+                          ? `${m.badge} ${m.border}` 
+                          : 'bg-gray-100 text-gray-400 border-gray-200 line-through'
+                      }`}>
+                      <span className={`w-2 h-2 rounded-full ${isActive ? m.color : 'bg-gray-300'}`}></span>
+                      {m.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <button 
+              onClick={() => setActiveEmployeeFilters(teamMembers.map(m => m.name))}
+              className="text-[11px] font-bold text-[#A9B1A6] hover:underline">
+              Show All Team Members
+            </button>
+          </div>
+        )}
+
         {/* =========================================
-            VIEW 1: DAY SCHEDULE GRID (HCP STYLE)
+            VIEW 1: DAY SCHEDULE GRID (HCP DISPATCH)
             ========================================= */}
         {currentView === 'day' && (
           <div className="flex-1 flex flex-col overflow-x-auto">
-            {/* COLUMN HEADERS (EMPLOYEES) */}
+            {/* COLUMN HEADERS */}
             <div className="flex border-b border-gray-300 bg-gray-100 rounded-t-lg min-w-[600px]">
               <div className="w-20 py-3 text-center text-xs font-bold text-gray-500 border-r border-gray-300">Time</div>
               <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
@@ -309,10 +439,10 @@ export default function App() {
               </div>
             </div>
 
-            {/* FLEXIBLE ALL-DAY TASK BANNER */}
+            {/* FLEXIBLE TASKS BANNER */}
             {visibleTasks.some(t => t.type === 'flexible') && (
               <div className="bg-amber-50 border-b border-amber-200 py-2 px-4 flex items-center gap-3 min-w-[600px]">
-                <span className="text-xs font-bold uppercase tracking-wider text-amber-800 bg-amber-200/60 px-2 py-0.5 rounded">All-Day Tasks:</span>
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-800 bg-amber-200/60 px-2 py-0.5 rounded">All-Day Flexible Tasks:</span>
                 <div className="flex flex-wrap gap-2">
                   {visibleTasks.filter(t => t.type === 'flexible' && t.status !== 'completed').map(task => {
                     const member = getMemberConfig(task.assignees[0]);
@@ -330,8 +460,8 @@ export default function App() {
               </div>
             )}
 
-            {/* HOURLY TIME GRID */}
-            <div className="flex-1 min-w-[600px] relative bg-white border-b border-l border-r border-gray-300 rounded-b-lg overflow-y-auto max-h-[600px]">
+            {/* HOURLY DISPATCH GRID */}
+            <div className="flex-1 min-w-[600px] relative bg-white border-b border-l border-r border-gray-300 rounded-b-lg overflow-y-auto max-h-[580px]">
               {timeSlots.map(hour => (
                 <div key={hour} className="flex h-20 border-b border-gray-200 last:border-b-0">
                   <div className="w-20 border-r border-gray-300 p-2 text-xs font-mono font-bold text-gray-400 text-right pr-3 bg-gray-50 select-none">
@@ -340,11 +470,10 @@ export default function App() {
                   <div className="flex-1 grid relative" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
                     {visibleMembers.map(member => (
                       <div key={member.name} className="border-r border-gray-100 last:border-r-0 h-full relative">
-                        {/* Render Timed Tasks in exact hour slot */}
                         {visibleTasks
                           .filter(t => t.type === 'timed' && t.status !== 'completed' && t.assignees.includes(member.name) && Math.floor(t.startHour) === hour)
                           .map(task => {
-                            const topOffset = (task.startHour - hour) * 80; // 80px per hour
+                            const topOffset = (task.startHour - hour) * 80;
                             const height = task.duration * 80;
                             return (
                               <div
@@ -361,7 +490,7 @@ export default function App() {
                                 </div>
                                 <div className="flex items-center justify-between text-[10px] opacity-80 pt-1 border-t border-white/20">
                                   <span>Priority: {task.priority}</span>
-                                  <span>{task.requiresPhoto ? '📷 Photo' : ''} {task.requiresComment ? '💬 Note' : ''}</span>
+                                  <span>{task.chaining ? '🔗 Chained' : ''} {task.requiresPhoto ? '📷' : ''} {task.requiresComment ? '💬' : ''}</span>
                                 </div>
                               </div>
                             );
@@ -376,7 +505,7 @@ export default function App() {
         )}
 
         {/* =========================================
-            VIEW 2: WEEK SCHEDULE VIEW
+            VIEW 2: WEEK VIEW
             ========================================= */}
         {currentView === 'week' && (
           <div className="flex-1 grid grid-cols-7 gap-2 overflow-x-auto min-w-[700px]">
@@ -409,7 +538,7 @@ export default function App() {
         )}
 
         {/* =========================================
-            VIEW 3: MONTH SCHEDULE GRID (HCP STYLE)
+            VIEW 3: MONTH GRID VIEW
             ========================================= */}
         {currentView === 'month' && (
           <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm">
@@ -418,7 +547,7 @@ export default function App() {
             </div>
             <div className="grid grid-cols-7 grid-rows-5 flex-1 divide-x divide-y divide-gray-200 min-h-[500px]">
               {Array.from({ length: 35 }).map((_, i) => {
-                const dayNum = i - 1; // Align Sept 1 to Tuesday
+                const dayNum = i - 1;
                 const isCurrentMonth = dayNum >= 1 && dayNum <= 30;
                 const dayTasks = isCurrentMonth ? visibleTasks.filter(t => t.dayOfMonth === dayNum && t.status !== 'completed') : [];
 
@@ -448,17 +577,17 @@ export default function App() {
         )}
 
         {/* =========================================
-            VIEW 4: ORIGINAL LIST VIEW
+            VIEW 4: LIST VIEW
             ========================================= */}
         {currentView === 'list' && (
           <div className="flex-col flex gap-6 overflow-y-auto pr-2">
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <span className="w-2 h-2 rounded-full bg-red-500"></span>
-                <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500">Scheduled Time Slots</h2>
+                <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500">Active Scheduled Tasks</h2>
               </div>
               <div className="flex flex-col gap-3">
-                {visibleTasks.filter(t => t.type === 'timed' && t.status !== 'completed').map(task => (
+                {visibleTasks.filter(t => t.status !== 'completed').map(task => (
                   <div 
                     key={task.id}
                     onClick={() => handleOpenModal(task)}
@@ -491,7 +620,7 @@ export default function App() {
         )}
 
         {/* =========================================
-            VIEW 5: CREATE TASK BUILDER
+            VIEW 5: FULL TASK BUILDER
             ========================================= */}
         {currentView === 'create' && (
           <div className="flex flex-col h-full animate-fade-in">
@@ -501,20 +630,23 @@ export default function App() {
             </div>
 
             <div className="flex gap-8 h-full">
+              {/* LEFT COLUMN: CORE TASK INFO */}
               <div className="w-1/2 flex flex-col gap-5 border-r border-gray-300 pr-8">
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-1">Task Title</label>
-                  <input type="text" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="e.g., Check Water Meter" className="w-full px-4 py-2 rounded border border-gray-300" />
+                  <input type="text" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="e.g., Check Water Meter" className="w-full px-4 py-2 rounded border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#A9B1A6]" />
                 </div>
+                
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-1">Description</label>
-                  <textarea rows={4} value={taskDesc} onChange={(e) => setTaskDesc(e.target.value)} placeholder="Add instructions..." className="w-full px-4 py-2 rounded border border-gray-300"></textarea>
+                  <textarea rows={3} value={taskDesc} onChange={(e) => setTaskDesc(e.target.value)} placeholder="Add instructions for this task..." className="w-full px-4 py-2 rounded border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#A9B1A6]"></textarea>
                 </div>
+
                 <div className="flex gap-4">
                   <div className="w-1/2">
                     <label className="block text-sm font-bold text-gray-700 mb-1">Assignees</label>
-                    <select value="" onChange={(e) => { if (e.target.value) handleAddAssignee(e.target.value); }} className="w-full px-4 py-2 rounded border border-gray-300 bg-white mb-2 text-sm">
-                      <option value="">Select team member...</option>
+                    <select value="" onChange={(e) => { if (e.target.value) handleAddAssignee(e.target.value); }} className="w-full px-4 py-2 rounded border border-gray-300 bg-white mb-2 text-sm focus:outline-none">
+                      <option value="">{teamMembers.filter(m => !selectedAssignees.includes(m.name)).length > 0 ? 'Select team member...' : 'All members assigned'}</option>
                       {teamMembers.filter(m => !selectedAssignees.includes(m.name)).map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
                     </select>
                     <div className="flex flex-wrap gap-2">
@@ -525,16 +657,17 @@ export default function App() {
                       ))}
                     </div>
                   </div>
+
                   <div className="w-1/2 flex flex-col gap-2">
                     <label className="block text-sm font-bold text-gray-700">Deadline Settings</label>
                     <input type="date" value={taskDate} onChange={(e) => setTaskDate(e.target.value)} className="w-full px-3 py-1.5 rounded border border-gray-300 bg-white text-sm" />
                     <div className="flex items-center gap-2 mt-1">
                       <input type="checkbox" id="timeToggle" checked={hasSpecificTime} onChange={(e) => setHasSpecificTime(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4 cursor-pointer" />
-                      <label htmlFor="timeToggle" className="text-xs text-gray-600 cursor-pointer">Set time slot on grid</label>
+                      <label htmlFor="timeToggle" className="text-xs text-gray-600 cursor-pointer">Set specific time on grid</label>
                     </div>
                     {hasSpecificTime && (
                       <div className="flex gap-2">
-                        <select value={taskStartHour} onChange={(e) => setTaskStartHour(Number(e.target.value))} className="w-1/2 p-1 border rounded text-xs">
+                        <select value={taskStartHour} onChange={(e) => setTaskStartHour(Number(e.target.value))} className="w-1/2 p-1 border rounded text-xs bg-white">
                           <option value={8}>8:00 AM</option>
                           <option value={9}>9:00 AM</option>
                           <option value={10}>10:00 AM</option>
@@ -542,7 +675,7 @@ export default function App() {
                           <option value={13}>1:00 PM</option>
                           <option value={14}>2:00 PM</option>
                         </select>
-                        <select value={taskDuration} onChange={(e) => setTaskDuration(Number(e.target.value))} className="w-1/2 p-1 border rounded text-xs">
+                        <select value={taskDuration} onChange={(e) => setTaskDuration(Number(e.target.value))} className="w-1/2 p-1 border rounded text-xs bg-white">
                           <option value={1}>1 Hour</option>
                           <option value={1.5}>1.5 Hours</option>
                           <option value={2}>2 Hours</option>
@@ -551,21 +684,111 @@ export default function App() {
                     )}
                   </div>
                 </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Priority Level</label>
+                  <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)} className="w-full px-4 py-2 rounded border border-gray-300 bg-white text-sm">
+                    <option value="High">High (Red)</option>
+                    <option value="Medium">Medium (Orange)</option>
+                    <option value="Low">Low (Green)</option>
+                    <option value="Routine">Routine (Gray)</option>
+                  </select>
+                </div>
               </div>
 
+              {/* RIGHT COLUMN: MODULAR LOGIC SETTINGS */}
               <div className="w-1/2 flex flex-col gap-4 overflow-y-auto pb-4">
                 <h3 className="font-bold text-gray-500 uppercase tracking-wider text-xs mb-1">Modular Logic Settings</h3>
+                
+                {/* 1. RECURRENCE ENGINE */}
+                <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
+                  <h4 className="font-bold text-sm mb-2">Recurrence Engine</h4>
+                  <select 
+                    value={recurrenceType}
+                    onChange={(e) => setRecurrenceType(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded border border-gray-300 bg-gray-50 mb-2 focus:outline-none">
+                    <option value="once">One-time Task</option>
+                    <option value="fixed">Fixed Calendar Schedule</option>
+                    <option value="completion">Completion-Triggered</option>
+                  </select>
+
+                  {recurrenceType === 'fixed' && (
+                    <div className="flex flex-col gap-3 mt-3 pt-3 border-t border-gray-100">
+                      <div>
+                        <span className="block text-xs font-semibold text-gray-600 mb-2">Active Days of the Week:</span>
+                        <div className="flex gap-1">
+                          {daysOfWeek.map(day => (
+                            <button 
+                              key={day}
+                              type="button"
+                              onClick={() => toggleDay(day)}
+                              className={`flex-1 py-1 text-xs font-bold rounded border ${activeDays.includes(day) ? 'bg-[#A9B1A6] text-white border-[#A9B1A6]' : 'bg-white text-gray-500 border-gray-300'}`}>
+                              {day}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-gray-600">Generation Time:</span>
+                        <input type="time" value={generationTime} onChange={(e) => setGenerationTime(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-sm w-32 focus:outline-none" />
+                      </div>
+                    </div>
+                  )}
+
+                  {recurrenceType === 'completion' && (
+                    <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+                      <span className="text-sm text-gray-600">Re-deploy task</span>
+                      <input type="number" value={cadenceDays} onChange={(e) => setCadenceDays(Number(e.target.value))} className="border border-gray-300 rounded px-2 py-1 text-sm w-16 text-center font-bold" />
+                      <span className="text-sm text-gray-600">days after completion</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. TASK CHAINING */}
+                <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
+                  <h4 className="font-bold text-sm mb-2">Task Chaining Engine</h4>
+                  <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer mb-2">
+                    <input type="checkbox" checked={enableChaining} onChange={(e) => setEnableChaining(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" />
+                    Auto-generate follow-up task on completion
+                  </label>
+                  {enableChaining && (
+                    <input 
+                      type="text" 
+                      value={chainTaskTitle}
+                      onChange={(e) => setChainTaskTitle(e.target.value)}
+                      placeholder="Follow-up task title (e.g., Send Invoice)" 
+                      className="w-full p-2 text-xs border border-gray-300 rounded mt-1 focus:outline-none focus:ring-1 focus:ring-[#A9B1A6]" />
+                  )}
+                </div>
+
+                {/* 3. PROOF OF WORK */}
                 <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
                   <h4 className="font-bold text-sm mb-2">Proof of Work Controls</h4>
                   <div className="flex flex-col gap-2">
                     <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                      <input type="checkbox" checked={requiresPhoto} onChange={(e) => setRequiresPhoto(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require photo upload
+                      <input type="checkbox" checked={requiresPhoto} onChange={(e) => setRequiresPhoto(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require photo upload to complete
                     </label>
                     <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                      <input type="checkbox" checked={requiresComment} onChange={(e) => setRequiresComment(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require execution notes
+                      <input type="checkbox" checked={requiresComment} onChange={(e) => setRequiresComment(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require execution notes/comment to complete
                     </label>
                   </div>
                 </div>
+
+                {/* 4. ADMIN NOTIFICATION RULES */}
+                <div className="bg-[#A9B1A6]/10 p-4 rounded border border-[#A9B1A6]/30">
+                  <h4 className="font-bold text-sm mb-2 text-gray-800">Admin Notification Rules</h4>
+                  <div className="flex flex-col gap-2">
+                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                      <input type="checkbox" checked={notifyOnComplete} onChange={(e) => setNotifyOnComplete(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" />
+                      Notify me when task is completed
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                      <input type="checkbox" checked={notifyOnComment} onChange={(e) => setNotifyOnComment(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" />
+                      Notify me on new task comments
+                    </label>
+                  </div>
+                </div>
+
               </div>
             </div>
 
@@ -596,6 +819,19 @@ export default function App() {
                 <span>Time: <strong>{selectedTask.timeLabel}</strong></span>
               </div>
 
+              {/* AUDIT & COMMENT LOG */}
+              {selectedTask.comments.length > 0 && (
+                <div className="bg-white p-3 rounded border border-gray-200">
+                  <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500 mb-2">Execution History & Notes</h4>
+                  <div className="flex flex-col gap-1 max-h-28 overflow-y-auto pr-1">
+                    {selectedTask.comments.map((c, i) => (
+                      <div key={i} className="text-xs text-gray-700 bg-gray-50 p-1.5 rounded border border-gray-100">{c}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ACTIVE TASK PROOF OF WORK REQUIREMENTS */}
               {selectedTask.status !== 'completed' && (
                 <div className="flex flex-col gap-3 my-1">
                   {selectedTask.requiresPhoto && (
@@ -615,7 +851,30 @@ export default function App() {
                 </div>
               )}
 
+              {/* COMPLETED TASK APPEND-NOTE SECTION */}
+              {selectedTask.status === 'completed' && (
+                <div className="bg-white p-3 rounded border border-green-300 flex flex-col gap-2">
+                  <span className="text-xs font-semibold text-green-800">✏️ Append additional review notes</span>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={additionalNote}
+                      onChange={(e) => setAdditionalNote(e.target.value)}
+                      placeholder="Type follow-up details..." 
+                      className="flex-1 p-2 text-xs border border-gray-200 rounded focus:outline-none" />
+                    <button 
+                      onClick={() => handleAppendNote(selectedTask.id)}
+                      className="bg-green-700 text-white px-3 py-1 rounded text-xs font-bold hover:bg-green-800 transition">
+                      Add Note
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="flex justify-between items-center pt-3 border-t border-gray-300 mt-2">
+                {userRole === 'admin' && selectedTask.status === 'completed' && (
+                  <button onClick={() => handleReopenTask(selectedTask.id)} className="text-xs text-amber-700 font-bold hover:underline">Reopen Task</button>
+                )}
                 <div className="flex gap-2 ml-auto">
                   {selectedTask.status !== 'completed' && (
                     <button onClick={() => handleCompleteTask(selectedTask.id)} className="bg-[#A9B1A6] text-white px-5 py-2 rounded text-xs font-bold shadow-sm hover:bg-gray-600 transition">
