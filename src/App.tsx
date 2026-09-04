@@ -1,12 +1,15 @@
 import { useState } from 'react';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState('month');
+  const [currentView, setCurrentView] = useState('month'); // 'list' | 'day' | 'week' | 'month' | 'create'
   const [userRole, setUserRole] = useState('admin');
+  
+  // DYNAMIC DATE STATE (Initializes to Today's Real Date)
+  const [currentDate, setCurrentDate] = useState(new Date());
   
   // Modal & Specific Instance Context
   const [selectedTask, setSelectedTask] = useState(null);
-  const [selectedInstanceDate, setSelectedInstanceDate] = useState('2026-09-04');
+  const [selectedInstanceDate, setSelectedInstanceDate] = useState('');
   const [isEditing, setIsEditing] = useState(false);
 
   // ADMIN TEAM MEMBER FILTER STATE
@@ -17,7 +20,7 @@ export default function App() {
   const [taskDesc, setTaskDesc] = useState('');
   const [selectedAssignees, setSelectedAssignees] = useState([]);
   const [taskPriority, setTaskPriority] = useState('Medium');
-  const [taskDate, setTaskDate] = useState('2026-09-04');
+  const [taskDate, setTaskDate] = useState('');
   const [hasSpecificTime, setHasSpecificTime] = useState(true);
   const [startTime, setStartTime] = useState('13:00');
   const [endTime, setEndTime] = useState('14:00');
@@ -55,7 +58,73 @@ export default function App() {
     { name: 'Marc S.', initials: 'MS', color: 'bg-[#0077B6]', border: 'border-blue-600', badge: 'bg-blue-100 text-blue-800' }
   ];
 
-  // Helper Conversions
+  // =========================================
+  // DATE MATHEMATICS & NAVIGATION HELPERS
+  // =========================================
+  const formatDateKey = (d) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const handlePrevDate = () => {
+    const d = new Date(currentDate);
+    if (currentView === 'day' || currentView === 'list') {
+      d.setDate(d.getDate() - 1);
+    } else if (currentView === 'week') {
+      d.setDate(d.getDate() - 7);
+    } else if (currentView === 'month') {
+      d.setMonth(d.getMonth() - 1);
+    }
+    setCurrentDate(d);
+  };
+
+  const handleNextDate = () => {
+    const d = new Date(currentDate);
+    if (currentView === 'day' || currentView === 'list') {
+      d.setDate(d.getDate() + 1);
+    } else if (currentView === 'week') {
+      d.setDate(d.getDate() + 7);
+    } else if (currentView === 'month') {
+      d.setMonth(d.getMonth() + 1);
+    }
+    setCurrentDate(d);
+  };
+
+  const handleToday = () => {
+    setCurrentDate(new Date()); // Snaps to real today
+  };
+
+  const getWeekStart = (d) => {
+    const temp = new Date(d);
+    const day = temp.getDay();
+    temp.setDate(temp.getDate() - day);
+    return temp;
+  };
+
+  const getHeaderTitle = () => {
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    if (currentView === 'day' || currentView === 'list') {
+      return `${dayNames[currentDate.getDay()]}, ${monthNames[currentDate.getMonth()]} ${currentDate.getDate()}, ${currentDate.getFullYear()}`;
+    }
+
+    if (currentView === 'week') {
+      const start = getWeekStart(currentDate);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 6);
+      return `${monthNames[start.getMonth()].slice(0, 3)} ${start.getDate()} – ${monthNames[end.getMonth()].slice(0, 3)} ${end.getDate()}, ${end.getFullYear()}`;
+    }
+
+    if (currentView === 'month') {
+      return `${monthNames[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
+    }
+
+    return 'Command Center';
+  };
+
   const timeToDecimal = (timeStr) => {
     if (!timeStr) return 9;
     const [h, m] = timeStr.split(':').map(Number);
@@ -73,20 +142,14 @@ export default function App() {
     return `${formatSingle(startStr)} - ${formatSingle(endStr)}`;
   };
 
-  const getFullDateString = (dayOfMonthNum) => {
-    const formattedNum = dayOfMonthNum < 10 ? `0${dayOfMonthNum}` : `${dayOfMonthNum}`;
-    return `2026-09-${formattedNum}`;
-  };
-
-  // Default In-Memory Tasks
+  // In-Memory Tasks
   const [tasks, setTasks] = useState([
     {
       id: 1,
       title: 'Grab the Mail',
       desc: 'Pick up daily mail package from the main office box.',
       assignees: ['Adrian R.'],
-      date: '2026-09-04',
-      dayOfWeek: 'Fri',
+      date: formatDateKey(new Date()),
       startTime: '13:00',
       endTime: '14:00',
       startHour: 13,
@@ -97,7 +160,7 @@ export default function App() {
       requiresComment: false,
       recurrenceType: 'fixed',
       activeDays: ['Fri'],
-      completedDates: [], // Array of completed instance dates (e.g. ['2026-09-04'])
+      completedDates: [],
       chaining: false,
       chainTitle: '',
       type: 'timed',
@@ -106,11 +169,10 @@ export default function App() {
     },
     {
       id: 2,
-      title: 'Meeting with Matt',
+      title: 'Client Follow-up',
       desc: 'Q3 strategy alignment and operations review.',
       assignees: ['Alex M.'],
-      date: '2026-09-04',
-      dayOfWeek: 'Fri',
+      date: formatDateKey(new Date()),
       startTime: '09:00',
       endTime: '11:00',
       startHour: 9,
@@ -133,8 +195,7 @@ export default function App() {
       title: 'Wash Laundry & Linens',
       desc: 'Complete routine wash for main guest quarters.',
       assignees: ['Marc S.'],
-      date: '2026-09-04',
-      dayOfWeek: 'Fri',
+      date: formatDateKey(new Date()),
       startTime: null,
       endTime: null,
       startHour: null,
@@ -159,7 +220,7 @@ export default function App() {
     setTaskDesc('');
     setSelectedAssignees([]);
     setTaskPriority('Medium');
-    setTaskDate('2026-09-04');
+    setTaskDate(formatDateKey(currentDate));
     setHasSpecificTime(true);
     setStartTime('09:00');
     setEndTime('11:00');
@@ -217,7 +278,6 @@ export default function App() {
       desc: taskDesc,
       assignees: selectedAssignees.length > 0 ? selectedAssignees : ['Alex M.'],
       date: taskDate,
-      dayOfWeek: 'Fri',
       startTime: hasSpecificTime ? startTime : null,
       endTime: hasSpecificTime ? endTime : null,
       startHour: hasSpecificTime ? startDec : null,
@@ -241,9 +301,9 @@ export default function App() {
     setCurrentView('month');
   };
 
-  const handleOpenModal = (task, instanceDateStr = '2026-09-04') => {
+  const handleOpenModal = (task, instanceDateStr) => {
     setSelectedTask(task);
-    setSelectedInstanceDate(instanceDateStr);
+    setSelectedInstanceDate(instanceDateStr || formatDateKey(currentDate));
     setIsEditing(false);
     setExecutionComment('');
     setPhotoUploaded(false);
@@ -253,7 +313,7 @@ export default function App() {
     setTaskDesc(task.desc);
     setSelectedAssignees(task.assignees);
     setTaskPriority(task.priority);
-    setTaskDate(task.date || '2026-09-04');
+    setTaskDate(task.date || formatDateKey(currentDate));
     setHasSpecificTime(task.type === 'timed');
     setStartTime(task.startTime || '09:00');
     setEndTime(task.endTime || '11:00');
@@ -303,7 +363,6 @@ export default function App() {
     setSelectedTask(null);
   };
 
-  // SMART COMPLETION: Logs completion stamp for specific date without breaking recurring rule
   const handleCompleteTask = (id) => {
     if (selectedTask.requiresPhoto && !photoUploaded) return alert('Photo upload required.');
     if (selectedTask.requiresComment && !executionComment.trim()) return alert('Execution notes required.');
@@ -317,7 +376,6 @@ export default function App() {
         if (t.recurrenceType === 'once') {
           return { ...t, status: 'completed', comments: newComments };
         } else {
-          // For recurring tasks, stamp completion ONLY for this specific date
           const updatedCompletedDates = [...(t.completedDates || []), selectedInstanceDate];
           return { ...t, completedDates: updatedCompletedDates, comments: newComments };
         }
@@ -332,7 +390,6 @@ export default function App() {
         desc: `Follow-up task chained from completed task: "${selectedTask.title}"`,
         assignees: selectedTask.assignees,
         date: selectedInstanceDate,
-        dayOfWeek: 'Fri',
         startTime: null,
         endTime: null,
         startHour: null,
@@ -409,9 +466,7 @@ export default function App() {
       : t.assignees.includes('Adrian R.');
   });
 
-  // HELPER: Matches active occurrence for a specific date
   const isTaskActiveOnDay = (task, dayOfWeekStr, dateStr) => {
-    // If it's already completed for this specific date, don't show as pending
     if (task.completedDates && task.completedDates.includes(dateStr)) return false;
     if (task.status === 'completed') return false;
 
@@ -421,7 +476,6 @@ export default function App() {
     return task.date === dateStr;
   };
 
-  // HELPER: Checks if task instance was completed on a specific date
   const isTaskCompletedOnDay = (task, dateStr) => {
     if (task.status === 'completed' && task.date === dateStr) return true;
     return task.completedDates && task.completedDates.includes(dateStr);
@@ -456,13 +510,40 @@ export default function App() {
           </span>
         </div>
 
-        {/* TOP HEADER & NAVIGATION */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 border-b border-gray-300 pb-4">
-          <div>
-            <h1 className="text-3xl font-serif font-bold">Command Center</h1>
-            <p className="text-xs text-gray-500 mt-0.5">September 2026</p>
+        {/* TOP HEADER & TIME CYCLE CONTROLS */}
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4 border-b border-gray-300 pb-4">
+          
+          {/* CONSISTENT DATE DISPLAY & NAVIGATOR */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1 bg-white border border-gray-300 rounded-lg p-1 shadow-2xs">
+              <button 
+                onClick={handlePrevDate}
+                className="px-2.5 py-1 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded transition">
+                ‹
+              </button>
+              <button 
+                onClick={handleToday}
+                className="px-3 py-1 text-xs font-bold text-gray-700 hover:bg-gray-100 rounded transition border-x border-gray-200">
+                Today
+              </button>
+              <button 
+                onClick={handleNextDate}
+                className="px-2.5 py-1 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded transition">
+                ›
+              </button>
+            </div>
+
+            <div>
+              <h1 className="text-2xl font-serif font-bold text-gray-900 leading-tight">
+                {getHeaderTitle()}
+              </h1>
+              <p className="text-[11px] text-gray-500 font-bold uppercase tracking-wider">
+                Command Center Queue
+              </p>
+            </div>
           </div>
 
+          {/* VIEW SWITCHER & NEW TASK BUTTON */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="bg-gray-200 p-1 rounded-lg flex items-center gap-1 border border-gray-300">
               <button 
@@ -530,64 +611,81 @@ export default function App() {
         )}
 
         {/* =========================================
-            VIEW 1: MONTH SCHEDULE GRID
+            VIEW 1: LIST VIEW (DYNAMIC DAY CYCLING)
             ========================================= */}
-        {currentView === 'month' && (
-          <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm">
-            <div className="grid grid-cols-7 bg-gray-100 border-b border-gray-300 text-center py-2 text-xs font-bold text-gray-600">
-              {daysOfWeek.map(d => <div key={d}>{d}</div>)}
-            </div>
-            <div className="grid grid-cols-7 grid-rows-5 flex-1 divide-x divide-y divide-gray-200 min-h-[550px]">
-              {Array.from({ length: 35 }).map((_, i) => {
-                const dayNum = i - 1; // Align Sept 1 to Tuesday
-                const isCurrentMonth = dayNum >= 1 && dayNum <= 30;
-                const dayOfWeekStr = daysOfWeek[i % 7];
-                const dateStr = getFullDateString(dayNum);
+        {currentView === 'list' && (
+          <div className="flex-col flex gap-6 overflow-y-auto pr-2">
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500">
+                  Tasks for {getHeaderTitle()}
+                </h2>
+              </div>
 
-                // Find active pending tasks for this day
-                const pendingDayTasks = isCurrentMonth 
-                  ? visibleTasks.filter(t => isTaskActiveOnDay(t, dayOfWeekStr, dateStr))
-                  : [];
-
-                // Find completed tasks for this specific day
-                const completedDayTasks = isCurrentMonth
-                  ? visibleTasks.filter(t => isTaskCompletedOnDay(t, dateStr))
-                  : [];
-
-                return (
-                  <div key={i} className={`p-1.5 flex flex-col ${isCurrentMonth ? 'bg-white' : 'bg-gray-50/50 text-gray-300'}`}>
-                    <span className={`text-xs font-bold p-1 ${dayNum === 4 ? 'bg-[#A9B1A6] text-white rounded-full w-5 h-5 flex items-center justify-center' : 'text-gray-500'}`}>
-                      {isCurrentMonth ? dayNum : ''}
-                    </span>
-                    <div className="flex flex-col gap-1 mt-1 overflow-y-auto max-h-24">
-                      {/* Active Tasks */}
-                      {pendingDayTasks.map(task => {
-                        const member = getMemberConfig(task.assignees[0]);
-                        return (
-                          <div 
-                            key={`${task.id}-${i}`} 
-                            onClick={() => handleOpenModal(task, dateStr)}
-                            className={`${member.color} text-white text-[10px] font-semibold p-1 rounded truncate cursor-pointer hover:opacity-90 shadow-2xs flex items-center justify-between`}>
-                            <span className="truncate">{task.title}</span>
-                            {task.recurrenceType === 'fixed' && <span className="text-[8px] bg-black/20 px-1 rounded ml-1 font-mono">↻</span>}
+              <div className="flex flex-col gap-3">
+                {visibleTasks
+                  .filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)))
+                  .map(task => {
+                    const style = getPriorityStyle(task.priority);
+                    return (
+                      <div 
+                        key={task.id}
+                        onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
+                        className={`bg-white p-4 rounded border-l-4 ${style.border} shadow-sm flex justify-between items-center cursor-pointer hover:bg-gray-50 transition`}>
+                        <div className="w-1/2 flex items-center gap-4">
+                          <span className="font-mono text-sm font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200">{task.timeLabel}</span>
+                          <div>
+                            <h3 className="font-bold text-lg">{task.title}</h3>
+                            <p className="text-sm text-gray-500 truncate">{task.desc}</p>
                           </div>
-                        );
-                      })}
-
-                      {/* Completed Tasks on this date */}
-                      {completedDayTasks.map(task => (
-                        <div 
-                          key={`completed-${task.id}-${i}`}
-                          onClick={() => handleOpenModal(task, dateStr)}
-                          className="bg-gray-200 text-gray-500 line-through text-[10px] font-semibold p-1 rounded truncate cursor-pointer opacity-75 flex items-center justify-between">
-                          <span className="truncate">✓ {task.title}</span>
                         </div>
-                      ))}
-                    </div>
+                        <div className="flex items-center gap-4">
+                          <span className={`text-xs font-semibold px-3 py-1 rounded-full ${style.badge}`}>{task.priority}</span>
+                          <div className="flex -space-x-2">
+                            {task.assignees.map((a, idx) => {
+                              const m = getMemberConfig(a);
+                              return (
+                                <div key={idx} className={`w-8 h-8 rounded-full border-2 border-white ${m.color} flex items-center justify-center text-xs text-white shadow-sm font-bold`}>
+                                  {m.initials}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                {visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate))).length === 0 && (
+                  <div className="bg-white p-8 rounded text-center border border-dashed border-gray-300">
+                    <p className="text-sm text-gray-500 font-bold">No active tasks scheduled for this date.</p>
                   </div>
-                );
-              })}
+                )}
+              </div>
             </div>
+
+            {visibleTasks.some(t => isTaskCompletedOnDay(t, formatDateKey(currentDate))) && (
+              <div className="pt-4 border-t border-gray-300">
+                <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Completed Today</h2>
+                <div className="flex flex-col gap-2">
+                  {visibleTasks.filter(t => isTaskCompletedOnDay(t, formatDateKey(currentDate))).map(task => (
+                    <div 
+                      key={task.id} 
+                      onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
+                      className="bg-gray-200/60 p-3 rounded flex justify-between items-center cursor-pointer hover:bg-gray-200 transition">
+                      <div>
+                        <span className="line-through text-sm font-bold text-gray-600 block">{task.title}</span>
+                        <span className="text-xs text-gray-500">Assignees: {task.assignees.join(', ')}</span>
+                      </div>
+                      <span className="text-xs font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-300">
+                        ✓ Completed
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -614,12 +712,12 @@ export default function App() {
               <div className="bg-amber-50 border-b border-amber-200 py-2 px-4 flex items-center gap-3 min-w-[600px]">
                 <span className="text-xs font-bold uppercase tracking-wider text-amber-800 bg-amber-200/60 px-2 py-0.5 rounded">All-Day Flexible Tasks:</span>
                 <div className="flex flex-wrap gap-2">
-                  {visibleTasks.filter(t => t.type === 'flexible' && !isTaskCompletedOnDay(t, '2026-09-04')).map(task => {
+                  {visibleTasks.filter(t => t.type === 'flexible' && isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate))).map(task => {
                     const member = getMemberConfig(task.assignees[0]);
                     return (
                       <div 
                         key={task.id} 
-                        onClick={() => handleOpenModal(task, '2026-09-04')}
+                        onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
                         className={`text-xs px-3 py-1 rounded ${member.color} text-white font-semibold cursor-pointer shadow-sm hover:opacity-90 flex items-center gap-1.5`}>
                         <span>{task.title}</span>
                         <span className="opacity-75 text-[10px]">({task.assignees.join(', ')})</span>
@@ -640,14 +738,14 @@ export default function App() {
                     {visibleMembers.map(member => (
                       <div key={member.name} className="border-r border-gray-100 last:border-r-0 h-full relative">
                         {visibleTasks
-                          .filter(t => t.type === 'timed' && isTaskActiveOnDay(t, 'Fri', '2026-09-04') && t.assignees.includes(member.name) && Math.floor(t.startHour) === hour)
+                          .filter(t => t.type === 'timed' && isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)) && t.assignees.includes(member.name) && Math.floor(t.startHour) === hour)
                           .map(task => {
                             const topOffset = (task.startHour - hour) * 80;
                             const height = task.duration * 80;
                             return (
                               <div
                                 key={task.id}
-                                onClick={() => handleOpenModal(task, '2026-09-04')}
+                                onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
                                 style={{ top: `${topOffset}px`, height: `${height - 4}px` }}
                                 className={`absolute inset-x-1 ${member.color} text-white rounded-md p-2.5 shadow-md border-l-4 ${member.border} cursor-pointer hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden`}>
                                 <div>
@@ -678,22 +776,29 @@ export default function App() {
             ========================================= */}
         {currentView === 'week' && (
           <div className="flex-1 grid grid-cols-7 gap-2 overflow-x-auto min-w-[700px]">
-            {daysOfWeek.map((day, idx) => {
-              const dateStr = getFullDateString(idx + 1);
+            {daysOfWeek.map((dayName, idx) => {
+              const weekStart = getWeekStart(currentDate);
+              const cellDate = new Date(weekStart);
+              cellDate.setDate(cellDate.getDate() + idx);
+              const dateStr = formatDateKey(cellDate);
+              const isTodayCell = dateStr === formatDateKey(new Date());
+
               return (
-                <div key={day} className="bg-white rounded-lg border border-gray-300 flex flex-col h-[550px] shadow-sm">
-                  <div className={`p-2 border-b border-gray-300 text-center ${idx === 3 ? 'bg-[#A9B1A6] text-white' : 'bg-gray-100 text-gray-700'}`}>
-                    <span className="block text-xs font-bold uppercase">{day}</span>
-                    <span className="text-sm font-serif font-bold">Sep {idx + 1}</span>
+                <div key={dayName} className="bg-white rounded-lg border border-gray-300 flex flex-col h-[550px] shadow-sm">
+                  <div className={`p-2 border-b border-gray-300 text-center ${isTodayCell ? 'bg-[#A9B1A6] text-white' : 'bg-gray-100 text-gray-700'}`}>
+                    <span className="block text-xs font-bold uppercase">{dayName}</span>
+                    <span className="text-sm font-serif font-bold">
+                      {cellDate.toLocaleString('default', { month: 'short' })} {cellDate.getDate()}
+                    </span>
                   </div>
                   <div className="p-2 flex-1 flex flex-col gap-2 overflow-y-auto">
                     {visibleTasks
-                      .filter(t => isTaskActiveOnDay(t, day, dateStr))
+                      .filter(t => isTaskActiveOnDay(t, dayName, dateStr))
                       .map(task => {
                         const member = getMemberConfig(task.assignees[0]);
                         return (
                           <div 
-                            key={`${task.id}-${day}`} 
+                            key={`${task.id}-${dateStr}`} 
                             onClick={() => handleOpenModal(task, dateStr)}
                             className={`${member.color} text-white p-2 rounded text-xs shadow cursor-pointer hover:opacity-90 flex flex-col gap-1`}>
                             <span className="font-bold leading-snug">{task.title}</span>
@@ -710,47 +815,63 @@ export default function App() {
         )}
 
         {/* =========================================
-            VIEW 4: LIST VIEW
+            VIEW 4: MONTH GRID VIEW
             ========================================= */}
-        {currentView === 'list' && (
-          <div className="flex-col flex gap-6 overflow-y-auto pr-2">
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <span className="w-2 h-2 rounded-full bg-red-500"></span>
-                <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500">Active Scheduled Tasks</h2>
-              </div>
-              <div className="flex flex-col gap-3">
-                {visibleTasks.filter(t => t.status !== 'completed').map(task => {
-                  const style = getPriorityStyle(task.priority);
-                  return (
-                    <div 
-                      key={task.id}
-                      onClick={() => handleOpenModal(task, task.date || '2026-09-04')}
-                      className={`bg-white p-4 rounded border-l-4 ${style.border} shadow-sm flex justify-between items-center cursor-pointer hover:bg-gray-50 transition`}>
-                      <div className="w-1/2 flex items-center gap-4">
-                        <span className="font-mono text-sm font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200">{task.timeLabel}</span>
-                        <div>
-                          <h3 className="font-bold text-lg">{task.title}</h3>
-                          <p className="text-sm text-gray-500 truncate">{task.desc}</p>
+        {currentView === 'month' && (
+          <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm">
+            <div className="grid grid-cols-7 bg-gray-100 border-b border-gray-300 text-center py-2 text-xs font-bold text-gray-600">
+              {daysOfWeek.map(d => <div key={d}>{d}</div>)}
+            </div>
+            <div className="grid grid-cols-7 grid-rows-5 flex-1 divide-x divide-y divide-gray-200 min-h-[550px]">
+              {Array.from({ length: 35 }).map((_, i) => {
+                const firstOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+                const startDay = firstOfMonth.getDay();
+                const cellDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1 - startDay + i);
+                
+                const isCurrentMonthCell = cellDate.getMonth() === currentDate.getMonth();
+                const dateStr = formatDateKey(cellDate);
+                const dayOfWeekStr = daysOfWeek[cellDate.getDay()];
+                const isTodayCell = dateStr === formatDateKey(new Date());
+
+                const pendingDayTasks = isCurrentMonthCell 
+                  ? visibleTasks.filter(t => isTaskActiveOnDay(t, dayOfWeekStr, dateStr))
+                  : [];
+
+                const completedDayTasks = isCurrentMonthCell
+                  ? visibleTasks.filter(t => isTaskCompletedOnDay(t, dateStr))
+                  : [];
+
+                return (
+                  <div key={i} className={`p-1.5 flex flex-col ${isCurrentMonthCell ? 'bg-white' : 'bg-gray-50/50 text-gray-300'}`}>
+                    <span className={`text-xs font-bold p-1 ${isTodayCell ? 'bg-[#A9B1A6] text-white rounded-full w-5 h-5 flex items-center justify-center' : 'text-gray-500'}`}>
+                      {cellDate.getDate()}
+                    </span>
+                    <div className="flex flex-col gap-1 mt-1 overflow-y-auto max-h-24">
+                      {pendingDayTasks.map(task => {
+                        const member = getMemberConfig(task.assignees[0]);
+                        return (
+                          <div 
+                            key={`${task.id}-${dateStr}`} 
+                            onClick={() => handleOpenModal(task, dateStr)}
+                            className={`${member.color} text-white text-[10px] font-semibold p-1 rounded truncate cursor-pointer hover:opacity-90 shadow-2xs flex items-center justify-between`}>
+                            <span className="truncate">{task.title}</span>
+                            {task.recurrenceType === 'fixed' && <span className="text-[8px] bg-black/20 px-1 rounded ml-1 font-mono">↻</span>}
+                          </div>
+                        );
+                      })}
+
+                      {completedDayTasks.map(task => (
+                        <div 
+                          key={`completed-${task.id}-${dateStr}`}
+                          onClick={() => handleOpenModal(task, dateStr)}
+                          className="bg-gray-200 text-gray-500 line-through text-[10px] font-semibold p-1 rounded truncate cursor-pointer opacity-75 flex items-center justify-between">
+                          <span className="truncate">✓ {task.title}</span>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <span className={`text-xs font-semibold px-3 py-1 rounded-full ${style.badge}`}>{task.priority}</span>
-                        <div className="flex -space-x-2">
-                          {task.assignees.map((a, idx) => {
-                            const m = getMemberConfig(a);
-                            return (
-                              <div key={idx} className={`w-8 h-8 rounded-full border-2 border-white ${m.color} flex items-center justify-center text-xs text-white shadow-sm font-bold`}>
-                                {m.initials}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
+                      ))}
                     </div>
-                  );
-                })}
-              </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -831,7 +952,6 @@ export default function App() {
               <div className="w-1/2 flex flex-col gap-4 overflow-y-auto pb-4">
                 <h3 className="font-bold text-gray-500 uppercase tracking-wider text-xs mb-1">Modular Logic Settings</h3>
                 
-                {/* RECURRENCE ENGINE */}
                 <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
                   <h4 className="font-bold text-sm mb-2">Recurrence Engine</h4>
                   <select 
@@ -875,7 +995,6 @@ export default function App() {
                   )}
                 </div>
 
-                {/* TASK CHAINING */}
                 <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
                   <h4 className="font-bold text-sm mb-2">Task Chaining Engine</h4>
                   <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer mb-2">
@@ -892,7 +1011,6 @@ export default function App() {
                   )}
                 </div>
 
-                {/* PROOF OF WORK */}
                 <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
                   <h4 className="font-bold text-sm mb-2">Proof of Work Controls</h4>
                   <div className="flex flex-col gap-2">
@@ -905,7 +1023,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* ADMIN NOTIFICATION RULES */}
                 <div className="bg-[#A9B1A6]/10 p-4 rounded border border-[#A9B1A6]/30">
                   <h4 className="font-bold text-sm mb-2 text-gray-800">Admin Notification Rules</h4>
                   <div className="flex flex-col gap-2">
