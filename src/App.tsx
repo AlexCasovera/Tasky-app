@@ -1,12 +1,22 @@
 import { useState } from 'react';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState('month');
+  const [currentView, setCurrentView] = useState('month'); // 'list' | 'day' | 'week' | 'month' | 'create'
   const [userRole, setUserRole] = useState('admin');
   
   // DYNAMIC DATE STATE (Initializes to Today's Real Date)
   const [currentDate, setCurrentDate] = useState(new Date());
   
+  // LIVE SEARCH QUERY
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // NOTIFICATION HUB STATE
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [notifications, setNotifications] = useState([
+    { id: 1, text: 'ALERT: "Client Follow-up" is past due!', type: 'overdue', read: false, time: '10m ago' },
+    { id: 2, text: 'Marc S. completed "Wash Laundry & Linens"', type: 'completion', read: false, time: '1h ago' }
+  ]);
+
   // Modal & Specific Instance Context
   const [selectedTask, setSelectedTask] = useState(null);
   const [selectedInstanceDate, setSelectedInstanceDate] = useState('');
@@ -42,7 +52,7 @@ export default function App() {
   const [notifyOnComplete, setNotifyOnComplete] = useState(true);
   const [notifyOnComment, setNotifyOnComment] = useState(false);
   
-  // Modal Inputs (Open Comments + Proof of Work)
+  // Execution & Audit State inside Modal
   const [openCommentInput, setExecutionComment] = useState('');
   const [photoUploaded, setPhotoUploaded] = useState(false);
   const [additionalNote, setAdditionalNote] = useState('');
@@ -145,7 +155,7 @@ export default function App() {
     return `${formatSingle(startStr)} - ${formatSingle(endStr)}`;
   };
 
-  // In-Memory Tasks
+  // In-Memory Tasks (Includes Active, Backlog & Overdue Example)
   const [tasks, setTasks] = useState([
     {
       id: 1,
@@ -172,6 +182,30 @@ export default function App() {
     },
     {
       id: 2,
+      title: 'Client Follow-up',
+      desc: 'Q3 strategy alignment and operations review.',
+      assignees: ['Alex M.'],
+      date: '2026-09-02', // PAST DATE = OVERDUE
+      startTime: '09:00',
+      endTime: '11:00',
+      startHour: 9,
+      duration: 2,
+      timeLabel: '09:00 AM - 11:00 AM',
+      priority: 'High',
+      requiresPhoto: false,
+      requiresComment: true,
+      recurrenceType: 'once',
+      activeDays: [],
+      cadenceDays: 14,
+      completedDates: [],
+      chainedSteps: [],
+      type: 'timed',
+      status: 'pending',
+      isOverdue: true,
+      comments: ['Admin created task.']
+    },
+    {
+      id: 3,
       title: 'Service Espresso Machine',
       desc: 'Run deep descaling cycle and replace water filter.',
       assignees: ['Marc S.'],
@@ -186,26 +220,26 @@ export default function App() {
       requiresComment: true,
       recurrenceType: 'completion',
       activeDays: [],
-      cadenceDays: 14, // Auto-redeploy 14 days after completion
+      cadenceDays: 14,
       completedDates: [],
       chainedSteps: [],
       type: 'timed',
       status: 'pending',
-      comments: ['Maintenance rule active.']
+      comments: []
     },
     {
-      id: 3,
-      title: 'Wash Laundry & Linens',
-      desc: 'Complete routine wash for main guest quarters.',
-      assignees: ['Alex M.'],
+      id: 4,
+      title: 'Draft Maintenance Protocol',
+      desc: 'Needs specific procedure writeup before assigning team member.',
+      assignees: [], // UNASSIGNED BACKLOG TRAY
       date: formatDateKey(new Date()),
       startTime: null,
       endTime: null,
       startHour: null,
       duration: null,
-      timeLabel: 'All-Day',
-      priority: 'Routine',
-      requiresPhoto: true,
+      timeLabel: 'Unscheduled',
+      priority: 'Low',
+      requiresPhoto: false,
       requiresComment: false,
       recurrenceType: 'once',
       activeDays: [],
@@ -294,7 +328,7 @@ export default function App() {
       id: Date.now(),
       title: taskTitle,
       desc: taskDesc,
-      assignees: selectedAssignees.length > 0 ? selectedAssignees : ['Alex M.'],
+      assignees: selectedAssignees, // Empty array = Backlog task
       date: taskDate,
       startTime: hasSpecificTime ? startTime : null,
       endTime: hasSpecificTime ? endTime : null,
@@ -354,7 +388,7 @@ export default function App() {
       ...selectedTask,
       title: taskTitle,
       desc: taskDesc,
-      assignees: selectedAssignees.length > 0 ? selectedAssignees : ['Alex M.'],
+      assignees: selectedAssignees,
       priority: taskPriority,
       date: taskDate,
       type: hasSpecificTime ? 'timed' : 'flexible',
@@ -381,17 +415,18 @@ export default function App() {
     setSelectedTask(null);
   };
 
-  // ADD OPEN COMMENT TO TASK HISTORY AT ANY TIME
   const handlePostOpenComment = (id) => {
     if (!openCommentInput.trim()) return;
     const commentText = `${userRole === 'admin' ? 'Admin' : 'Assignee'} (${selectedInstanceDate}): ${openCommentInput}`;
     
     setTasks(tasks.map(t => t.id === id ? { ...t, comments: [...t.comments, commentText] } : t));
     setSelectedTask(prev => ({ ...prev, comments: [...prev.comments, commentText] }));
+    
+    // Add Notification
+    setNotifications([{ id: Date.now(), text: `New comment on "${selectedTask.title}"`, type: 'comment', read: false, time: 'Just now' }, ...notifications]);
     setExecutionComment('');
   };
 
-  // COMPLETION HANDLER (HANDLES ONCE, FIXED, COMPLETION-TRIGGERED & CHAINING)
   const handleCompleteTask = (id) => {
     if (selectedTask.requiresPhoto && !photoUploaded) return alert('Photo upload required to complete.');
     if (selectedTask.requiresComment && !openCommentInput.trim() && selectedTask.comments.length === 0) {
@@ -407,16 +442,22 @@ export default function App() {
         const newComments = noteText ? [...t.comments, noteText] : t.comments;
 
         if (t.recurrenceType === 'once') {
-          return { ...t, status: 'completed', comments: newComments };
+          return { ...t, status: 'completed', isOverdue: false, comments: newComments };
         } else {
           const updatedCompletedDates = [...(t.completedDates || []), selectedInstanceDate];
-          return { ...t, completedDates: updatedCompletedDates, comments: newComments };
+          return { ...t, completedDates: updatedCompletedDates, isOverdue: false, comments: newComments };
         }
       }
       return t;
     });
 
-    // 1. COMPLETION-TRIGGERED RECURRENCE LOGIC: AUTO-DEPLOY NEXT TASK X DAYS LATER
+    // Push completion alert to Notification Center
+    setNotifications([
+      { id: Date.now(), text: `${userRole === 'admin' ? 'Admin' : 'Assignee'} completed "${selectedTask.title}"`, type: 'completion', read: false, time: 'Just now' },
+      ...notifications
+    ]);
+
+    // COMPLETION-TRIGGERED RECURRENCE
     if (selectedTask.recurrenceType === 'completion') {
       const nextDueDate = addDaysToDateStr(selectedInstanceDate, selectedTask.cadenceDays || 14);
       const nextInstanceTask = {
@@ -425,13 +466,14 @@ export default function App() {
         date: nextDueDate,
         completedDates: [],
         status: 'pending',
+        isOverdue: false,
         comments: [`Auto-deployed ${selectedTask.cadenceDays || 14} days after completion on ${selectedInstanceDate}`]
       };
       updatedTasks = [nextInstanceTask, ...updatedTasks];
-      alert(`Task completed! Next completion-triggered task scheduled for ${nextDueDate} (${selectedTask.cadenceDays || 14} days from now).`);
+      alert(`Task completed! Next completion-triggered task scheduled for ${nextDueDate}.`);
     }
 
-    // 2. CHAINED WORKFLOW LOGIC
+    // CHAINED WORKFLOW LOGIC
     if (selectedTask.chainedSteps && selectedTask.chainedSteps.length > 0) {
       const nextStep = selectedTask.chainedSteps[0];
       const targetDate = addDaysToDateStr(selectedInstanceDate, nextStep.relativeDays || 0);
@@ -458,6 +500,7 @@ export default function App() {
         chainedSteps: selectedTask.chainedSteps.slice(1),
         type: 'timed',
         status: 'pending',
+        isOverdue: false,
         comments: [`Auto-deployed via Chained Workflow from "${selectedTask.title}"`]
       };
 
@@ -488,6 +531,12 @@ export default function App() {
     setSelectedTask(null);
   };
 
+  const markAllNotifsRead = () => {
+    setNotifications(notifications.map(n => ({ ...n, read: true })));
+  };
+
+  const unreadNotifCount = notifications.filter(n => !n.read).length;
+
   const getPriorityStyle = (priority) => {
     switch (priority) {
       case 'High': return { border: 'border-red-500', badge: 'bg-red-100 text-red-800' };
@@ -501,11 +550,24 @@ export default function App() {
     ? teamMembers.filter(m => activeEmployeeFilters.includes(m.name))
     : teamMembers.filter(m => m.name === 'Adrian R.');
 
+  // SEARCH + ROLE FILTER ENGINE
   const visibleTasks = tasks.filter(t => {
-    return userRole === 'admin' 
+    // Exclude Unassigned Backlog tasks from main assigned views
+    if (!t.assignees || t.assignees.length === 0) return false;
+
+    const isAssigneeMatch = userRole === 'admin' 
       ? t.assignees.some(a => activeEmployeeFilters.includes(a))
       : t.assignees.includes('Adrian R.');
+
+    const isSearchMatch = !searchQuery.trim() || 
+      t.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      t.desc.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      t.assignees.some(a => a.toLowerCase().includes(searchQuery.toLowerCase()));
+
+    return isAssigneeMatch && isSearchMatch;
   });
+
+  const backlogTasks = tasks.filter(t => (!t.assignees || t.assignees.length === 0) && t.status !== 'completed');
 
   const isTaskActiveOnDay = (task, dayOfWeekStr, dateStr) => {
     if (task.completedDates && task.completedDates.includes(dateStr)) return false;
@@ -531,8 +593,8 @@ export default function App() {
     <div className="min-h-screen bg-[#A9B1A6] p-4 sm:p-8 font-sans text-[#333333]">
       <div className="max-w-7xl mx-auto bg-[#F4F3ED] p-6 rounded-lg shadow-sm min-h-[850px] flex flex-col relative">
         
-        {/* ROLE SIMULATION TOOLBAR */}
-        <div className="bg-[#333333] text-white px-4 py-2 rounded-md mb-4 flex justify-between items-center text-xs shadow-md">
+        {/* ROLE SIMULATION & SEARCH TOOLBAR */}
+        <div className="bg-[#333333] text-white px-4 py-2 rounded-md mb-4 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs shadow-md">
           <div className="flex items-center gap-2">
             <span className="font-bold text-gray-400 uppercase tracking-wider">Simulate Role:</span>
             <button 
@@ -546,9 +608,19 @@ export default function App() {
               Assignee View (Adrian R.)
             </button>
           </div>
-          <span className="text-gray-400 italic">
-            {userRole === 'admin' ? 'Master Operations View' : 'Personal Assigned Tasks'}
-          </span>
+
+          {/* ACTIVE SEARCH INPUT */}
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <input 
+              type="text" 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search active & past tasks..." 
+              className="px-3 py-1 rounded bg-gray-800 text-white placeholder-gray-400 text-xs focus:outline-none focus:ring-1 focus:ring-[#A9B1A6] w-full sm:w-64" />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-white font-bold">✕</button>
+            )}
+          </div>
         </div>
 
         {/* TOP HEADER & TIME CYCLE CONTROLS */}
@@ -573,6 +645,40 @@ export default function App() {
               <button onClick={() => setCurrentView('day')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'day' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Day</button>
               <button onClick={() => setCurrentView('week')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'week' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Week</button>
               <button onClick={() => setCurrentView('month')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'month' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Month</button>
+            </div>
+
+            {/* NOTIFICATION HUB BELL BUTTON */}
+            <div className="relative">
+              <button 
+                onClick={() => setIsNotifOpen(!isNotifOpen)}
+                className="bg-white p-2 rounded-lg border border-gray-300 relative hover:bg-gray-50 transition">
+                🔔
+                {unreadNotifCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+                    {unreadNotifCount}
+                  </span>
+                )}
+              </button>
+
+              {/* NOTIFICATION DRAWER DROPDOWN */}
+              {isNotifOpen && (
+                <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl border border-gray-300 z-50 p-3 animate-fade-in">
+                  <div className="flex justify-between items-center border-b pb-2 mb-2">
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700">Notification Center</h4>
+                    <button onClick={markAllNotifsRead} className="text-[10px] text-blue-600 font-bold hover:underline">Mark all read</button>
+                  </div>
+                  <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+                    {notifications.map(n => (
+                      <div key={n.id} className={`p-2 rounded text-xs border ${n.read ? 'bg-gray-50 border-gray-100 text-gray-500' : 'bg-red-50 border-red-200 text-red-900 font-bold'}`}>
+                        <div className="flex justify-between">
+                          <span>{n.text}</span>
+                          <span className="text-[9px] text-gray-400">{n.time}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {userRole === 'admin' && (
@@ -611,6 +717,29 @@ export default function App() {
           </div>
         )}
 
+        {/* UNASSIGNED TASK BACKLOG TRAY (FOR ADMINS) */}
+        {userRole === 'admin' && backlogTasks.length > 0 && currentView !== 'create' && (
+          <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-4">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-amber-900 flex items-center gap-2">
+                📥 Unassigned Task Backlog ({backlogTasks.length} Drafts Waiting)
+              </span>
+              <span className="text-[10px] text-amber-700 italic">Click task to assign team members</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {backlogTasks.map(task => (
+                <div 
+                  key={task.id}
+                  onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
+                  className="bg-white px-3 py-1.5 rounded border border-amber-200 text-xs font-bold text-gray-800 cursor-pointer hover:bg-amber-100 transition shadow-2xs flex items-center gap-2">
+                  <span>{task.title}</span>
+                  <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">Unassigned</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* VIEW 1: LIST VIEW */}
         {currentView === 'list' && (
           <div className="flex-col flex gap-6 overflow-y-auto pr-2">
@@ -629,12 +758,13 @@ export default function App() {
                       <div 
                         key={task.id}
                         onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                        className={`bg-white p-4 rounded border-l-4 ${style.border} shadow-sm flex justify-between items-center cursor-pointer hover:bg-gray-50 transition`}>
+                        className={`bg-white p-4 rounded border-l-4 ${task.isOverdue ? 'border-red-600 bg-red-50/50' : style.border} shadow-sm flex justify-between items-center cursor-pointer hover:bg-gray-50 transition`}>
                         <div className="w-1/2 flex items-center gap-4">
                           <span className="font-mono text-sm font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200">{task.timeLabel}</span>
                           <div>
                             <div className="flex items-center gap-2">
                               <h3 className="font-bold text-lg">{task.title}</h3>
+                              {task.isOverdue && <span className="text-[10px] bg-red-600 text-white font-bold px-1.5 py-0.5 rounded animate-pulse">OVERDUE</span>}
                               {task.recurrenceType === 'completion' && <span className="text-[10px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded">🔄 Interval</span>}
                             </div>
                             <p className="text-sm text-gray-500 truncate">{task.desc}</p>
@@ -745,17 +875,20 @@ export default function App() {
                                 key={task.id}
                                 onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
                                 style={{ top: `${topOffset}px`, height: `${height - 4}px` }}
-                                className={`absolute inset-x-1 ${member.color} text-white rounded-md p-2.5 shadow-md border-l-4 ${member.border} cursor-pointer hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden`}>
+                                className={`absolute inset-x-1 ${member.color} text-white rounded-md p-2.5 shadow-md border-l-4 ${task.isOverdue ? 'border-red-500 ring-2 ring-red-400' : member.border} cursor-pointer hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden`}>
                                 <div>
                                   <div className="flex justify-between items-start">
-                                    <h4 className="font-bold text-xs leading-tight drop-shadow-sm">{task.title}</h4>
+                                    <h4 className="font-bold text-xs leading-tight drop-shadow-sm flex items-center gap-1">
+                                      {task.title}
+                                      {task.isOverdue && <span className="bg-red-600 text-[8px] font-bold px-1 rounded">OVERDUE</span>}
+                                    </h4>
                                     <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded font-mono">{task.timeLabel}</span>
                                   </div>
                                   <p className="text-[11px] opacity-90 truncate mt-1">{task.desc}</p>
                                 </div>
                                 <div className="flex items-center justify-between text-[10px] opacity-80 pt-1 border-t border-white/20">
                                   <span>Priority: {task.priority}</span>
-                                  <span>{task.recurrenceType === 'completion' ? '🔄 Completion' : task.recurrenceType === 'fixed' ? '↻ Fixed' : ''}</span>
+                                  <span>{task.recurrenceType === 'completion' ? '🔄' : task.recurrenceType === 'fixed' ? '↻' : ''}</span>
                                 </div>
                               </div>
                             );
@@ -796,8 +929,11 @@ export default function App() {
                           <div 
                             key={`${task.id}-${dateStr}`} 
                             onClick={() => handleOpenModal(task, dateStr)}
-                            className={`${member.color} text-white p-2 rounded text-xs shadow cursor-pointer hover:opacity-90 flex flex-col gap-1`}>
-                            <span className="font-bold leading-snug">{task.title}</span>
+                            className={`${member.color} text-white p-2 rounded text-xs shadow cursor-pointer hover:opacity-90 flex flex-col gap-1 ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
+                            <div className="flex justify-between items-center">
+                              <span className="font-bold leading-snug">{task.title}</span>
+                              {task.isOverdue && <span className="bg-red-600 text-[8px] font-bold px-1 rounded">!</span>}
+                            </div>
                             <span className="text-[10px] opacity-80 font-mono">{task.timeLabel}</span>
                             <span className="text-[10px] bg-black/20 px-1 rounded w-max">{task.assignees.join(', ')}</span>
                           </div>
@@ -847,9 +983,10 @@ export default function App() {
                           <div 
                             key={`${task.id}-${dateStr}`} 
                             onClick={() => handleOpenModal(task, dateStr)}
-                            className={`${member.color} text-white text-[10px] font-semibold p-1 rounded truncate cursor-pointer hover:opacity-90 shadow-2xs flex items-center justify-between`}>
+                            className={`${member.color} text-white text-[10px] font-semibold p-1 rounded truncate cursor-pointer hover:opacity-90 shadow-2xs flex items-center justify-between ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
                             <span className="truncate">{task.title}</span>
                             <div className="flex items-center gap-0.5">
+                              {task.isOverdue && <span className="text-[8px] bg-red-600 px-0.5 rounded font-bold">!</span>}
                               {task.recurrenceType === 'completion' && <span className="text-[8px] bg-black/20 px-0.5 rounded">🔄</span>}
                               {task.recurrenceType === 'fixed' && <span className="text-[8px] bg-black/20 px-0.5 rounded font-mono">↻</span>}
                             </div>
@@ -1076,7 +1213,10 @@ export default function App() {
                   <span className="text-xs font-bold text-[#A9B1A6] uppercase tracking-wider">
                     {isCurrentInstanceCompleted ? 'Completed Occurrence Review' : (userRole === 'admin' ? (isEditing ? 'Admin Task Editor' : 'Admin Inspector Mode') : 'Assignee Execution View')}
                   </span>
-                  <h2 className="text-2xl font-serif font-bold">{selectedTask.title}</h2>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-2xl font-serif font-bold">{selectedTask.title}</h2>
+                    {selectedTask.isOverdue && <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded">OVERDUE</span>}
+                  </div>
                 </div>
                 <button onClick={() => setSelectedTask(null)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
               </div>
@@ -1086,7 +1226,7 @@ export default function App() {
                   <p className="text-sm text-gray-600 bg-white p-3 rounded border border-gray-200">{selectedTask.desc}</p>
 
                   <div className="flex justify-between text-xs text-gray-500 bg-gray-100 p-2 rounded">
-                    <span>Assignees: <strong>{selectedTask.assignees.join(', ')}</strong></span>
+                    <span>Assignees: <strong>{selectedTask.assignees.length > 0 ? selectedTask.assignees.join(', ') : 'Unassigned (Backlog)'}</strong></span>
                     <span>Occurrence Date: <strong>{selectedInstanceDate}</strong></span>
                   </div>
 
@@ -1104,7 +1244,6 @@ export default function App() {
                       <p className="text-xs text-gray-400 italic mb-2">No comments posted yet.</p>
                     )}
 
-                    {/* OPEN COMMENT INPUT FOR ASSIGNEE AND ADMIN */}
                     {!isCurrentInstanceCompleted && (
                       <div className="flex gap-2">
                         <input 
