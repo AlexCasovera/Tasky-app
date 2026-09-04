@@ -17,6 +17,24 @@ export default function App() {
     { id: 2, text: 'Marc S. completed "Wash Laundry & Linens"', type: 'completion', read: false, time: '1h ago' }
   ]);
 
+  // SETTINGS & USER MANAGEMENT STATE
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [editingMemberId, setEditingMemberId] = useState(null); // null = list/add mode
+
+  const [teamMembers, setTeamMembers] = useState([
+    { id: '1', name: 'Alex M.', initials: 'AM', email: 'alex@company.com', password: 'password123', role: 'admin', color: '#E63946' },
+    { id: '2', name: 'Adrian R.', initials: 'AR', email: 'adrian@company.com', password: 'password123', role: 'assignee', color: '#7209B7' },
+    { id: '3', name: 'Marc S.', initials: 'MS', email: 'marc@company.com', password: 'password123', role: 'assignee', color: '#0077B6' }
+  ]);
+
+  // Member Form State
+  const [memberName, setMemberName] = useState('');
+  const [memberEmail, setMemberEmail] = useState('');
+  const [memberPassword, setMemberPassword] = useState('');
+  const [memberRole, setMemberRole] = useState('assignee');
+  const [memberColor, setMemberColor] = useState('#2A9D8F');
+  const [showPassword, setShowPassword] = useState(false);
+
   // Modal & Specific Instance Context
   const [selectedTask, setSelectedTask] = useState(null);
   const [selectedInstanceDate, setSelectedInstanceDate] = useState('');
@@ -59,12 +77,6 @@ export default function App() {
 
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const timeSlots = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
-  
-  const teamMembers = [
-    { name: 'Alex M.', initials: 'AM', color: 'bg-[#E63946]', border: 'border-red-600', badge: 'bg-red-100 text-red-800' },
-    { name: 'Adrian R.', initials: 'AR', color: 'bg-[#7209B7]', border: 'border-purple-600', badge: 'bg-purple-100 text-purple-800' },
-    { name: 'Marc S.', initials: 'MS', color: 'bg-[#0077B6]', border: 'border-blue-600', badge: 'bg-blue-100 text-blue-800' }
-  ];
 
   // Helper Conversions
   const formatDateKey = (d) => {
@@ -155,7 +167,7 @@ export default function App() {
     return `${formatSingle(startStr)} - ${formatSingle(endStr)}`;
   };
 
-  // In-Memory Tasks (Includes Active, Backlog & Overdue Example)
+  // In-Memory Tasks
   const [tasks, setTasks] = useState([
     {
       id: 1,
@@ -252,6 +264,72 @@ export default function App() {
     }
   ]);
 
+  // USER MANAGEMENT HANDLERS
+  const resetMemberForm = () => {
+    setMemberName('');
+    setMemberEmail('');
+    setMemberPassword('');
+    setMemberRole('assignee');
+    setMemberColor('#2A9D8F');
+    setEditingMemberId(null);
+    setShowPassword(false);
+  };
+
+  const handleOpenEditMember = (member) => {
+    setEditingMemberId(member.id);
+    setMemberName(member.name);
+    setMemberEmail(member.email);
+    setMemberPassword(member.password);
+    setMemberRole(member.role);
+    setMemberColor(member.color || '#2A9D8F');
+  };
+
+  const handleSaveMember = () => {
+    if (!memberName.trim()) return alert('Please enter a name.');
+
+    const initials = memberName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+
+    if (editingMemberId) {
+      // Edit existing member
+      setTeamMembers(teamMembers.map(m => {
+        if (m.id === editingMemberId) {
+          return {
+            ...m,
+            name: memberName,
+            initials,
+            email: memberEmail,
+            password: memberPassword,
+            role: memberRole,
+            color: memberColor
+          };
+        }
+        return m;
+      }));
+    } else {
+      // Add new member
+      const newMember = {
+        id: Date.now().toString(),
+        name: memberName,
+        initials,
+        email: memberEmail,
+        password: memberPassword,
+        role: memberRole,
+        color: memberColor
+      };
+      setTeamMembers([...teamMembers, newMember]);
+      setActiveEmployeeFilters([...activeEmployeeFilters, memberName]);
+    }
+
+    resetMemberForm();
+  };
+
+  const handleDeleteMember = (id, name) => {
+    if (teamMembers.length <= 1) return alert('At least one team member must remain.');
+    setTeamMembers(teamMembers.filter(m => m.id !== id));
+    setActiveEmployeeFilters(activeEmployeeFilters.filter(n => n !== name));
+    resetMemberForm();
+  };
+
   const resetForm = () => {
     setTaskTitle('');
     setTaskDesc('');
@@ -306,7 +384,17 @@ export default function App() {
   };
 
   const getMemberConfig = (name) => {
-    return teamMembers.find(m => m.name === name) || { name, initials: '??', color: 'bg-gray-600', border: 'border-gray-500', badge: 'bg-gray-100 text-gray-800' };
+    const found = teamMembers.find(m => m.name === name);
+    if (found) {
+      return {
+        name: found.name,
+        initials: found.initials,
+        color: found.color,
+        badgeBg: found.color + '20',
+        badgeText: found.color
+      };
+    }
+    return { name, initials: '??', color: '#6B7280', badgeBg: '#F3F4F6', badgeText: '#374151' };
   };
 
   const handleAddAssignee = (name) => {
@@ -328,7 +416,7 @@ export default function App() {
       id: Date.now(),
       title: taskTitle,
       desc: taskDesc,
-      assignees: selectedAssignees, // Empty array = Backlog task
+      assignees: selectedAssignees,
       date: taskDate,
       startTime: hasSpecificTime ? startTime : null,
       endTime: hasSpecificTime ? endTime : null,
@@ -422,7 +510,6 @@ export default function App() {
     setTasks(tasks.map(t => t.id === id ? { ...t, comments: [...t.comments, commentText] } : t));
     setSelectedTask(prev => ({ ...prev, comments: [...prev.comments, commentText] }));
     
-    // Add Notification
     setNotifications([{ id: Date.now(), text: `New comment on "${selectedTask.title}"`, type: 'comment', read: false, time: 'Just now' }, ...notifications]);
     setExecutionComment('');
   };
@@ -451,13 +538,11 @@ export default function App() {
       return t;
     });
 
-    // Push completion alert to Notification Center
     setNotifications([
       { id: Date.now(), text: `${userRole === 'admin' ? 'Admin' : 'Assignee'} completed "${selectedTask.title}"`, type: 'completion', read: false, time: 'Just now' },
       ...notifications
     ]);
 
-    // COMPLETION-TRIGGERED RECURRENCE
     if (selectedTask.recurrenceType === 'completion') {
       const nextDueDate = addDaysToDateStr(selectedInstanceDate, selectedTask.cadenceDays || 14);
       const nextInstanceTask = {
@@ -473,7 +558,6 @@ export default function App() {
       alert(`Task completed! Next completion-triggered task scheduled for ${nextDueDate}.`);
     }
 
-    // CHAINED WORKFLOW LOGIC
     if (selectedTask.chainedSteps && selectedTask.chainedSteps.length > 0) {
       const nextStep = selectedTask.chainedSteps[0];
       const targetDate = addDaysToDateStr(selectedInstanceDate, nextStep.relativeDays || 0);
@@ -550,9 +634,7 @@ export default function App() {
     ? teamMembers.filter(m => activeEmployeeFilters.includes(m.name))
     : teamMembers.filter(m => m.name === 'Adrian R.');
 
-  // SEARCH + ROLE FILTER ENGINE
   const visibleTasks = tasks.filter(t => {
-    // Exclude Unassigned Backlog tasks from main assigned views
     if (!t.assignees || t.assignees.length === 0) return false;
 
     const isAssigneeMatch = userRole === 'admin' 
@@ -609,7 +691,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* ACTIVE SEARCH INPUT */}
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <input 
               type="text" 
@@ -623,7 +704,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* TOP HEADER & TIME CYCLE CONTROLS */}
+        {/* TOP HEADER & CONTROLS */}
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4 border-b border-gray-300 pb-4">
           
           <div className="flex items-center gap-4">
@@ -647,7 +728,7 @@ export default function App() {
               <button onClick={() => setCurrentView('month')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'month' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Month</button>
             </div>
 
-            {/* NOTIFICATION HUB BELL BUTTON */}
+            {/* NOTIFICATION HUB BELL */}
             <div className="relative">
               <button 
                 onClick={() => setIsNotifOpen(!isNotifOpen)}
@@ -660,7 +741,6 @@ export default function App() {
                 )}
               </button>
 
-              {/* NOTIFICATION DRAWER DROPDOWN */}
               {isNotifOpen && (
                 <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl border border-gray-300 z-50 p-3 animate-fade-in">
                   <div className="flex justify-between items-center border-b pb-2 mb-2">
@@ -681,6 +761,16 @@ export default function App() {
               )}
             </div>
 
+            {/* ⚙️ SETTINGS BUTTON */}
+            {userRole === 'admin' && (
+              <button 
+                onClick={() => { resetMemberForm(); setIsSettingsOpen(true); }}
+                className="bg-white p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition font-bold text-sm"
+                title="Settings & User Management">
+                ⚙️
+              </button>
+            )}
+
             {userRole === 'admin' && (
               <button onClick={() => { resetForm(); setCurrentView('create'); }} className="bg-[#A9B1A6] text-white px-4 py-2 rounded text-xs font-bold shadow-sm hover:bg-gray-600 transition">
                 + New Task
@@ -699,12 +789,12 @@ export default function App() {
                   const isActive = activeEmployeeFilters.includes(m.name);
                   return (
                     <button
-                      key={m.name}
+                      key={m.id}
                       onClick={() => toggleEmployeeFilter(m.name)}
                       className={`text-xs px-2.5 py-1 rounded-full font-bold border transition flex items-center gap-1.5 ${
-                        isActive ? `${m.badge} ${m.border}` : 'bg-gray-100 text-gray-400 border-gray-200 line-through'
+                        isActive ? 'bg-white shadow-2xs border-gray-300' : 'bg-gray-100 text-gray-400 border-gray-200 line-through'
                       }`}>
-                      <span className={`w-2 h-2 rounded-full ${isActive ? m.color : 'bg-gray-300'}`}></span>
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: m.color }}></span>
                       {m.name}
                     </button>
                   );
@@ -717,7 +807,7 @@ export default function App() {
           </div>
         )}
 
-        {/* UNASSIGNED TASK BACKLOG TRAY (FOR ADMINS) */}
+        {/* UNASSIGNED TASK BACKLOG TRAY */}
         {userRole === 'admin' && backlogTasks.length > 0 && currentView !== 'create' && (
           <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-4">
             <div className="flex justify-between items-center mb-2">
@@ -776,7 +866,7 @@ export default function App() {
                             {task.assignees.map((a, idx) => {
                               const m = getMemberConfig(a);
                               return (
-                                <div key={idx} className={`w-8 h-8 rounded-full border-2 border-white ${m.color} flex items-center justify-center text-xs text-white shadow-sm font-bold`}>
+                                <div key={idx} style={{ backgroundColor: m.color }} className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-xs text-white shadow-sm font-bold">
                                   {m.initials}
                                 </div>
                               );
@@ -826,8 +916,8 @@ export default function App() {
               <div className="w-20 py-3 text-center text-xs font-bold text-gray-500 border-r border-gray-300">Time</div>
               <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
                 {visibleMembers.map(member => (
-                  <div key={member.name} className="py-3 px-2 border-r border-gray-300 last:border-r-0 flex items-center justify-center gap-2">
-                    <div className={`w-7 h-7 rounded-full ${member.color} text-white flex items-center justify-center text-xs font-bold shadow-sm`}>
+                  <div key={member.id} className="py-3 px-2 border-r border-gray-300 last:border-r-0 flex items-center justify-center gap-2">
+                    <div style={{ backgroundColor: member.color }} className="w-7 h-7 rounded-full text-white flex items-center justify-center text-xs font-bold shadow-sm">
                       {member.initials}
                     </div>
                     <span className="font-bold text-sm text-gray-800">{member.name}</span>
@@ -846,7 +936,8 @@ export default function App() {
                       <div 
                         key={task.id} 
                         onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                        className={`text-xs px-3 py-1 rounded ${member.color} text-white font-semibold cursor-pointer shadow-sm hover:opacity-90 flex items-center gap-1.5`}>
+                        style={{ backgroundColor: member.color }}
+                        className="text-xs px-3 py-1 rounded text-white font-semibold cursor-pointer shadow-sm hover:opacity-90 flex items-center gap-1.5">
                         <span>{task.title}</span>
                         <span className="opacity-75 text-[10px]">({task.assignees.join(', ')})</span>
                       </div>
@@ -864,7 +955,7 @@ export default function App() {
                   </div>
                   <div className="flex-1 grid relative" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
                     {visibleMembers.map(member => (
-                      <div key={member.name} className="border-r border-gray-100 last:border-r-0 h-full relative">
+                      <div key={member.id} className="border-r border-gray-100 last:border-r-0 h-full relative">
                         {visibleTasks
                           .filter(t => t.type === 'timed' && isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)) && t.assignees.includes(member.name) && Math.floor(t.startHour) === hour)
                           .map(task => {
@@ -874,8 +965,8 @@ export default function App() {
                               <div
                                 key={task.id}
                                 onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                                style={{ top: `${topOffset}px`, height: `${height - 4}px` }}
-                                className={`absolute inset-x-1 ${member.color} text-white rounded-md p-2.5 shadow-md border-l-4 ${task.isOverdue ? 'border-red-500 ring-2 ring-red-400' : member.border} cursor-pointer hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden`}>
+                                style={{ top: `${topOffset}px`, height: `${height - 4}px`, backgroundColor: member.color }}
+                                className={`absolute inset-x-1 text-white rounded-md p-2.5 shadow-md border-l-4 ${task.isOverdue ? 'border-red-500 ring-2 ring-red-400' : 'border-black/20'} cursor-pointer hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden`}>
                                 <div>
                                   <div className="flex justify-between items-start">
                                     <h4 className="font-bold text-xs leading-tight drop-shadow-sm flex items-center gap-1">
@@ -929,7 +1020,8 @@ export default function App() {
                           <div 
                             key={`${task.id}-${dateStr}`} 
                             onClick={() => handleOpenModal(task, dateStr)}
-                            className={`${member.color} text-white p-2 rounded text-xs shadow cursor-pointer hover:opacity-90 flex flex-col gap-1 ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
+                            style={{ backgroundColor: member.color }}
+                            className={`text-white p-2 rounded text-xs shadow cursor-pointer hover:opacity-90 flex flex-col gap-1 ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
                             <div className="flex justify-between items-center">
                               <span className="font-bold leading-snug">{task.title}</span>
                               {task.isOverdue && <span className="bg-red-600 text-[8px] font-bold px-1 rounded">!</span>}
@@ -983,7 +1075,8 @@ export default function App() {
                           <div 
                             key={`${task.id}-${dateStr}`} 
                             onClick={() => handleOpenModal(task, dateStr)}
-                            className={`${member.color} text-white text-[10px] font-semibold p-1 rounded truncate cursor-pointer hover:opacity-90 shadow-2xs flex items-center justify-between ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
+                            style={{ backgroundColor: member.color }}
+                            className={`text-white text-[10px] font-semibold p-1 rounded truncate cursor-pointer hover:opacity-90 shadow-2xs flex items-center justify-between ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
                             <span className="truncate">{task.title}</span>
                             <div className="flex items-center gap-0.5">
                               {task.isOverdue && <span className="text-[8px] bg-red-600 px-0.5 rounded font-bold">!</span>}
@@ -1035,7 +1128,7 @@ export default function App() {
                     <label className="block text-sm font-bold text-gray-700 mb-1">Assignees</label>
                     <select value="" onChange={(e) => { if (e.target.value) handleAddAssignee(e.target.value); }} className="w-full px-4 py-2 rounded border border-gray-300 bg-white mb-2 text-sm focus:outline-none">
                       <option value="">{teamMembers.filter(m => !selectedAssignees.includes(m.name)).length > 0 ? 'Select team member...' : 'All members assigned'}</option>
-                      {teamMembers.filter(m => !selectedAssignees.includes(m.name)).map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
+                      {teamMembers.filter(m => !selectedAssignees.includes(m.name)).map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
                     </select>
                     <div className="flex flex-wrap gap-2">
                       {selectedAssignees.map(name => (
@@ -1161,7 +1254,7 @@ export default function App() {
                               <label className="block font-bold text-[10px] text-gray-500 mb-0.5">Assignee</label>
                               <select value={step.assignee} onChange={(e) => handleUpdateChainedStep(idx, 'assignee', e.target.value)} className="w-full p-1 border rounded bg-white text-xs">
                                 <option value="Same as Parent">Same as Parent</option>
-                                {teamMembers.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
+                                {teamMembers.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
                               </select>
                             </div>
                           </div>
@@ -1230,7 +1323,6 @@ export default function App() {
                     <span>Occurrence Date: <strong>{selectedInstanceDate}</strong></span>
                   </div>
 
-                  {/* EXECUTION HISTORY & OPEN COMMENT LOG */}
                   <div className="bg-white p-3 rounded border border-gray-200">
                     <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500 mb-2">Task Activity & Comments</h4>
                     
@@ -1307,7 +1399,7 @@ export default function App() {
                       <label className="block font-bold text-xs mb-1 text-gray-700">Assignees</label>
                       <select value="" onChange={(e) => { if (e.target.value) handleAddAssignee(e.target.value); }} className="w-full p-2 border rounded text-xs bg-white mb-1">
                         <option value="">Add assignee...</option>
-                        {teamMembers.filter(m => !selectedAssignees.includes(m.name)).map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
+                        {teamMembers.filter(m => !selectedAssignees.includes(m.name)).map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
                       </select>
                       <div className="flex flex-wrap gap-1">
                         {selectedAssignees.map(name => (
@@ -1386,6 +1478,145 @@ export default function App() {
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* SETTINGS & USER MANAGEMENT DRAWER MODAL */}
+        {isSettingsOpen && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-end p-4 z-50">
+            <div className="bg-[#F4F3ED] max-w-md w-full h-full rounded-l-lg shadow-2xl p-6 border-l border-gray-300 flex flex-col gap-4 animate-fade-in overflow-y-auto">
+              <div className="flex justify-between items-center border-b border-gray-300 pb-3">
+                <div>
+                  <span className="text-xs font-bold text-[#A9B1A6] uppercase tracking-wider">System Governance</span>
+                  <h2 className="text-2xl font-serif font-bold text-gray-900">Settings & Team</h2>
+                </div>
+                <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
+              </div>
+
+              {/* TEAM MEMBER LIST */}
+              <div className="bg-white p-3 rounded-lg border border-gray-200">
+                <div className="flex justify-between items-center mb-2">
+                  <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500">Active Team Members</h4>
+                  <button 
+                    onClick={resetMemberForm} 
+                    className="text-xs font-bold bg-[#A9B1A6] text-white px-2 py-0.5 rounded hover:bg-gray-600 transition">
+                    + Add New
+                  </button>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  {teamMembers.map(member => (
+                    <div key={member.id} className="flex justify-between items-center p-2 rounded bg-gray-50 border border-gray-200">
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full" style={{ backgroundColor: member.color }}></span>
+                        <div>
+                          <span className="font-bold text-xs text-gray-800 block">{member.name} ({member.role.toUpperCase()})</span>
+                          <span className="text-[10px] text-gray-500">{member.email}</span>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => handleOpenEditMember(member)} 
+                        className="text-xs font-bold text-blue-700 hover:underline">
+                        Edit
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* ADD / EDIT MEMBER FORM */}
+              <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3">
+                <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">
+                  {editingMemberId ? 'Edit Team Member Profile' : 'Create New Team Member'}
+                </h4>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Full Name</label>
+                  <input 
+                    type="text" 
+                    value={memberName} 
+                    onChange={(e) => setMemberName(e.target.value)} 
+                    placeholder="e.g. Jordan Smith" 
+                    className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none" />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Email Address</label>
+                  <input 
+                    type="email" 
+                    value={memberEmail} 
+                    onChange={(e) => setMemberEmail(e.target.value)} 
+                    placeholder="jordan@company.com" 
+                    className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none" />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Password</label>
+                  <div className="relative flex items-center">
+                    <input 
+                      type={showPassword ? 'text' : 'password'} 
+                      value={memberPassword} 
+                      onChange={(e) => setMemberPassword(e.target.value)} 
+                      placeholder="••••••••" 
+                      className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none pr-12" />
+                    <button 
+                      type="button" 
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-2 text-[10px] font-bold text-gray-500 hover:text-gray-800">
+                      {showPassword ? 'HIDE' : 'SHOW'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <div className="w-1/2">
+                    <label className="block text-xs font-bold text-gray-700 mb-1">Role / Access</label>
+                    <select 
+                      value={memberRole} 
+                      onChange={(e) => setMemberRole(e.target.value)} 
+                      className="w-full p-2 text-xs border border-gray-300 rounded bg-white">
+                      <option value="admin">Admin (Master)</option>
+                      <option value="assignee">Assignee (Worker)</option>
+                    </select>
+                  </div>
+
+                  <div className="w-1/2">
+                    <label className="block text-xs font-bold text-gray-700 mb-1">Assigned Color</label>
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="color" 
+                        value={memberColor} 
+                        onChange={(e) => setMemberColor(e.target.value)} 
+                        className="w-8 h-8 rounded border border-gray-300 cursor-pointer p-0 bg-white" />
+                      <span className="text-xs font-mono font-bold text-gray-600">{memberColor}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center pt-2 mt-1 border-t border-gray-200">
+                  {editingMemberId && (
+                    <button 
+                      onClick={() => handleDeleteMember(editingMemberId, memberName)}
+                      className="text-xs text-red-600 font-bold hover:underline">
+                      Delete Profile
+                    </button>
+                  )}
+                  <div className="flex gap-2 ml-auto">
+                    <button 
+                      onClick={resetMemberForm}
+                      className="px-3 py-1.5 rounded text-xs font-bold text-gray-500 hover:bg-gray-100">
+                      Cancel
+                    </button>
+                    <button 
+                      onClick={handleSaveMember}
+                      className="bg-[#333333] text-white px-4 py-1.5 rounded text-xs font-bold hover:bg-black transition">
+                      {editingMemberId ? 'Update Profile' : 'Add Member'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
         )}
