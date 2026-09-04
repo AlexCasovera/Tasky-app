@@ -31,9 +31,8 @@ export default function App() {
   const [generationTime, setGenerationTime] = useState('13:00');
   const [cadenceDays, setCadenceDays] = useState(14);
 
-  // Task Chaining States
-  const [enableChaining, setEnableChaining] = useState(false);
-  const [chainTaskTitle, setChainTaskTitle] = useState('');
+  // Multi-Step Task Chaining Pipeline State
+  const [chainedSteps, setChainedSteps] = useState([]);
 
   // Proof of Work Controls
   const [requiresPhoto, setRequiresPhoto] = useState(false);
@@ -68,6 +67,13 @@ export default function App() {
     return `${year}-${month}-${day}`;
   };
 
+  const addDaysToDateStr = (dateStr, days) => {
+    const parts = dateStr.split('-');
+    const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    d.setDate(d.getDate() + days);
+    return formatDateKey(d);
+  };
+
   const handlePrevDate = () => {
     const d = new Date(currentDate);
     if (currentView === 'day' || currentView === 'list') {
@@ -93,7 +99,7 @@ export default function App() {
   };
 
   const handleToday = () => {
-    setCurrentDate(new Date()); // Snaps to real today
+    setCurrentDate(new Date());
   };
 
   const getWeekStart = (d) => {
@@ -161,8 +167,17 @@ export default function App() {
       recurrenceType: 'fixed',
       activeDays: ['Fri'],
       completedDates: [],
-      chaining: false,
-      chainTitle: '',
+      chainedSteps: [
+        {
+          title: 'Sort Mail & Deliver Documents',
+          desc: 'Sort incoming packages and leave invoices on admin desk.',
+          relativeDays: 0,
+          assignee: 'Same as Parent',
+          priority: 'Medium',
+          requiresPhoto: false,
+          requiresComment: true
+        }
+      ],
       type: 'timed',
       status: 'pending',
       comments: []
@@ -184,8 +199,7 @@ export default function App() {
       recurrenceType: 'once',
       activeDays: [],
       completedDates: [],
-      chaining: false,
-      chainTitle: '',
+      chainedSteps: [],
       type: 'timed',
       status: 'pending',
       comments: ['Admin created task.']
@@ -207,8 +221,7 @@ export default function App() {
       recurrenceType: 'once',
       activeDays: [],
       completedDates: [],
-      chaining: false,
-      chainTitle: '',
+      chainedSteps: [],
       type: 'flexible',
       status: 'pending',
       comments: []
@@ -228,12 +241,39 @@ export default function App() {
     setActiveDays(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
     setGenerationTime('13:00');
     setCadenceDays(14);
-    setEnableChaining(false);
-    setChainTaskTitle('');
+    setChainedSteps([]);
     setRequiresPhoto(false);
     setRequiresComment(false);
     setNotifyOnComplete(true);
     setNotifyOnComment(false);
+  };
+
+  // MULTI-STEP CHAINING ENGINE HANDLERS
+  const handleAddChainedStep = () => {
+    const newStep = {
+      title: '',
+      desc: '',
+      relativeDays: 1,
+      assignee: 'Same as Parent',
+      priority: 'Medium',
+      requiresPhoto: false,
+      requiresComment: false
+    };
+    setChainedSteps([...chainedSteps, newStep]);
+  };
+
+  const handleUpdateChainedStep = (index, field, value) => {
+    const updated = chainedSteps.map((step, i) => {
+      if (i === index) {
+        return { ...step, [field]: value };
+      }
+      return step;
+    });
+    setChainedSteps(updated);
+  };
+
+  const handleRemoveChainedStep = (index) => {
+    setChainedSteps(chainedSteps.filter((_, i) => i !== index));
   };
 
   const toggleEmployeeFilter = (memberName) => {
@@ -289,8 +329,7 @@ export default function App() {
       recurrenceType,
       activeDays: recurrenceType === 'fixed' ? activeDays : [],
       completedDates: [],
-      chaining: enableChaining,
-      chainTitle: chainTaskTitle,
+      chainedSteps: chainedSteps.filter(s => s.title.trim() !== ''),
       type: hasSpecificTime ? 'timed' : 'flexible',
       status: 'pending',
       comments: []
@@ -321,8 +360,7 @@ export default function App() {
     setActiveDays(task.activeDays || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
     setRequiresPhoto(task.requiresPhoto || false);
     setRequiresComment(task.requiresComment || false);
-    setEnableChaining(task.chaining || false);
-    setChainTaskTitle(task.chainTitle || '');
+    setChainedSteps(task.chainedSteps || []);
   };
 
   const handleSaveChanges = () => {
@@ -349,8 +387,7 @@ export default function App() {
       activeDays: recurrenceType === 'fixed' ? activeDays : [],
       requiresPhoto,
       requiresComment,
-      chaining: enableChaining,
-      chainTitle: chainTaskTitle
+      chainedSteps: chainedSteps.filter(s => s.title.trim() !== '')
     };
 
     setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t));
@@ -383,32 +420,37 @@ export default function App() {
       return t;
     });
 
-    if (selectedTask.chaining && selectedTask.chainTitle.trim()) {
+    // ADVANCED CHAINING: Deploys next pipeline step and passes remaining steps along
+    if (selectedTask.chainedSteps && selectedTask.chainedSteps.length > 0) {
+      const nextStep = selectedTask.chainedSteps[0];
+      const targetDate = addDaysToDateStr(selectedInstanceDate, nextStep.relativeDays || 0);
+      const stepAssignees = nextStep.assignee === 'Same as Parent' ? selectedTask.assignees : [nextStep.assignee];
+
       const chainedTask = {
         id: Date.now() + 1,
-        title: selectedTask.chainTitle,
-        desc: `Follow-up task chained from completed task: "${selectedTask.title}"`,
-        assignees: selectedTask.assignees,
-        date: selectedInstanceDate,
-        startTime: null,
-        endTime: null,
-        startHour: null,
-        duration: null,
-        timeLabel: 'All-Day',
-        priority: 'Medium',
-        requiresPhoto: false,
-        requiresComment: false,
+        title: nextStep.title || 'Follow-up Task',
+        desc: nextStep.desc || `Chained step from completed task: "${selectedTask.title}"`,
+        assignees: stepAssignees,
+        date: targetDate,
+        startTime: '09:00',
+        endTime: '10:00',
+        startHour: 9,
+        duration: 1,
+        timeLabel: '09:00 AM - 10:00 AM',
+        priority: nextStep.priority || 'Medium',
+        requiresPhoto: nextStep.requiresPhoto || false,
+        requiresComment: nextStep.requiresComment || false,
         recurrenceType: 'once',
         activeDays: [],
         completedDates: [],
-        chaining: false,
-        chainTitle: '',
-        type: 'flexible',
+        chainedSteps: selectedTask.chainedSteps.slice(1), // Passes remaining pipeline
+        type: 'timed',
         status: 'pending',
-        comments: ['Auto-generated via Task Chaining rule.']
+        comments: [`Auto-deployed via Chained Workflow from "${selectedTask.title}"`]
       };
+
       updatedTasks = [chainedTask, ...updatedTasks];
-      alert(`Occurrence for ${selectedInstanceDate} completed! Chained task "${selectedTask.chainTitle}" deployed.`);
+      alert(`Occurrence for ${selectedInstanceDate} completed! Next chained step "${nextStep.title}" deployed for ${targetDate}.`);
     }
 
     setTasks(updatedTasks);
@@ -513,7 +555,6 @@ export default function App() {
         {/* TOP HEADER & TIME CYCLE CONTROLS */}
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4 border-b border-gray-300 pb-4">
           
-          {/* CONSISTENT DATE DISPLAY & NAVIGATOR */}
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1 bg-white border border-gray-300 rounded-lg p-1 shadow-2xs">
               <button 
@@ -543,7 +584,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* VIEW SWITCHER & NEW TASK BUTTON */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="bg-gray-200 p-1 rounded-lg flex items-center gap-1 border border-gray-300">
               <button 
@@ -610,9 +650,7 @@ export default function App() {
           </div>
         )}
 
-        {/* =========================================
-            VIEW 1: LIST VIEW (DYNAMIC DAY CYCLING)
-            ========================================= */}
+        {/* VIEW 1: LIST VIEW */}
         {currentView === 'list' && (
           <div className="flex-col flex gap-6 overflow-y-auto pr-2">
             <div>
@@ -636,7 +674,12 @@ export default function App() {
                         <div className="w-1/2 flex items-center gap-4">
                           <span className="font-mono text-sm font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200">{task.timeLabel}</span>
                           <div>
-                            <h3 className="font-bold text-lg">{task.title}</h3>
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-bold text-lg">{task.title}</h3>
+                              {task.chainedSteps && task.chainedSteps.length > 0 && (
+                                <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded">🔗 Workflow</span>
+                              )}
+                            </div>
                             <p className="text-sm text-gray-500 truncate">{task.desc}</p>
                           </div>
                         </div>
@@ -689,9 +732,7 @@ export default function App() {
           </div>
         )}
 
-        {/* =========================================
-            VIEW 2: DAY SCHEDULE GRID
-            ========================================= */}
+        {/* VIEW 2: DAY SCHEDULE GRID */}
         {currentView === 'day' && (
           <div className="flex-1 flex flex-col overflow-x-auto">
             <div className="flex border-b border-gray-300 bg-gray-100 rounded-t-lg min-w-[600px]">
@@ -757,7 +798,7 @@ export default function App() {
                                 </div>
                                 <div className="flex items-center justify-between text-[10px] opacity-80 pt-1 border-t border-white/20">
                                   <span>Priority: {task.priority}</span>
-                                  <span>{task.recurrenceType === 'fixed' ? '↻ Recurring' : ''}</span>
+                                  <span>{task.chainedSteps && task.chainedSteps.length > 0 ? '🔗 Chained' : ''} {task.recurrenceType === 'fixed' ? '↻' : ''}</span>
                                 </div>
                               </div>
                             );
@@ -771,9 +812,7 @@ export default function App() {
           </div>
         )}
 
-        {/* =========================================
-            VIEW 3: WEEK VIEW
-            ========================================= */}
+        {/* VIEW 3: WEEK VIEW */}
         {currentView === 'week' && (
           <div className="flex-1 grid grid-cols-7 gap-2 overflow-x-auto min-w-[700px]">
             {daysOfWeek.map((dayName, idx) => {
@@ -814,9 +853,7 @@ export default function App() {
           </div>
         )}
 
-        {/* =========================================
-            VIEW 4: MONTH GRID VIEW
-            ========================================= */}
+        {/* VIEW 4: MONTH GRID VIEW */}
         {currentView === 'month' && (
           <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm">
             <div className="grid grid-cols-7 bg-gray-100 border-b border-gray-300 text-center py-2 text-xs font-bold text-gray-600">
@@ -855,7 +892,10 @@ export default function App() {
                             onClick={() => handleOpenModal(task, dateStr)}
                             className={`${member.color} text-white text-[10px] font-semibold p-1 rounded truncate cursor-pointer hover:opacity-90 shadow-2xs flex items-center justify-between`}>
                             <span className="truncate">{task.title}</span>
-                            {task.recurrenceType === 'fixed' && <span className="text-[8px] bg-black/20 px-1 rounded ml-1 font-mono">↻</span>}
+                            <div className="flex items-center gap-0.5">
+                              {task.chainedSteps && task.chainedSteps.length > 0 && <span className="text-[8px] bg-black/20 px-0.5 rounded">🔗</span>}
+                              {task.recurrenceType === 'fixed' && <span className="text-[8px] bg-black/20 px-0.5 rounded font-mono">↻</span>}
+                            </div>
                           </div>
                         );
                       })}
@@ -876,9 +916,7 @@ export default function App() {
           </div>
         )}
 
-        {/* =========================================
-            VIEW 5: TASK BUILDER
-            ========================================= */}
+        {/* VIEW 5: TASK BUILDER WITH MULTI-STEP CHAINING ENGINE */}
         {currentView === 'create' && (
           <div className="flex flex-col h-full animate-fade-in">
             <div className="flex justify-between items-center mb-6 border-b border-gray-300 pb-4">
@@ -952,6 +990,7 @@ export default function App() {
               <div className="w-1/2 flex flex-col gap-4 overflow-y-auto pb-4">
                 <h3 className="font-bold text-gray-500 uppercase tracking-wider text-xs mb-1">Modular Logic Settings</h3>
                 
+                {/* RECURRENCE ENGINE */}
                 <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
                   <h4 className="font-bold text-sm mb-2">Recurrence Engine</h4>
                   <select 
@@ -995,22 +1034,94 @@ export default function App() {
                   )}
                 </div>
 
+                {/* MULTI-STEP TASK CHAINING ENGINE */}
                 <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
-                  <h4 className="font-bold text-sm mb-2">Task Chaining Engine</h4>
-                  <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer mb-2">
-                    <input type="checkbox" checked={enableChaining} onChange={(e) => setEnableChaining(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" />
-                    Auto-generate follow-up task on completion
-                  </label>
-                  {enableChaining && (
-                    <input 
-                      type="text" 
-                      value={chainTaskTitle}
-                      onChange={(e) => setChainTaskTitle(e.target.value)}
-                      placeholder="Follow-up task title (e.g., Send Invoice)" 
-                      className="w-full p-2 text-xs border border-gray-300 rounded mt-1 focus:outline-none focus:ring-1 focus:ring-[#A9B1A6]" />
+                  <div className="flex justify-between items-center mb-2">
+                    <h4 className="font-bold text-sm">Multi-Step Task Chaining Engine</h4>
+                    <button 
+                      type="button"
+                      onClick={handleAddChainedStep}
+                      className="text-xs font-bold bg-[#A9B1A6] text-white px-2.5 py-1 rounded hover:bg-gray-600 transition">
+                      + Add Step
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-3">Build an automated pipeline of follow-up tasks triggered upon completion.</p>
+
+                  {chainedSteps.length === 0 ? (
+                    <p className="text-xs text-gray-400 italic">No follow-up steps configured.</p>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {chainedSteps.map((step, idx) => (
+                        <div key={idx} className="bg-gray-50 p-3 rounded border border-gray-200 text-xs flex flex-col gap-2.5 relative">
+                          <div className="flex justify-between items-center font-bold text-gray-700">
+                            <span>Step {idx + 1} Follow-up Task</span>
+                            <button type="button" onClick={() => handleRemoveChainedStep(idx)} className="text-red-600 font-bold hover:underline">Remove</button>
+                          </div>
+                          
+                          <input 
+                            type="text" 
+                            value={step.title}
+                            onChange={(e) => handleUpdateChainedStep(idx, 'title', e.target.value)}
+                            placeholder="Step Title (e.g., Deliver Sorted Documents)" 
+                            className="p-1.5 border border-gray-300 rounded bg-white focus:outline-none" />
+
+                          <textarea 
+                            rows={2}
+                            value={step.desc}
+                            onChange={(e) => handleUpdateChainedStep(idx, 'desc', e.target.value)}
+                            placeholder="Step instructions..." 
+                            className="p-1.5 border border-gray-300 rounded bg-white focus:outline-none"></textarea>
+
+                          <div className="flex gap-2">
+                            <div className="w-1/2">
+                              <label className="block font-bold text-[10px] text-gray-500 mb-0.5">Deployment Offset</label>
+                              <div className="flex items-center gap-1">
+                                <input 
+                                  type="number" 
+                                  value={step.relativeDays}
+                                  onChange={(e) => handleUpdateChainedStep(idx, 'relativeDays', Number(e.target.value))}
+                                  className="w-12 p-1 border border-gray-300 rounded bg-white text-center font-bold" />
+                                <span className="text-[11px] text-gray-600">days after</span>
+                              </div>
+                            </div>
+
+                            <div className="w-1/2">
+                              <label className="block font-bold text-[10px] text-gray-500 mb-0.5">Assignee</label>
+                              <select 
+                                value={step.assignee}
+                                onChange={(e) => handleUpdateChainedStep(idx, 'assignee', e.target.value)}
+                                className="w-full p-1 border border-gray-300 rounded bg-white text-xs">
+                                <option value="Same as Parent">Same as Parent</option>
+                                {teamMembers.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-4 pt-1 border-t border-gray-200">
+                            <label className="flex items-center gap-1 cursor-pointer">
+                              <input 
+                                type="checkbox" 
+                                checked={step.requiresPhoto}
+                                onChange={(e) => handleUpdateChainedStep(idx, 'requiresPhoto', e.target.checked)}
+                                className="accent-[#A9B1A6]" />
+                              <span>Require Photo</span>
+                            </label>
+                            <label className="flex items-center gap-1 cursor-pointer">
+                              <input 
+                                type="checkbox" 
+                                checked={step.requiresComment}
+                                onChange={(e) => handleUpdateChainedStep(idx, 'requiresComment', e.target.checked)}
+                                className="accent-[#A9B1A6]" />
+                              <span>Require Notes</span>
+                            </label>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
 
+                {/* PROOF OF WORK */}
                 <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
                   <h4 className="font-bold text-sm mb-2">Proof of Work Controls</h4>
                   <div className="flex flex-col gap-2">
@@ -1023,6 +1134,7 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* ADMIN NOTIFICATION RULES */}
                 <div className="bg-[#A9B1A6]/10 p-4 rounded border border-[#A9B1A6]/30">
                   <h4 className="font-bold text-sm mb-2 text-gray-800">Admin Notification Rules</h4>
                   <div className="flex flex-col gap-2">
