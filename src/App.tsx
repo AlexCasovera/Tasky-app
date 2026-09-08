@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 export default function App() {
   const [currentView, setCurrentView] = useState('month');
@@ -60,6 +60,9 @@ export default function App() {
   const [openCommentInput, setExecutionComment] = useState('');
   const [photoUploaded, setPhotoUploaded] = useState(false);
   const [additionalNote, setAdditionalNote] = useState('');
+
+  // DRAG & DROP STATE
+  const [draggedTaskId, setDraggedTaskId] = useState(null);
 
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const timeSlots = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
@@ -152,6 +155,14 @@ export default function App() {
     return `${formatSingle(startStr)} - ${formatSingle(endStr)}`;
   };
 
+  const decimalToTimeString = (dec) => {
+    const hours = Math.floor(dec);
+    const minutes = Math.round((dec - hours) * 60);
+    const hStr = String(hours).padStart(2, '0');
+    const mStr = String(minutes).padStart(2, '0');
+    return `${hStr}:${mStr}`;
+  };
+
   const [tasks, setTasks] = useState([
     {
       id: 1,
@@ -198,6 +209,7 @@ export default function App() {
       type: 'timed',
       status: 'pending',
       isOverdue: true,
+      overdueNotified: true,
       comments: ['Admin created task.']
     },
     {
@@ -247,6 +259,93 @@ export default function App() {
       comments: []
     }
   ]);
+
+  // AUTOMATED OVERDUE MONITORING ENGINE
+  useEffect(() => {
+    const todayStr = formatDateKey(new Date());
+
+    tasks.forEach(task => {
+      const isPastDue = task.date && task.date < todayStr && task.status !== 'completed';
+
+      if (isPastDue && !task.overdueNotified) {
+        const assigneeLabel = task.assignees.length > 0 ? task.assignees.join(', ') : 'Unassigned';
+        const notifMsg = `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was due on ${task.date}`;
+
+        setNotifications(prev => [
+          { id: Date.now() + Math.random(), text: notifMsg, type: 'overdue', read: false, time: 'Just now' },
+          ...prev
+        ]);
+
+        setTasks(prevTasks => prevTasks.map(t => t.id === task.id ? { ...t, isOverdue: true, overdueNotified: true } : t));
+      }
+    });
+  }, [tasks]);
+
+  // DRAG & DROP HANDLERS
+  const handleDragStart = (e, taskId) => {
+    if (userRole !== 'admin') return;
+    setDraggedTaskId(taskId);
+    e.dataTransfer.setData('text/plain', String(taskId));
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e) => {
+    if (userRole !== 'admin') return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDayDrop = (e, targetHour, targetMemberName) => {
+    if (userRole !== 'admin') return;
+    e.preventDefault();
+    const taskIdStr = e.dataTransfer.getData('text/plain') || draggedTaskId;
+    const taskId = Number(taskIdStr);
+
+    setTasks(prevTasks => prevTasks.map(t => {
+      if (t.id === taskId) {
+        const dur = t.duration || 1;
+        const newStartHour = targetHour;
+        const newEndHour = newStartHour + dur;
+
+        const newStartStr = decimalToTimeString(newStartHour);
+        const newEndStr = decimalToTimeString(newEndHour);
+
+        return {
+          ...t,
+          assignees: [targetMemberName],
+          startHour: newStartHour,
+          duration: dur,
+          startTime: newStartStr,
+          endTime: newEndStr,
+          timeLabel: formatTimeLabel(newStartStr, newEndStr),
+          date: formatDateKey(currentDate),
+          type: 'timed'
+        };
+      }
+      return t;
+    }));
+
+    setDraggedTaskId(null);
+  };
+
+  const handleDateDrop = (e, targetDateStr) => {
+    if (userRole !== 'admin') return;
+    e.preventDefault();
+    const taskIdStr = e.dataTransfer.getData('text/plain') || draggedTaskId;
+    const taskId = Number(taskIdStr);
+
+    setTasks(prevTasks => prevTasks.map(t => {
+      if (t.id === taskId) {
+        return {
+          ...t,
+          date: targetDateStr
+        };
+      }
+      return t;
+    }));
+
+    setDraggedTaskId(null);
+  };
 
   const resetMemberForm = () => {
     setMemberName('');
@@ -928,7 +1027,11 @@ export default function App() {
                   </div>
                   <div className="flex-1 grid relative" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
                     {visibleMembers.map(member => (
-                      <div key={member.id} className="border-r border-gray-100 last:border-r-0 h-full relative">
+                      <div 
+                        key={member.id} 
+                        onDragOver={handleDragOver}
+                        onDrop={(e) => handleDayDrop(e, hour, member.name)}
+                        className="border-r border-gray-100 last:border-r-0 h-full relative transition hover:bg-blue-50/30">
                         {visibleTasks
                           .filter(t => t.type === 'timed' && isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)) && t.assignees.includes(member.name) && Math.floor(t.startHour) === hour)
                           .map(task => {
@@ -937,9 +1040,11 @@ export default function App() {
                             return (
                               <div
                                 key={task.id}
+                                draggable={userRole === 'admin'}
+                                onDragStart={(e) => handleDragStart(e, task.id)}
                                 onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
                                 style={{ top: `${topOffset}px`, height: `${height - 4}px`, backgroundColor: member.color }}
-                                className={`absolute inset-x-1 text-white rounded-md p-2.5 shadow-md border-l-4 ${task.isOverdue ? 'border-red-500 ring-2 ring-red-400' : 'border-black/20'} cursor-pointer hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden`}>
+                                className={`absolute inset-x-1 text-white rounded-md p-2.5 shadow-md border-l-4 ${task.isOverdue ? 'border-red-500 ring-2 ring-red-400' : 'border-black/20'} ${userRole === 'admin' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden`}>
                                 <div>
                                   <div className="flex justify-between items-start">
                                     <h4 className="font-bold text-xs leading-tight drop-shadow-sm flex items-center gap-1">
@@ -976,7 +1081,11 @@ export default function App() {
               const isTodayCell = dateStr === formatDateKey(new Date());
 
               return (
-                <div key={dayName} className="bg-white rounded-lg border border-gray-300 flex flex-col h-[550px] shadow-sm">
+                <div 
+                  key={dayName} 
+                  onDragOver={handleDragOver}
+                  onDrop={(e) => handleDateDrop(e, dateStr)}
+                  className="bg-white rounded-lg border border-gray-300 flex flex-col h-[550px] shadow-sm hover:border-blue-400 transition">
                   <div className={`p-2 border-b border-gray-300 text-center ${isTodayCell ? 'bg-[#A9B1A6] text-white' : 'bg-gray-100 text-gray-700'}`}>
                     <span className="block text-xs font-bold uppercase">{dayName}</span>
                     <span className="text-sm font-serif font-bold">
@@ -991,9 +1100,11 @@ export default function App() {
                         return (
                           <div 
                             key={`${task.id}-${dateStr}`} 
+                            draggable={userRole === 'admin'}
+                            onDragStart={(e) => handleDragStart(e, task.id)}
                             onClick={() => handleOpenModal(task, dateStr)}
                             style={{ backgroundColor: member.color }}
-                            className={`text-white p-2 rounded text-xs shadow cursor-pointer hover:opacity-90 flex flex-col gap-1 ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
+                            className={`text-white p-2 rounded text-xs shadow ${userRole === 'admin' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 flex flex-col gap-1 ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
                             <div className="flex justify-between items-center">
                               <span className="font-bold leading-snug">{task.title}</span>
                               {task.isOverdue && <span className="bg-red-600 text-[8px] font-bold px-1 rounded">!</span>}
@@ -1035,7 +1146,11 @@ export default function App() {
                   : [];
 
                 return (
-                  <div key={i} className={`p-1.5 flex flex-col ${isCurrentMonthCell ? 'bg-white' : 'bg-gray-50/50 text-gray-300'}`}>
+                  <div 
+                    key={i} 
+                    onDragOver={handleDragOver}
+                    onDrop={(e) => handleDateDrop(e, dateStr)}
+                    className={`p-1.5 flex flex-col transition hover:bg-blue-50/20 ${isCurrentMonthCell ? 'bg-white' : 'bg-gray-50/50 text-gray-300'}`}>
                     <span className={`text-xs font-bold p-1 ${isTodayCell ? 'bg-[#A9B1A6] text-white rounded-full w-5 h-5 flex items-center justify-center' : 'text-gray-500'}`}>
                       {cellDate.getDate()}
                     </span>
@@ -1045,9 +1160,11 @@ export default function App() {
                         return (
                           <div 
                             key={`${task.id}-${dateStr}`} 
+                            draggable={userRole === 'admin'}
+                            onDragStart={(e) => handleDragStart(e, task.id)}
                             onClick={() => handleOpenModal(task, dateStr)}
                             style={{ backgroundColor: member.color }}
-                            className={`text-white text-[10px] font-semibold p-1 rounded truncate cursor-pointer hover:opacity-90 shadow-2xs flex items-center justify-between ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
+                            className={`text-white text-[10px] font-semibold p-1 rounded truncate ${userRole === 'admin' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 shadow-2xs flex items-center justify-between ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
                             <span className="truncate">{task.title}</span>
                             <div className="flex items-center gap-0.5">
                               {task.isOverdue && <span className="text-[8px] bg-red-600 px-0.5 rounded font-bold">!</span>}
