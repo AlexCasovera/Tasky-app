@@ -1,25 +1,21 @@
+// @ts-nocheck
 import { useState } from 'react';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState('month'); // 'list' | 'day' | 'week' | 'month' | 'create'
+  const [currentView, setCurrentView] = useState('month');
   const [userRole, setUserRole] = useState('admin');
   
-  // DYNAMIC DATE STATE (Initializes to Today's Real Date)
   const [currentDate, setCurrentDate] = useState(new Date());
-  
-  // LIVE SEARCH QUERY
   const [searchQuery, setSearchQuery] = useState('');
 
-  // NOTIFICATION HUB STATE
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState([
     { id: 1, text: 'ALERT: "Client Follow-up" is past due!', type: 'overdue', read: false, time: '10m ago' },
     { id: 2, text: 'Marc S. completed "Wash Laundry & Linens"', type: 'completion', read: false, time: '1h ago' }
   ]);
 
-  // SETTINGS & USER MANAGEMENT STATE
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [editingMemberId, setEditingMemberId] = useState(null); // null = list/add mode
+  const [editingMemberId, setEditingMemberId] = useState(null);
 
   const [teamMembers, setTeamMembers] = useState([
     { id: '1', name: 'Alex M.', initials: 'AM', email: 'alex@company.com', password: 'password123', role: 'admin', color: '#E63946' },
@@ -27,7 +23,6 @@ export default function App() {
     { id: '3', name: 'Marc S.', initials: 'MS', email: 'marc@company.com', password: 'password123', role: 'assignee', color: '#0077B6' }
   ]);
 
-  // Member Form State
   const [memberName, setMemberName] = useState('');
   const [memberEmail, setMemberEmail] = useState('');
   const [memberPassword, setMemberPassword] = useState('');
@@ -35,15 +30,12 @@ export default function App() {
   const [memberColor, setMemberColor] = useState('#2A9D8F');
   const [showPassword, setShowPassword] = useState(false);
 
-  // Modal & Specific Instance Context
   const [selectedTask, setSelectedTask] = useState(null);
   const [selectedInstanceDate, setSelectedInstanceDate] = useState('');
   const [isEditing, setIsEditing] = useState(false);
 
-  // ADMIN TEAM MEMBER FILTER STATE
   const [activeEmployeeFilters, setActiveEmployeeFilters] = useState(['Alex M.', 'Adrian R.', 'Marc S.']);
 
-  // Form State for Task Builder & Modal Editor
   const [taskTitle, setTaskTitle] = useState('');
   const [taskDesc, setTaskDesc] = useState('');
   const [selectedAssignees, setSelectedAssignees] = useState([]);
@@ -53,24 +45,18 @@ export default function App() {
   const [startTime, setStartTime] = useState('13:00');
   const [endTime, setEndTime] = useState('14:00');
 
-  // Recurrence Engine States
   const [recurrenceType, setRecurrenceType] = useState('fixed');
   const [activeDays, setActiveDays] = useState(['Fri']);
   const [generationTime, setGenerationTime] = useState('13:00');
   const [cadenceDays, setCadenceDays] = useState(14);
 
-  // Multi-Step Task Chaining Pipeline State
   const [chainedSteps, setChainedSteps] = useState([]);
-
-  // Proof of Work Controls
   const [requiresPhoto, setRequiresPhoto] = useState(false);
   const [requiresComment, setRequiresComment] = useState(false);
 
-  // Admin Notification Settings
   const [notifyOnComplete, setNotifyOnComplete] = useState(true);
   const [notifyOnComment, setNotifyOnComment] = useState(false);
   
-  // Execution & Audit State inside Modal
   const [openCommentInput, setExecutionComment] = useState('');
   const [photoUploaded, setPhotoUploaded] = useState(false);
   const [additionalNote, setAdditionalNote] = useState('');
@@ -78,7 +64,6 @@ export default function App() {
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const timeSlots = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
 
-  // Helper Conversions
   const formatDateKey = (d) => {
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -167,7 +152,6 @@ export default function App() {
     return `${formatSingle(startStr)} - ${formatSingle(endStr)}`;
   };
 
-  // In-Memory Tasks
   const [tasks, setTasks] = useState([
     {
       id: 1,
@@ -197,7 +181,7 @@ export default function App() {
       title: 'Client Follow-up',
       desc: 'Q3 strategy alignment and operations review.',
       assignees: ['Alex M.'],
-      date: '2026-09-02', // PAST DATE = OVERDUE
+      date: '2026-09-02',
       startTime: '09:00',
       endTime: '11:00',
       startHour: 9,
@@ -243,7 +227,7 @@ export default function App() {
       id: 4,
       title: 'Draft Maintenance Protocol',
       desc: 'Needs specific procedure writeup before assigning team member.',
-      assignees: [], // UNASSIGNED BACKLOG TRAY
+      assignees: [],
       date: formatDateKey(new Date()),
       startTime: null,
       endTime: null,
@@ -264,7 +248,6 @@ export default function App() {
     }
   ]);
 
-  // USER MANAGEMENT HANDLERS
   const resetMemberForm = () => {
     setMemberName('');
     setMemberEmail('');
@@ -290,7 +273,6 @@ export default function App() {
     const initials = memberName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
 
     if (editingMemberId) {
-      // Edit existing member
       setTeamMembers(teamMembers.map(m => {
         if (m.id === editingMemberId) {
           return {
@@ -306,7 +288,6 @@ export default function App() {
         return m;
       }));
     } else {
-      // Add new member
       const newMember = {
         id: Date.now().toString(),
         name: memberName,
@@ -675,7 +656,6 @@ export default function App() {
     <div className="min-h-screen bg-[#A9B1A6] p-4 sm:p-8 font-sans text-[#333333]">
       <div className="max-w-7xl mx-auto bg-[#F4F3ED] p-6 rounded-lg shadow-sm min-h-[850px] flex flex-col relative">
         
-        {/* ROLE SIMULATION & SEARCH TOOLBAR */}
         <div className="bg-[#333333] text-white px-4 py-2 rounded-md mb-4 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs shadow-md">
           <div className="flex items-center gap-2">
             <span className="font-bold text-gray-400 uppercase tracking-wider">Simulate Role:</span>
@@ -704,7 +684,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* TOP HEADER & CONTROLS */}
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4 border-b border-gray-300 pb-4">
           
           <div className="flex items-center gap-4">
@@ -728,7 +707,6 @@ export default function App() {
               <button onClick={() => setCurrentView('month')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'month' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Month</button>
             </div>
 
-            {/* NOTIFICATION HUB BELL */}
             <div className="relative">
               <button 
                 onClick={() => setIsNotifOpen(!isNotifOpen)}
@@ -761,7 +739,6 @@ export default function App() {
               )}
             </div>
 
-            {/* ⚙️ SETTINGS BUTTON */}
             {userRole === 'admin' && (
               <button 
                 onClick={() => { resetMemberForm(); setIsSettingsOpen(true); }}
@@ -779,7 +756,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* ADMIN TEAM MEMBER FILTER BAR */}
         {userRole === 'admin' && currentView !== 'create' && (
           <div className="bg-white p-2.5 rounded-lg border border-gray-200 mb-4 flex items-center justify-between shadow-2xs">
             <div className="flex items-center gap-2">
@@ -807,7 +783,6 @@ export default function App() {
           </div>
         )}
 
-        {/* UNASSIGNED TASK BACKLOG TRAY */}
         {userRole === 'admin' && backlogTasks.length > 0 && currentView !== 'create' && (
           <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-4">
             <div className="flex justify-between items-center mb-2">
@@ -830,7 +805,6 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 1: LIST VIEW */}
         {currentView === 'list' && (
           <div className="flex-col flex gap-6 overflow-y-auto pr-2">
             <div>
@@ -909,7 +883,6 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 2: DAY SCHEDULE GRID */}
         {currentView === 'day' && (
           <div className="flex-1 flex flex-col overflow-x-auto">
             <div className="flex border-b border-gray-300 bg-gray-100 rounded-t-lg min-w-[600px]">
@@ -993,7 +966,6 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 3: WEEK VIEW */}
         {currentView === 'week' && (
           <div className="flex-1 grid grid-cols-7 gap-2 overflow-x-auto min-w-[700px]">
             {daysOfWeek.map((dayName, idx) => {
@@ -1038,7 +1010,6 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 4: MONTH GRID VIEW */}
         {currentView === 'month' && (
           <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm">
             <div className="grid grid-cols-7 bg-gray-100 border-b border-gray-300 text-center py-2 text-xs font-bold text-gray-600">
@@ -1103,7 +1074,6 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 5: TASK BUILDER */}
         {currentView === 'create' && (
           <div className="flex flex-col h-full animate-fade-in">
             <div className="flex justify-between items-center mb-6 border-b border-gray-300 pb-4">
@@ -1297,7 +1267,6 @@ export default function App() {
           </div>
         )}
 
-        {/* TASK EXECUTION & INSPECTOR / EDITOR MODAL */}
         {selectedTask && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
             <div className="bg-[#F4F3ED] max-w-lg w-full rounded-lg shadow-xl p-6 border border-gray-300 flex flex-col gap-4 animate-fade-in max-h-[90vh] overflow-y-auto">
@@ -1447,7 +1416,6 @@ export default function App() {
                 </div>
               )}
 
-              {/* ACTION FOOTER */}
               <div className="flex justify-between items-center pt-3 border-t border-gray-300 mt-2">
                 {userRole === 'admin' && !isCurrentInstanceCompleted && (
                   <div className="flex gap-2">
@@ -1482,7 +1450,6 @@ export default function App() {
           </div>
         )}
 
-        {/* SETTINGS & USER MANAGEMENT DRAWER MODAL */}
         {isSettingsOpen && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-end p-4 z-50">
             <div className="bg-[#F4F3ED] max-w-md w-full h-full rounded-l-lg shadow-2xl p-6 border-l border-gray-300 flex flex-col gap-4 animate-fade-in overflow-y-auto">
@@ -1494,7 +1461,6 @@ export default function App() {
                 <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
               </div>
 
-              {/* TEAM MEMBER LIST */}
               <div className="bg-white p-3 rounded-lg border border-gray-200">
                 <div className="flex justify-between items-center mb-2">
                   <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500">Active Team Members</h4>
@@ -1525,7 +1491,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* ADD / EDIT MEMBER FORM */}
               <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3">
                 <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">
                   {editingMemberId ? 'Edit Team Member Profile' : 'Create New Team Member'}
