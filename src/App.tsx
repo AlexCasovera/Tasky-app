@@ -18,6 +18,9 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingMemberId, setEditingMemberId] = useState(null);
 
+  const [companies, setCompanies] = useState(['Sparkulous', 'Casovera', 'TMFLO', 'Leprino Personal']);
+  const [newCompanyInput, setNewCompanyInput] = useState('');
+
   const [teamMembers, setTeamMembers] = useState([
     { id: '1', name: 'Alex M.', initials: 'AM', email: 'alex@company.com', password: 'password123', role: 'admin', color: '#E63946' },
     { id: '2', name: 'Adrian R.', initials: 'AR', email: 'adrian@company.com', password: 'password123', role: 'assignee', color: '#7209B7' },
@@ -39,10 +42,11 @@ export default function App() {
 
   const [taskTitle, setTaskTitle] = useState('');
   const [taskDesc, setTaskDesc] = useState('');
+  const [taskCompany, setTaskCompany] = useState('Sparkulous');
   const [selectedAssignees, setSelectedAssignees] = useState([]);
   const [taskPriority, setTaskPriority] = useState('Medium');
   const [taskDate, setTaskDate] = useState('');
-  const [hasSpecificTime, setHasSpecificTime] = useState(false); // DEFAULT TO DAYLONG
+  const [hasSpecificTime, setHasSpecificTime] = useState(false); 
   const [startTime, setStartTime] = useState('13:00');
   const [endTime, setEndTime] = useState('14:00');
 
@@ -56,8 +60,8 @@ export default function App() {
   const [requiresComment, setRequiresComment] = useState(false);
   const [allowAssigneeDeadlineChange, setAllowAssigneeDeadlineChange] = useState(false);
 
-  const [notifyOnComplete, setNotifyOnComplete] = useState(true); // DEFAULT ALL NOTIFS ON
-  const [notifyOnComment, setNotifyOnComment] = useState(true);   // DEFAULT ALL NOTIFS ON
+  const [notifyOnComplete, setNotifyOnComplete] = useState(true); 
+  const [notifyOnComment, setNotifyOnComment] = useState(true);   
   
   const [openCommentInput, setExecutionComment] = useState('');
   const [photoUploaded, setPhotoUploaded] = useState(false);
@@ -266,6 +270,7 @@ export default function App() {
       id: 1,
       title: 'Grab the Mail',
       desc: 'Pick up daily mail package from the main office box.',
+      company: 'Sparkulous',
       assignees: ['Adrian R.'],
       date: formatDateKey(new Date()),
       startTime: '13:00',
@@ -291,6 +296,7 @@ export default function App() {
       id: 2,
       title: 'Client Follow-up',
       desc: 'Q3 strategy alignment and operations review.',
+      company: 'Casovera',
       assignees: ['Alex M.'],
       date: '2026-09-02',
       startTime: '09:00',
@@ -318,6 +324,7 @@ export default function App() {
       id: 3,
       title: 'Service Espresso Machine',
       desc: 'Run deep descaling cycle and replace water filter.',
+      company: 'TMFLO',
       assignees: ['Marc S.'],
       date: formatDateKey(new Date()),
       startTime: '10:00',
@@ -343,6 +350,7 @@ export default function App() {
       id: 4,
       title: 'Draft Maintenance Protocol',
       desc: 'Needs specific procedure writeup before assigning team member.',
+      company: 'Leprino Personal',
       assignees: [],
       date: formatDateKey(new Date()),
       startTime: null,
@@ -475,7 +483,7 @@ export default function App() {
     });
   }, []);
 
-  // DRAG & DROP HANDLERS WITH HTML5 DATA TRANSFER FOR BULLETPROOF SOURCE TRACKING
+  // DRAG & DROP HANDLERS WITH SOURCE DATE TRACKING
   const handleDragStart = (e, taskId, sourceDate = null) => {
     if (userRole !== 'admin') return;
     setDraggedTaskId(taskId);
@@ -734,6 +742,7 @@ export default function App() {
   const resetForm = () => {
     setTaskTitle('');
     setTaskDesc('');
+    setTaskCompany(companies[0] || ''); // SET DEFAULT COMPANY
     setSelectedAssignees([]);
     setTaskPriority('Medium');
     setTaskDate(formatDateKey(currentDate));
@@ -818,6 +827,7 @@ export default function App() {
       id: Date.now(),
       title: taskTitle,
       desc: taskDesc,
+      company: taskCompany,
       assignees: selectedAssignees,
       date: taskDate,
       startTime: hasSpecificTime ? startTime : null,
@@ -855,6 +865,7 @@ export default function App() {
 
     setTaskTitle(task.title);
     setTaskDesc(task.desc);
+    setTaskCompany(task.company || companies[0] || '');
     setSelectedAssignees(task.assignees || []);
     setTaskPriority(task.priority);
     setTaskDate(task.date || instanceDateStr);
@@ -886,6 +897,7 @@ export default function App() {
       ...selectedTask,
       title: taskTitle,
       desc: taskDesc,
+      company: taskCompany,
       assignees: selectedAssignees,
       priority: taskPriority,
       date: taskDate,
@@ -975,6 +987,7 @@ export default function App() {
         id: Date.now() + 5,
         title: completionPrompt.title || 'Follow-up Task',
         desc: completionPrompt.desc || `Ad-hoc follow-up from: "${selectedTask.title}"`,
+        company: selectedTask.company, // INHERIT COMPANY
         assignees: [completionPrompt.assignee],
         date: targetDate,
         startTime: null,
@@ -1026,6 +1039,7 @@ export default function App() {
         id: Date.now() + 1,
         title: nextStep.title || 'Follow-up Task',
         desc: nextStep.desc || `Chained step from completed task: "${selectedTask.title}"`,
+        company: selectedTask.company, // INHERIT COMPANY
         assignees: stepAssignees,
         date: targetDate,
         startTime: '09:00',
@@ -1274,8 +1288,8 @@ export default function App() {
           </div>
         )}
 
-        {/* UNASSIGNED BACKLOG TRAY */}
-        {userRole === 'admin' && backlogTasks.length > 0 && currentView !== 'create' && (
+        {/* UNASSIGNED BACKLOG TRAY (HIDDEN IN LIST VIEW FOR ADMIN) */}
+        {userRole === 'admin' && backlogTasks.length > 0 && currentView !== 'create' && currentView !== 'list' && (
           <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-4">
             <div className="flex justify-between items-center mb-2">
               <span className="text-xs font-bold uppercase tracking-wider text-amber-900 flex items-center gap-2">
@@ -1293,6 +1307,7 @@ export default function App() {
                   onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
                   className="bg-white px-3 py-1.5 rounded border border-amber-200 text-xs font-bold text-gray-800 cursor-grab active:cursor-grabbing hover:bg-amber-100 transition shadow-2xs flex items-center gap-2">
                   <span>{task.title}</span>
+                  <span className="text-[9px] bg-gray-200 text-gray-700 px-1 py-0.5 rounded">{task.company}</span>
                   <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">Unassigned</span>
                 </div>
               ))}
@@ -1300,80 +1315,192 @@ export default function App() {
           </div>
         )}
 
-        {/* LIST VIEW */}
+        {/* LIST VIEW (ADMIN GROUPED / ASSIGNEE FLAT) */}
         {currentView === 'list' && (
           <div className="flex-col flex gap-6 overflow-y-auto pr-2">
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <span className="w-2 h-2 rounded-full bg-red-500"></span>
-                <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500">Tasks for {getHeaderTitle()}</h2>
-              </div>
+            
+            {userRole === 'admin' ? (
+              // ADMIN GROUPED COMPANY VIEW
+              Array.from(new Set([...companies, ...tasks.map(t => t.company).filter(Boolean)])).map(company => {
+                const compActive = visibleTasks.filter(t => t.company === company && isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)));
+                const compCompleted = visibleTasks.filter(t => t.company === company && isTaskCompletedOnDay(t, formatDateKey(currentDate)));
+                const compBacklog = backlogTasks.filter(t => t.company === company);
 
-              <div className="flex flex-col gap-3">
-                {visibleTasks
-                  .filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)))
-                  .map(task => {
-                    const style = getPriorityStyle(task.priority);
-                    return (
-                      <div 
-                        key={task.id}
-                        onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                        className={`bg-white p-4 rounded border-l-4 ${task.isOverdue ? 'border-red-600 bg-red-50/50 ring-1 ring-red-400' : style.border} shadow-sm flex justify-between items-center cursor-pointer hover:bg-gray-50 transition`}>
-                        <div className="w-1/2 flex items-center gap-4">
-                          <span className="font-mono text-sm font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200">{task.timeLabel}</span>
+                if (compActive.length === 0 && compCompleted.length === 0 && compBacklog.length === 0) return null;
+
+                return (
+                  <div key={company} className="flex flex-col gap-4 mb-4">
+                    <div className="flex items-center gap-2 mb-1 border-b border-gray-300 pb-2">
+                      <span className="w-3 h-3 rounded-sm bg-[#333333]"></span>
+                      <h2 className="text-lg font-serif font-bold text-gray-800 tracking-wide">{company}</h2>
+                    </div>
+                    
+                    {compBacklog.length > 0 && (
+                      <div className="bg-amber-50 border border-amber-300 rounded-lg p-3">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-amber-900 flex items-center gap-2">
+                            📥 Unassigned Backlog ({compBacklog.length})
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {compBacklog.map(task => (
+                            <div 
+                              key={task.id}
+                              draggable={userRole === 'admin'}
+                              onDragStart={(e) => handleDragStart(e, task.id, task.date)}
+                              onDragEnd={handleDragEnd}
+                              onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
+                              className="bg-white px-3 py-1.5 rounded border border-amber-200 text-xs font-bold text-gray-800 cursor-grab active:cursor-grabbing hover:bg-amber-100 transition shadow-2xs flex items-center gap-2">
+                              <span>{task.title}</span>
+                              <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">Unassigned</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex flex-col gap-3">
+                      {compActive.map(task => {
+                        const style = getPriorityStyle(task.priority);
+                        return (
+                          <div 
+                            key={task.id}
+                            onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
+                            className={`bg-white p-4 rounded border-l-4 ${task.isOverdue ? 'border-red-600 bg-red-50/50 ring-1 ring-red-400' : style.border} shadow-sm flex justify-between items-center cursor-pointer hover:bg-gray-50 transition`}>
+                            <div className="w-1/2 flex items-center gap-4">
+                              <span className="font-mono text-sm font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200">{task.timeLabel}</span>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h3 className="font-bold text-lg">{task.title}</h3>
+                                  {task.isOverdue && <span className="text-[10px] bg-red-600 text-white font-bold px-1.5 py-0.5 rounded animate-pulse">OVERDUE</span>}
+                                  {task.recurrenceType === 'completion' && <span className="text-[10px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded">🔄 Interval</span>}
+                                </div>
+                                <p className="text-sm text-gray-500 truncate">{task.desc}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <span className={`text-xs font-semibold px-3 py-1 rounded-full ${style.badge}`}>{task.priority}</span>
+                              <div className="flex -space-x-2">
+                                {(task.assignees || []).map((a, idx) => {
+                                  const m = getMemberConfig(a);
+                                  return (
+                                    <div key={idx} style={{ backgroundColor: m.color }} className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-xs text-white shadow-sm font-bold">
+                                      {m.initials}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {compActive.length === 0 && compBacklog.length === 0 && (
+                        <p className="text-xs text-gray-400 italic py-2">No active tasks for {company} today.</p>
+                      )}
+                    </div>
+
+                    {compCompleted.length > 0 && (
+                      <div className="pt-2 border-t border-gray-200">
+                        <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-2">Completed Today</h3>
+                        <div className="flex flex-col gap-2">
+                          {compCompleted.map(task => (
+                            <div 
+                              key={task.id} 
+                              onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
+                              className="bg-gray-200/60 p-3 rounded flex justify-between items-center cursor-pointer hover:bg-gray-200 transition">
+                              <div>
+                                <span className="line-through text-sm font-bold text-gray-600 block">{task.title}</span>
+                                <span className="text-xs text-gray-500">Assignees: {(task.assignees || []).join(', ')}</span>
+                              </div>
+                              <span className="text-xs font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-300">
+                                ✓ Completed
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            ) : (
+              // ASSIGNEE FLAT LIST VIEW
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500">Tasks for {getHeaderTitle()}</h2>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  {visibleTasks
+                    .filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)))
+                    .map(task => {
+                      const style = getPriorityStyle(task.priority);
+                      return (
+                        <div 
+                          key={task.id}
+                          onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
+                          className={`bg-white p-4 rounded border-l-4 ${task.isOverdue ? 'border-red-600 bg-red-50/50 ring-1 ring-red-400' : style.border} shadow-sm flex justify-between items-center cursor-pointer hover:bg-gray-50 transition`}>
+                          <div className="w-1/2 flex items-center gap-4">
+                            <span className="font-mono text-sm font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200">{task.timeLabel}</span>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h3 className="font-bold text-lg">{task.title}</h3>
+                                <span className="text-[9px] bg-gray-200 text-gray-700 px-1 py-0.5 rounded">{task.company}</span>
+                                {task.isOverdue && <span className="text-[10px] bg-red-600 text-white font-bold px-1.5 py-0.5 rounded animate-pulse">OVERDUE</span>}
+                                {task.recurrenceType === 'completion' && <span className="text-[10px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded">🔄 Interval</span>}
+                              </div>
+                              <p className="text-sm text-gray-500 truncate">{task.desc}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <span className={`text-xs font-semibold px-3 py-1 rounded-full ${style.badge}`}>{task.priority}</span>
+                            <div className="flex -space-x-2">
+                              {(task.assignees || []).map((a, idx) => {
+                                const m = getMemberConfig(a);
+                                return (
+                                  <div key={idx} style={{ backgroundColor: m.color }} className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-xs text-white shadow-sm font-bold">
+                                    {m.initials}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                  {visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate))).length === 0 && (
+                    <div className="bg-white p-8 rounded text-center border border-dashed border-gray-300">
+                      <p className="text-sm text-gray-500 font-bold">No active tasks scheduled for this date.</p>
+                    </div>
+                  )}
+                </div>
+
+                {visibleTasks.some(t => isTaskCompletedOnDay(t, formatDateKey(currentDate))) && (
+                  <div className="pt-4 border-t border-gray-300 mt-4">
+                    <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Completed Today</h2>
+                    <div className="flex flex-col gap-2">
+                      {visibleTasks.filter(t => isTaskCompletedOnDay(t, formatDateKey(currentDate))).map(task => (
+                        <div 
+                          key={task.id} 
+                          onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
+                          className="bg-gray-200/60 p-3 rounded flex justify-between items-center cursor-pointer hover:bg-gray-200 transition">
                           <div>
                             <div className="flex items-center gap-2">
-                              <h3 className="font-bold text-lg">{task.title}</h3>
-                              {task.isOverdue && <span className="text-[10px] bg-red-600 text-white font-bold px-1.5 py-0.5 rounded animate-pulse">OVERDUE</span>}
-                              {task.recurrenceType === 'completion' && <span className="text-[10px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded">🔄 Interval</span>}
+                              <span className="line-through text-sm font-bold text-gray-600 block">{task.title}</span>
+                              <span className="text-[9px] bg-gray-300 text-gray-600 px-1 py-0.5 rounded">{task.company}</span>
                             </div>
-                            <p className="text-sm text-gray-500 truncate">{task.desc}</p>
+                            <span className="text-xs text-gray-500">Assignees: {(task.assignees || []).join(', ')}</span>
                           </div>
+                          <span className="text-xs font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-300">
+                            ✓ Completed
+                          </span>
                         </div>
-                        <div className="flex items-center gap-4">
-                          <span className={`text-xs font-semibold px-3 py-1 rounded-full ${style.badge}`}>{task.priority}</span>
-                          <div className="flex -space-x-2">
-                            {(task.assignees || []).map((a, idx) => {
-                              const m = getMemberConfig(a);
-                              return (
-                                <div key={idx} style={{ backgroundColor: m.color }} className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-xs text-white shadow-sm font-bold">
-                                  {m.initials}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                {visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate))).length === 0 && (
-                  <div className="bg-white p-8 rounded text-center border border-dashed border-gray-300">
-                    <p className="text-sm text-gray-500 font-bold">No active tasks scheduled for this date.</p>
+                      ))}
+                    </div>
                   </div>
                 )}
-              </div>
-            </div>
-
-            {visibleTasks.some(t => isTaskCompletedOnDay(t, formatDateKey(currentDate))) && (
-              <div className="pt-4 border-t border-gray-300">
-                <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Completed Today</h2>
-                <div className="flex flex-col gap-2">
-                  {visibleTasks.filter(t => isTaskCompletedOnDay(t, formatDateKey(currentDate))).map(task => (
-                    <div 
-                      key={task.id} 
-                      onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                      className="bg-gray-200/60 p-3 rounded flex justify-between items-center cursor-pointer hover:bg-gray-200 transition">
-                      <div>
-                        <span className="line-through text-sm font-bold text-gray-600 block">{task.title}</span>
-                        <span className="text-xs text-gray-500">Assignees: {(task.assignees || []).join(', ')}</span>
-                      </div>
-                      <span className="text-xs font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-300">
-                        ✓ Completed
-                      </span>
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
           </div>
@@ -1495,7 +1622,7 @@ export default function App() {
                                 )}
                               </div>
                               <span className="text-[10px] bg-black/20 px-1 rounded font-mono inline-block mt-0.5">{task.timeLabel}</span>
-                              <p className="text-[10px] opacity-90 truncate mt-0.5">{task.desc}</p>
+                              <p className="text-[10px] opacity-90 truncate mt-0.5">[{task.company}] {task.desc}</p>
                             </div>
                             <div className="flex items-center justify-between text-[9px] opacity-80 pt-0.5 border-t border-white/20 mt-auto">
                               <span>Priority: {task.priority}</span>
@@ -1794,14 +1921,22 @@ export default function App() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Priority Level</label>
-                  <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)} className="w-full px-4 py-2 rounded border border-gray-300 bg-white text-sm">
-                    <option value="High">High (Red)</option>
-                    <option value="Medium">Medium (Orange)</option>
-                    <option value="Low">Low (Green)</option>
-                    <option value="Routine">Routine (Gray)</option>
-                  </select>
+                <div className="flex gap-4">
+                  <div className="w-1/2">
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Company</label>
+                    <select value={taskCompany} onChange={(e) => setTaskCompany(e.target.value)} className="w-full px-4 py-2 rounded border border-gray-300 bg-white text-sm">
+                      {companies.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div className="w-1/2">
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Priority Level</label>
+                    <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)} className="w-full px-4 py-2 rounded border border-gray-300 bg-white text-sm">
+                      <option value="High">High (Red)</option>
+                      <option value="Medium">Medium (Orange)</option>
+                      <option value="Low">Low (Green)</option>
+                      <option value="Routine">Routine (Gray)</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
@@ -1942,6 +2077,7 @@ export default function App() {
                   </span>
                   <div className="flex items-center gap-2">
                     <h2 className="text-2xl font-serif font-bold">{selectedTask.title}</h2>
+                    <span className="text-[10px] bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded font-bold">{selectedTask.company}</span>
                     {selectedTask.isOverdue && <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded">OVERDUE</span>}
                   </div>
                 </div>
@@ -2048,14 +2184,22 @@ export default function App() {
                       <input type="text" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} className="w-full p-2 border rounded bg-white" />
                     </div>
 
-                    <div>
-                      <label className="block font-bold mb-1 text-gray-700">Priority Level</label>
-                      <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)} className="w-full p-2 border rounded bg-white">
-                        <option value="High">High (Red)</option>
-                        <option value="Medium">Medium (Orange)</option>
-                        <option value="Low">Low (Green)</option>
-                        <option value="Routine">Routine (Gray)</option>
-                      </select>
+                    <div className="flex gap-2">
+                      <div className="w-1/2">
+                        <label className="block font-bold mb-1 text-gray-700">Company</label>
+                        <select value={taskCompany} onChange={(e) => setTaskCompany(e.target.value)} className="w-full p-2 border rounded bg-white">
+                          {companies.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </div>
+                      <div className="w-1/2">
+                        <label className="block font-bold mb-1 text-gray-700">Priority Level</label>
+                        <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)} className="w-full p-2 border rounded bg-white">
+                          <option value="High">High (Red)</option>
+                          <option value="Medium">Medium (Orange)</option>
+                          <option value="Low">Low (Green)</option>
+                          <option value="Routine">Routine (Gray)</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
 
@@ -2347,6 +2491,7 @@ export default function App() {
                 <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
               </div>
 
+              {/* ACTIVE TEAM MEMBERS SECTION */}
               <div className="bg-white p-3 rounded-lg border border-gray-200">
                 <div className="flex justify-between items-center mb-2">
                   <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500">Active Team Members</h4>
@@ -2377,6 +2522,7 @@ export default function App() {
                 </div>
               </div>
 
+              {/* MEMBER EDITING FORM */}
               <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3">
                 <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">
                   {editingMemberId ? 'Edit Team Member Profile' : 'Create New Team Member'}
@@ -2465,6 +2611,46 @@ export default function App() {
                       {editingMemberId ? 'Update Profile' : 'Add Member'}
                     </button>
                   </div>
+                </div>
+              </div>
+
+              {/* COMPANY MANAGEMENT SECTION */}
+              <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3 mt-2">
+                <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Company Management</h4>
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    value={newCompanyInput}
+                    onChange={(e) => setNewCompanyInput(e.target.value)}
+                    placeholder="New Company Name"
+                    className="flex-1 p-2 text-xs border border-gray-300 rounded focus:outline-none"
+                  />
+                  <button 
+                    onClick={() => {
+                      if(newCompanyInput.trim() && !companies.includes(newCompanyInput.trim())) {
+                        setCompanies([...companies, newCompanyInput.trim()]);
+                        setNewCompanyInput('');
+                      }
+                    }}
+                    className="bg-[#333333] text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-black transition">
+                    Add
+                  </button>
+                </div>
+                <div className="flex flex-col gap-1 mt-2">
+                  {companies.map(comp => (
+                    <div key={comp} className="flex justify-between items-center bg-gray-50 p-2 rounded border border-gray-100 text-xs">
+                      <span className="font-bold text-gray-700">{comp}</span>
+                      <button 
+                        onClick={() => {
+                          if(companies.length > 1) {
+                            setCompanies(companies.filter(c => c !== comp));
+                          } else {
+                            alert('You must have at least one company in the system.');
+                          }
+                        }}
+                        className="text-red-500 font-bold hover:underline">Remove</button>
+                    </div>
+                  ))}
                 </div>
               </div>
 
