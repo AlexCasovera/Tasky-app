@@ -1,8 +1,9 @@
 // @ts-nocheck
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 export default function App() {
   const [currentView, setCurrentView] = useState('month');
+  const [previousView, setPreviousView] = useState('month');
   const [userRole, setUserRole] = useState('admin');
   
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -65,6 +66,10 @@ export default function App() {
   const [draggedTaskId, setDraggedTaskId] = useState(null);
   const [hoverSlot, setHoverSlot] = useState(null);
   const [reschedulePrompt, setReschedulePrompt] = useState(null);
+  
+  // LIVE RESIZING STATE
+  const [resizingTaskId, setResizingTaskId] = useState(null);
+  const resizeStateRef = useRef(null);
 
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const timeSlots = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
@@ -168,7 +173,14 @@ export default function App() {
     return `${formatSingle(startStr)} - ${formatSingle(endStr)}`;
   };
 
-  // SIDE-BY-SIDE OVERLAPPING TASK LAYOUT ENGINE WITH 12PX LANDING GUTTER
+  // OPEN TASK CREATOR & CAPTURE PREVIOUS VIEW
+  const handleOpenCreateView = () => {
+    setPreviousView(currentView);
+    resetForm();
+    setCurrentView('create');
+  };
+
+  // SIDE-BY-SIDE OVERLAPPING TASK LAYOUT ENGINE
   const computeColumnTaskLayouts = (colTasks) => {
     if (!colTasks || colTasks.length === 0) return {};
 
@@ -231,7 +243,7 @@ export default function App() {
           const widthPct = (1.0 / numCols) * 100;
           layouts[item.id] = {
             left: `${leftPct}%`,
-            width: `calc(${widthPct}% - 12px)`, // Increased to 12px to guarantee an easy visual drop target area
+            width: `calc(${widthPct}% - 12px)`,
             startPx: (item.start - 8) * 80,
             heightPx: Math.max(28, (item.end - item.start) * 80 - 2),
             numCols,
@@ -342,6 +354,84 @@ export default function App() {
     }
   ]);
 
+  // LIVE TASK RESIZING ENGINE
+  const handleResizeStart = (e, task, edge) => {
+    e.stopPropagation();
+    e.preventDefault(); 
+    if (userRole !== 'admin') return;
+
+    resizeStateRef.current = {
+      id: task.id,
+      edge,
+      initialStartHour: task.startHour,
+      initialDuration: task.duration,
+      initialMouseY: e.clientY
+    };
+    setResizingTaskId(task.id);
+  };
+
+  useEffect(() => {
+    const handleMove = (e) => {
+      if (!resizeStateRef.current) return;
+      const state = resizeStateRef.current;
+      
+      const deltaY = e.clientY - state.initialMouseY;
+      const deltaHours = Math.round(deltaY / 20) * 0.25;
+
+      let newStartHour = state.initialStartHour;
+      let newDuration = state.initialDuration;
+
+      if (state.edge === 'top') {
+        newStartHour = state.initialStartHour + deltaHours;
+        newDuration = state.initialDuration - deltaHours;
+        if (newDuration < 0.5) {
+          newDuration = 0.5;
+          newStartHour = state.initialStartHour + state.initialDuration - 0.5;
+        }
+        if (newStartHour < 8) {
+          newStartHour = 8;
+          newDuration = state.initialStartHour + state.initialDuration - 8;
+        }
+      } else {
+        newDuration = state.initialDuration + deltaHours;
+        if (newDuration < 0.5) newDuration = 0.5;
+        if (state.initialStartHour + newDuration > 18) {
+          newDuration = 18 - state.initialStartHour;
+        }
+      }
+
+      setTasks(prevTasks => prevTasks.map(t => {
+        if (t.id === state.id) {
+          const sStr = decimalToTimeString(newStartHour);
+          const eStr = decimalToTimeString(newStartHour + newDuration);
+          return {
+            ...t,
+            startHour: newStartHour,
+            duration: newDuration,
+            startTime: sStr,
+            endTime: eStr,
+            timeLabel: formatTimeLabel(sStr, eStr)
+          };
+        }
+        return t;
+      }));
+    };
+
+    const handleUp = () => {
+      if (resizeStateRef.current) {
+        resizeStateRef.current = null;
+        setResizingTaskId(null);
+      }
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+    };
+  }, []);
+
   // AUTOMATED OVERDUE DETECTION
   useEffect(() => {
     const todayStr = formatDateKey(new Date());
@@ -415,35 +505,38 @@ export default function App() {
 
     setTasks(prevTasks => prevTasks.map(t => {
       if (t.id === taskId) {
-        if (t.recurrenceType !== 'once' && !updateSeries) {
-          const dur = t.duration || 1;
-          const startDec = targetHour !== null ? targetHour : (t.startHour || 9);
-          const endDec = startDec + dur;
-          const sStr = decimalToTimeString(startDec);
-          const eStr = decimalToTimeString(endDec);
+        const isFlex = t.type === 'flexible' || t.startHour === null || t.startHour === undefined;
+        
+        let startDec = t.startHour;
+        let dur = t.duration || 1;
+        let sStr = t.startTime;
+        let eStr = t.endTime;
+        let label = t.timeLabel;
 
+        if (!isFlex && targetHour !== null) {
+          startDec = targetHour;
+          sStr = decimalToTimeString(startDec);
+          eStr = decimalToTimeString(startDec + dur);
+          label = formatTimeLabel(sStr, eStr);
+        }
+
+        if (t.recurrenceType !== 'once' && !updateSeries) {
           return {
             ...t,
             id: Date.now(),
             date: targetDate,
             assignees: targetMemberName ? [targetMemberName] : (t.assignees || []),
-            startHour: targetHour !== null ? startDec : t.startHour,
+            startHour: startDec,
             duration: dur,
-            startTime: targetHour !== null ? sStr : t.startTime,
-            endTime: targetHour !== null ? eStr : t.endTime,
-            timeLabel: targetHour !== null ? formatTimeLabel(sStr, eStr) : t.timeLabel,
-            type: targetHour !== null ? 'timed' : t.type,
+            startTime: sStr,
+            endTime: eStr,
+            timeLabel: label,
+            type: isFlex ? 'flexible' : 'timed',
             recurrenceType: 'once',
             isOverdue: targetDate < todayStr,
             overdueNotified: targetDate < todayStr
           };
         }
-
-        const dur = t.duration || 1;
-        const startDec = targetHour !== null ? targetHour : (t.startHour || 9);
-        const endDec = startDec + dur;
-        const sStr = decimalToTimeString(startDec);
-        const eStr = decimalToTimeString(endDec);
 
         const newIsOverdue = targetDate < todayStr && t.status !== 'completed';
 
@@ -451,12 +544,12 @@ export default function App() {
           ...t,
           date: targetDate,
           assignees: targetMemberName ? [targetMemberName] : (t.assignees || []),
-          startHour: targetHour !== null ? startDec : t.startHour,
-          duration: targetHour !== null ? dur : t.duration,
-          startTime: targetHour !== null ? sStr : t.startTime,
-          endTime: targetHour !== null ? eStr : t.endTime,
-          timeLabel: targetHour !== null ? formatTimeLabel(sStr, eStr) : t.timeLabel,
-          type: targetHour !== null ? 'timed' : t.type,
+          startHour: startDec,
+          duration: dur,
+          startTime: sStr,
+          endTime: eStr,
+          timeLabel: label,
+          type: isFlex ? 'flexible' : 'timed',
           isOverdue: newIsOverdue,
           overdueNotified: newIsOverdue
         };
@@ -658,7 +751,7 @@ export default function App() {
 
     setTasks([newTask, ...tasks]);
     resetForm();
-    setCurrentView('month');
+    setCurrentView(previousView); // Routes back to the view you were previously on
   };
 
   const handleOpenModal = (task, instanceDateStr) => {
@@ -1002,7 +1095,7 @@ export default function App() {
             )}
 
             {userRole === 'admin' && (
-              <button onClick={() => { resetForm(); setCurrentView('create'); }} className="bg-[#A9B1A6] text-white px-4 py-2 rounded text-xs font-bold shadow-sm hover:bg-gray-600 transition">
+              <button onClick={handleOpenCreateView} className="bg-[#A9B1A6] text-white px-4 py-2 rounded text-xs font-bold shadow-sm hover:bg-gray-600 transition">
                 + New Task
               </button>
             )}
@@ -1050,7 +1143,7 @@ export default function App() {
               {backlogTasks.map(task => (
                 <div 
                   key={task.id}
-                  draggable={userRole === 'admin'}
+                  draggable={userRole === 'admin' && !resizingTaskId}
                   onDragStart={(e) => handleDragStart(e, task.id)}
                   onDragEnd={handleDragEnd}
                   onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
@@ -1225,7 +1318,7 @@ export default function App() {
                         return (
                           <div
                             key={task.id}
-                            draggable={userRole === 'admin'}
+                            draggable={userRole === 'admin' && !resizingTaskId}
                             onDragStart={(e) => handleDragStart(e, task.id)}
                             onDragEnd={handleDragEnd}
                             onClick={() => handleOpenModal(task, dayDateStr)}
@@ -1236,7 +1329,16 @@ export default function App() {
                               width: layout.width, 
                               backgroundColor: member.color 
                             }}
-                            className={`absolute text-white rounded-md p-2 shadow-md border-l-4 ${task.isOverdue ? 'border-red-500 ring-2 ring-red-400' : 'border-black/20'} ${userRole === 'admin' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden ${isFlex ? 'opacity-95' : ''}`}>
+                            className={`absolute text-white rounded-md p-2 shadow-md border-l-4 ${task.isOverdue ? 'border-red-500 ring-2 ring-red-400' : 'border-black/20'} ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden ${isFlex ? 'opacity-95' : ''}`}>
+                            
+                            {/* TOP RESIZE HANDLE */}
+                            {!isFlex && userRole === 'admin' && (
+                              <div 
+                                className="absolute top-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-t-md"
+                                onPointerDown={(e) => handleResizeStart(e, task, 'top')}
+                              />
+                            )}
+
                             <div>
                               <div className="flex justify-between items-start gap-1">
                                 <h4 className="font-bold text-xs leading-tight drop-shadow-sm truncate">
@@ -1255,6 +1357,14 @@ export default function App() {
                               <span>Priority: {task.priority}</span>
                               <span>{task.recurrenceType === 'completion' ? '🔄' : task.recurrenceType === 'fixed' ? '↻' : ''}</span>
                             </div>
+
+                            {/* BOTTOM RESIZE HANDLE */}
+                            {!isFlex && userRole === 'admin' && (
+                              <div 
+                                className="absolute bottom-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-b-md"
+                                onPointerDown={(e) => handleResizeStart(e, task, 'bottom')}
+                              />
+                            )}
                           </div>
                         );
                       })}
@@ -1356,7 +1466,7 @@ export default function App() {
                         return (
                           <div
                             key={`${task.id}-${dateStr}`}
-                            draggable={userRole === 'admin'}
+                            draggable={userRole === 'admin' && !resizingTaskId}
                             onDragStart={(e) => handleDragStart(e, task.id)}
                             onDragEnd={handleDragEnd}
                             onClick={() => handleOpenModal(task, dateStr)}
@@ -1367,7 +1477,16 @@ export default function App() {
                               width: layout.width, 
                               backgroundColor: member.color 
                             }}
-                            className={`absolute text-white rounded p-1.5 shadow ${userRole === 'admin' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 transition z-10 flex flex-col justify-between overflow-hidden ${task.isOverdue ? 'ring-2 ring-red-500' : ''} ${isFlex ? 'opacity-95' : ''}`}>
+                            className={`absolute text-white rounded p-1.5 shadow ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 transition z-10 flex flex-col justify-between overflow-hidden ${task.isOverdue ? 'ring-2 ring-red-500' : ''} ${isFlex ? 'opacity-95' : ''}`}>
+                            
+                            {/* TOP RESIZE HANDLE */}
+                            {!isFlex && userRole === 'admin' && (
+                              <div 
+                                className="absolute top-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-t"
+                                onPointerDown={(e) => handleResizeStart(e, task, 'top')}
+                              />
+                            )}
+
                             <div>
                               <div className="flex justify-between items-center text-[10px] font-bold leading-tight">
                                 <span className="truncate">{task.title}</span>
@@ -1380,6 +1499,14 @@ export default function App() {
                               <span className="text-[9px] opacity-80 font-mono block truncate">{task.timeLabel}</span>
                             </div>
                             <span className="text-[8px] bg-black/20 px-1 rounded truncate w-max mt-auto">{(task.assignees || []).join(', ')}</span>
+
+                            {/* BOTTOM RESIZE HANDLE */}
+                            {!isFlex && userRole === 'admin' && (
+                              <div 
+                                className="absolute bottom-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-b"
+                                onPointerDown={(e) => handleResizeStart(e, task, 'bottom')}
+                              />
+                            )}
                           </div>
                         );
                       })}
@@ -1431,12 +1558,12 @@ export default function App() {
                         return (
                           <div 
                             key={`${task.id}-${dateStr}`} 
-                            draggable={userRole === 'admin'}
+                            draggable={userRole === 'admin' && !resizingTaskId}
                             onDragStart={(e) => handleDragStart(e, task.id)}
                             onDragEnd={handleDragEnd}
                             onClick={() => handleOpenModal(task, dateStr)}
                             style={{ backgroundColor: member.color }}
-                            className={`text-white text-[10px] font-semibold p-1 rounded truncate ${userRole === 'admin' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 shadow-2xs flex items-center justify-between ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
+                            className={`text-white text-[10px] font-semibold p-1 rounded truncate ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 shadow-2xs flex items-center justify-between ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
                             <span className="truncate">{task.title}</span>
                             <div className="flex items-center gap-0.5">
                               {task.isOverdue && <span className="text-[8px] bg-red-600 px-0.5 rounded font-bold">!</span>}
@@ -1468,7 +1595,7 @@ export default function App() {
           <div className="flex flex-col h-full animate-fade-in">
             <div className="flex justify-between items-center mb-6 border-b border-gray-300 pb-4">
               <h1 className="text-3xl font-serif font-bold">Task Builder</h1>
-              <button onClick={() => setCurrentView('month')} className="text-gray-500 hover:text-gray-800 font-semibold text-sm">✕ Cancel</button>
+              <button onClick={() => setCurrentView(previousView)} className="text-gray-500 hover:text-gray-800 font-semibold text-sm">✕ Cancel</button>
             </div>
 
             <div className="flex gap-8 h-full">
@@ -1574,7 +1701,7 @@ export default function App() {
                   {recurrenceType === 'completion' && (
                     <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
                       <span className="text-sm text-gray-600">Re-deploy task</span>
-                      <input type="number" value={cadenceDays} onChange={(e) => setCadenceDays(Number(e.target.value))} className="w-12 p-1 border rounded text-center font-bold" />
+                      <input type="number" value={cadenceDays} onChange={(e) => setCadenceDays(Number(e.target.value))} className="border border-gray-300 rounded px-2 py-1 text-sm w-16 text-center font-bold" />
                       <span className="text-sm text-gray-600">days after completion</span>
                     </div>
                   )}
