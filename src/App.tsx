@@ -61,13 +61,14 @@ export default function App() {
   const [photoUploaded, setPhotoUploaded] = useState(false);
   const [additionalNote, setAdditionalNote] = useState('');
 
-  // DRAG & DROP & RESCHEDULE PROMPT STATE
+  // DRAG & DROP, HOVER GHOST & RESCHEDULE PROMPT STATE
   const [draggedTaskId, setDraggedTaskId] = useState(null);
+  const [hoverSlot, setHoverSlot] = useState(null); // { dateStr, targetHour, memberName }
   const [reschedulePrompt, setReschedulePrompt] = useState(null);
 
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const timeSlots = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
-  const minuteSubSlots = [0, 0.25, 0.5, 0.75]; // 00m, 15m, 30m, 45m
+  const timeSlots = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17]; // 8 AM to 5 PM
+  const minuteSubSlots = [0, 0.25, 0.5, 0.75]; // :00, :15, :30, :45
 
   const formatDateKey = (d) => {
     const year = d.getFullYear();
@@ -130,7 +131,7 @@ export default function App() {
       const start = getWeekStart(currentDate);
       const end = new Date(start);
       end.setDate(end.getDate() + 6);
-      return `${monthNames[start.getMonth()].slice(0, 3)} ${start.getDate()} – ${monthNames[end.getMonth()].slice(0, 3)} ${end.getDate()}, ${end.getFullYear()}`;
+      return `${monthNames[start.getMonth()].slice(0, 3)} ${start.getDate()} - ${monthNames[end.getMonth()].slice(0, 3)} ${end.getDate()}, ${end.getFullYear()}`;
     }
 
     if (currentView === 'month') {
@@ -163,6 +164,81 @@ export default function App() {
       return `${h12 < 10 ? '0' + h12 : h12}:${m < 10 ? '0' + m : m} ${ampm}`;
     };
     return `${formatSingle(startStr)} - ${formatSingle(endStr)}`;
+  };
+
+  // SIDE-BY-SIDE OVERLAPPING TASK LAYOUT COMPUTATION
+  const computeColumnTaskLayouts = (colTasks) => {
+    const items = colTasks.map(t => {
+      const isFlex = (t.type === 'flexible' || t.startHour === null || t.startHour === undefined);
+      const start = isFlex ? 8.0 : Number(t.startHour);
+      const dur = isFlex ? 10.0 : Number(t.duration || 1.0);
+      return {
+        id: t.id,
+        start,
+        end: start + dur,
+        isFlex,
+        task: t
+      };
+    });
+
+    items.sort((a, b) => {
+      if (a.isFlex !== b.isFlex) return a.isFlex ? -1 : 1;
+      if (a.start !== b.start) return a.start - b.start;
+      return (b.end - b.start) - (a.end - a.start);
+    });
+
+    const clusters = [];
+    items.forEach(item => {
+      let targetCluster = null;
+      for (let cluster of clusters) {
+        if (cluster.some(c => Math.max(item.start, c.start) < Math.min(item.end, c.end))) {
+          targetCluster = cluster;
+          break;
+        }
+      }
+      if (targetCluster) {
+        targetCluster.push(item);
+      } else {
+        clusters.push([item]);
+      }
+    });
+
+    const layouts = {};
+    clusters.forEach(cluster => {
+      const cols = [];
+      cluster.forEach(item => {
+        let placed = false;
+        for (let col of cols) {
+          if (col[col.length - 1].end <= item.start) {
+            col.push(item);
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          cols.push([item]);
+        }
+      });
+
+      const numCols = cols.length;
+      cols.forEach((col, colIdx) => {
+        col.forEach(item => {
+          const leftPct = (colIdx / numCols) * 100;
+          const widthPct = (1.0 / numCols) * 100;
+          layouts[item.id] = {
+            left: `${leftPct}%`,
+            width: `calc(${widthPct}% - 2px)`,
+            startPx: (item.start - 8) * 80,
+            heightPx: Math.max(28, (item.end - item.start) * 80 - 2),
+            numCols,
+            colIdx,
+            isFlex: item.isFlex
+          };
+        });
+      });
+    });
+
+    return layouts;
   };
 
   const [tasks, setTasks] = useState([
@@ -262,7 +338,7 @@ export default function App() {
     }
   ]);
 
-  // DYNAMIC OVERDUE STATUS & NOTIFICATION ENGINE
+  // DYNAMIC OVERDUE STATUS ENGINE
   useEffect(() => {
     const todayStr = formatDateKey(new Date());
 
@@ -293,7 +369,7 @@ export default function App() {
     });
   }, [tasks]);
 
-  // DRAG & DROP LOGIC WITH 15-MIN GRANULARITY & RECURRING SCOPE PROMPT
+  // DRAG & DROP HANDLERS WITH CLEANUP
   const handleDragStart = (e, taskId) => {
     if (userRole !== 'admin') return;
     setDraggedTaskId(taskId);
@@ -301,10 +377,27 @@ export default function App() {
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const handleDragOver = (e) => {
-    if (userRole !== 'admin') return;
+  const handleDragEnd = () => {
+    setDraggedTaskId(null);
+    setHoverSlot(null);
+  };
+
+  const handleSubSlotDragOver = (e, dateStr, targetHour, memberName) => {
+    if (userRole !== 'admin' || !draggedTaskId) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
+
+    setHoverSlot(prev => {
+      if (
+        prev &&
+        prev.dateStr === dateStr &&
+        prev.targetHour === targetHour &&
+        prev.memberName === memberName
+      ) {
+        return prev;
+      }
+      return { dateStr, targetHour, memberName };
+    });
   };
 
   const applyTaskMove = (taskId, targetDate, targetHour, targetMemberName, updateSeries = false) => {
@@ -313,31 +406,29 @@ export default function App() {
     setTasks(prevTasks => prevTasks.map(t => {
       if (t.id === taskId) {
         if (t.recurrenceType !== 'once' && !updateSeries) {
-          // CREATE SINGLE INSTANCE OVERRIDE FOR RECURRING TASK
           const dur = t.duration || 1;
           const startDec = targetHour !== null ? targetHour : (t.startHour || 9);
           const endDec = startDec + dur;
           const sStr = decimalToTimeString(startDec);
           const eStr = decimalToTimeString(endDec);
 
-          const standaloneTask = {
+          return {
             ...t,
             id: Date.now(),
             date: targetDate,
             assignees: targetMemberName ? [targetMemberName] : t.assignees,
-            startHour: startDec,
+            startHour: targetHour !== null ? startDec : t.startHour,
             duration: dur,
-            startTime: sStr,
-            endTime: eStr,
-            timeLabel: formatTimeLabel(sStr, eStr),
+            startTime: targetHour !== null ? sStr : t.startTime,
+            endTime: targetHour !== null ? eStr : t.endTime,
+            timeLabel: targetHour !== null ? formatTimeLabel(sStr, eStr) : t.timeLabel,
+            type: targetHour !== null ? 'timed' : t.type,
             recurrenceType: 'once',
             isOverdue: targetDate < todayStr,
             overdueNotified: targetDate < todayStr
           };
-          return standaloneTask;
         }
 
-        // UPDATE TASK OR ENTIRE RECURRING SERIES
         const dur = t.duration || 1;
         const startDec = targetHour !== null ? targetHour : (t.startHour || 9);
         const endDec = startDec + dur;
@@ -355,6 +446,7 @@ export default function App() {
           startTime: targetHour !== null ? sStr : t.startTime,
           endTime: targetHour !== null ? eStr : t.endTime,
           timeLabel: targetHour !== null ? formatTimeLabel(sStr, eStr) : t.timeLabel,
+          type: targetHour !== null ? 'timed' : t.type,
           isOverdue: newIsOverdue,
           overdueNotified: newIsOverdue
         };
@@ -364,6 +456,7 @@ export default function App() {
 
     setReschedulePrompt(null);
     setDraggedTaskId(null);
+    setHoverSlot(null);
   };
 
   const handleDropSlot = (e, targetDate, targetHour = null, targetMemberName = null) => {
@@ -372,6 +465,8 @@ export default function App() {
     const taskIdStr = e.dataTransfer.getData('text/plain') || draggedTaskId;
     const taskId = Number(taskIdStr);
     const task = tasks.find(t => t.id === taskId);
+
+    setHoverSlot(null);
 
     if (!task) return;
 
@@ -564,7 +659,6 @@ export default function App() {
     setPhotoUploaded(false);
     setAdditionalNote('');
 
-    // POPULATE ALL EDITABLE FIELDS
     setTaskTitle(task.title);
     setTaskDesc(task.desc);
     setSelectedAssignees(task.assignees || []);
@@ -796,10 +890,13 @@ export default function App() {
     (selectedTask.completedDates && selectedTask.completedDates.includes(selectedInstanceDate))
   );
 
+  const draggedTaskObj = draggedTaskId ? tasks.find(t => t.id === draggedTaskId) : null;
+
   return (
     <div className="min-h-screen bg-[#A9B1A6] p-4 sm:p-8 font-sans text-[#333333]">
       <div className="max-w-7xl mx-auto bg-[#F4F3ED] p-6 rounded-lg shadow-sm min-h-[850px] flex flex-col relative">
         
+        {/* ROLE SIMULATION HEADER */}
         <div className="bg-[#333333] text-white px-4 py-2 rounded-md mb-4 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs shadow-md">
           <div className="flex items-center gap-2">
             <span className="font-bold text-gray-400 uppercase tracking-wider">Simulate Role:</span>
@@ -828,6 +925,7 @@ export default function App() {
           </div>
         </div>
 
+        {/* CONTROLS HEADER */}
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4 border-b border-gray-300 pb-4">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1 bg-white border border-gray-300 rounded-lg p-1 shadow-2xs">
@@ -899,6 +997,7 @@ export default function App() {
           </div>
         </div>
 
+        {/* TEAM MEMBER FILTER BAR */}
         {userRole === 'admin' && currentView !== 'create' && (
           <div className="bg-white p-2.5 rounded-lg border border-gray-200 mb-4 flex items-center justify-between shadow-2xs">
             <div className="flex items-center gap-2">
@@ -926,6 +1025,7 @@ export default function App() {
           </div>
         )}
 
+        {/* UNASSIGNED BACKLOG TRAY */}
         {userRole === 'admin' && backlogTasks.length > 0 && currentView !== 'create' && (
           <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-4">
             <div className="flex justify-between items-center mb-2">
@@ -938,8 +1038,11 @@ export default function App() {
               {backlogTasks.map(task => (
                 <div 
                   key={task.id}
+                  draggable={userRole === 'admin'}
+                  onDragStart={(e) => handleDragStart(e, task.id)}
+                  onDragEnd={handleDragEnd}
                   onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                  className="bg-white px-3 py-1.5 rounded border border-amber-200 text-xs font-bold text-gray-800 cursor-pointer hover:bg-amber-100 transition shadow-2xs flex items-center gap-2">
+                  className="bg-white px-3 py-1.5 rounded border border-amber-200 text-xs font-bold text-gray-800 cursor-grab active:cursor-grabbing hover:bg-amber-100 transition shadow-2xs flex items-center gap-2">
                   <span>{task.title}</span>
                   <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">Unassigned</span>
                 </div>
@@ -948,6 +1051,7 @@ export default function App() {
           </div>
         )}
 
+        {/* LIST VIEW */}
         {currentView === 'list' && (
           <div className="flex-col flex gap-6 overflow-y-auto pr-2">
             <div>
@@ -1026,10 +1130,11 @@ export default function App() {
           </div>
         )}
 
-        {/* DAY VIEW WITH 15-MIN SUB-SLOT DROP ZONES */}
+        {/* DAY VIEW WITH SIDE-BY-SIDE OVERLAPPING TASKS & HOVER GHOST PREVIEW */}
         {currentView === 'day' && (
-          <div className="flex-1 flex flex-col overflow-x-auto">
-            <div className="flex border-b border-gray-300 bg-gray-100 rounded-t-lg min-w-[600px]">
+          <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm min-w-[600px]">
+            {/* Column Headers */}
+            <div className="flex border-b border-gray-300 bg-gray-100">
               <div className="w-20 py-3 text-center text-xs font-bold text-gray-500 border-r border-gray-300">Time</div>
               <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
                 {visibleMembers.map(member => (
@@ -1043,67 +1148,116 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex-1 min-w-[600px] relative bg-white border-b border-l border-r border-gray-300 rounded-b-lg overflow-y-auto max-h-[580px]">
-              {timeSlots.map(hour => (
-                <div key={hour} className="flex h-20 border-b border-gray-200 last:border-b-0 relative">
-                  <div className="w-20 border-r border-gray-300 p-2 text-xs font-mono font-bold text-gray-400 text-right pr-3 bg-gray-50 select-none">
+            {/* Continuous 10-Hour Column Grid */}
+            <div className="flex-1 relative overflow-y-auto max-h-[580px] flex">
+              {/* Time Label Sidebar */}
+              <div className="w-20 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0">
+                {timeSlots.map(hour => (
+                  <div key={hour} className="h-20 border-b border-gray-200 p-2 text-xs font-mono font-bold text-gray-400 text-right pr-3">
                     {hour === 12 ? '12:00 PM' : hour > 12 ? `${hour - 12}:00 PM` : `${hour}:00 AM`}
                   </div>
-                  <div className="flex-1 grid relative" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
-                    {visibleMembers.map(member => (
-                      <div key={member.id} className="border-r border-gray-100 last:border-r-0 h-full relative flex flex-col">
-                        {minuteSubSlots.map(subOffset => (
-                          <div 
-                            key={subOffset}
-                            onDragOver={handleDragOver}
-                            onDrop={(e) => handleDropSlot(e, formatDateKey(currentDate), hour + subOffset, member.name)}
-                            className="flex-1 hover:bg-blue-50/40 transition border-b border-dashed border-gray-100/50 last:border-b-0"
-                            title={`${decimalToTimeString(hour + subOffset)} - ${member.name}`}>
-                          </div>
-                        ))}
+                ))}
+              </div>
 
-                        {visibleTasks
-                          .filter(t => t.type === 'timed' && isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)) && t.assignees.includes(member.name) && Math.floor(t.startHour) === hour)
-                          .map(task => {
-                            const topOffset = (task.startHour - hour) * 80;
-                            const height = task.duration * 80;
-                            return (
-                              <div
-                                key={task.id}
-                                draggable={userRole === 'admin'}
-                                onDragStart={(e) => handleDragStart(e, task.id)}
-                                onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                                style={{ top: `${topOffset}px`, height: `${height - 2}px`, backgroundColor: member.color }}
-                                className={`absolute inset-x-1 text-white rounded-md p-2 shadow-md border-l-4 ${task.isOverdue ? 'border-red-500 ring-2 ring-red-400' : 'border-black/20'} ${userRole === 'admin' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden`}>
-                                <div>
-                                  <div className="flex justify-between items-start">
-                                    <h4 className="font-bold text-xs leading-tight drop-shadow-sm flex items-center gap-1 truncate">
-                                      {task.title}
-                                      {task.isOverdue && <span className="bg-red-600 text-[8px] font-bold px-1 rounded">OVERDUE</span>}
-                                    </h4>
-                                    <span className="text-[9px] bg-black/20 px-1 rounded font-mono ml-1">{task.timeLabel}</span>
-                                  </div>
-                                  <p className="text-[10px] opacity-90 truncate mt-0.5">{task.desc}</p>
-                                </div>
-                                <div className="flex items-center justify-between text-[9px] opacity-80 pt-0.5 border-t border-white/20">
-                                  <span>{task.priority}</span>
-                                  <span>{task.recurrenceType === 'completion' ? '🔄' : task.recurrenceType === 'fixed' ? '↻' : ''}</span>
-                                </div>
+              {/* Interactive Member Columns */}
+              <div className="flex-1 grid relative" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
+                {visibleMembers.map(member => {
+                  const dayDateStr = formatDateKey(currentDate);
+                  const memberColTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], dayDateStr) && t.assignees.includes(member.name));
+                  const layouts = computeColumnTaskLayouts(memberColTasks);
+
+                  return (
+                    <div key={member.id} className="border-r border-gray-200 last:border-r-0 relative h-[800px]">
+                      {/* 15-Minute Sub-Slot Drop Grid */}
+                      {timeSlots.map(hour => (
+                        <div key={hour} className="h-20 border-b border-gray-200 flex flex-col">
+                          {minuteSubSlots.map(subOffset => (
+                            <div 
+                              key={subOffset}
+                              onDragOver={(e) => handleSubSlotDragOver(e, dayDateStr, hour + subOffset, member.name)}
+                              onDrop={(e) => handleDropSlot(e, dayDateStr, hour + subOffset, member.name)}
+                              className="flex-1 hover:bg-blue-50/50 transition border-b border-dashed border-gray-100 last:border-b-0"
+                              title={`Schedule for ${decimalToTimeString(hour + subOffset)} - ${member.name}`}>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+
+                      {/* REAL-TIME HOVER GHOST PREVIEW CARD (HCP-STYLE) */}
+                      {draggedTaskObj && hoverSlot && hoverSlot.memberName === member.name && hoverSlot.dateStr === dayDateStr && (
+                        <div 
+                          style={{
+                            top: `${(hoverSlot.targetHour - 8) * 80}px`,
+                            height: `${Math.max(32, (draggedTaskObj.duration || 1) * 80)}px`,
+                            left: '2px',
+                            right: '2px'
+                          }}
+                          className="absolute z-30 bg-blue-500/20 border-2 border-dashed border-blue-600 rounded-md p-2 shadow-lg pointer-events-none flex flex-col justify-between text-blue-950 font-bold backdrop-blur-[2px] animate-pulse">
+                          <div className="flex justify-between items-start gap-1">
+                            <span className="text-[10px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded shadow-2xs font-mono shrink-0">
+                              🎯 {formatTimeLabel(decimalToTimeString(hoverSlot.targetHour), decimalToTimeString(hoverSlot.targetHour + (draggedTaskObj.duration || 1)))}
+                            </span>
+                            <span className="text-[9px] bg-white/90 px-1 py-0.5 rounded border border-blue-300 text-blue-900 truncate">
+                              {member.name}
+                            </span>
+                          </div>
+                          <span className="text-xs truncate text-blue-950 mt-1">{draggedTaskObj.title}</span>
+                        </div>
+                      )}
+
+                      {/* SIDE-BY-SIDE RENDERED TASKS */}
+                      {memberColTasks.map(task => {
+                        const layout = layouts[task.id] || { left: '0%', width: '100%', startPx: 0, heightPx: 80, isFlex: false };
+                        const isFlex = layout.isFlex;
+
+                        return (
+                          <div
+                            key={task.id}
+                            draggable={userRole === 'admin'}
+                            onDragStart={(e) => handleDragStart(e, task.id)}
+                            onDragEnd={handleDragEnd}
+                            onClick={() => handleOpenModal(task, dayDateStr)}
+                            style={{ 
+                              top: `${layout.startPx}px`, 
+                              height: `${layout.heightPx}px`, 
+                              left: layout.left, 
+                              width: layout.width, 
+                              backgroundColor: member.color 
+                            }}
+                            className={`absolute text-white rounded-md p-2 shadow-md border-l-4 ${task.isOverdue ? 'border-red-500 ring-2 ring-red-400' : 'border-black/20'} ${userRole === 'admin' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden ${isFlex ? 'opacity-95' : ''}`}>
+                            <div>
+                              <div className="flex justify-between items-start gap-1">
+                                <h4 className="font-bold text-xs leading-tight drop-shadow-sm truncate">
+                                  {task.title}
+                                </h4>
+                                {task.isOverdue ? (
+                                  <span className="bg-red-600 text-[8px] font-bold px-1 rounded shrink-0">OVERDUE</span>
+                                ) : (
+                                  isFlex && <span className="bg-black/30 text-[8px] font-bold px-1 rounded shrink-0">ALL-DAY</span>
+                                )}
                               </div>
-                            );
-                          })}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
+                              <span className="text-[10px] bg-black/20 px-1 rounded font-mono inline-block mt-0.5">{task.timeLabel}</span>
+                              <p className="text-[10px] opacity-90 truncate mt-0.5">{task.desc}</p>
+                            </div>
+                            <div className="flex items-center justify-between text-[9px] opacity-80 pt-0.5 border-t border-white/20 mt-auto">
+                              <span>Priority: {task.priority}</span>
+                              <span>{task.recurrenceType === 'completion' ? '🔄' : task.recurrenceType === 'fixed' ? '↻' : ''}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
 
-        {/* WEEK VIEW WITH 15-MIN TIME GRID DRAG & DROP */}
+        {/* WEEK VIEW WITH SIDE-BY-SIDE OVERLAPPING TASKS & HOVER GHOST PREVIEW */}
         {currentView === 'week' && (
-          <div className="flex-1 flex flex-col overflow-x-auto min-w-[800px] border border-gray-300 rounded-lg bg-white shadow-sm">
+          <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm min-w-[800px]">
+            {/* Week Header */}
             <div className="flex border-b border-gray-300 bg-gray-100 font-bold text-xs text-gray-700">
               <div className="w-16 py-2 text-center border-r border-gray-300">Time</div>
               <div className="flex-1 grid grid-cols-7">
@@ -1123,68 +1277,109 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex-1 relative overflow-y-auto max-h-[550px]">
-              {timeSlots.map(hour => (
-                <div key={hour} className="flex h-20 border-b border-gray-200 last:border-b-0 relative">
-                  <div className="w-16 border-r border-gray-300 p-1 text-[10px] font-mono font-bold text-gray-400 text-right pr-2 bg-gray-50 select-none">
+            {/* Continuous 7-Day Time Grid */}
+            <div className="flex-1 relative overflow-y-auto max-h-[550px] flex">
+              {/* Time Label Sidebar */}
+              <div className="w-16 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0">
+                {timeSlots.map(hour => (
+                  <div key={hour} className="h-20 border-b border-gray-200 p-1 text-[10px] font-mono font-bold text-gray-400 text-right pr-2">
                     {hour === 12 ? '12 PM' : hour > 12 ? `${hour - 12} PM` : `${hour} AM`}
                   </div>
-                  <div className="flex-1 grid grid-cols-7 relative">
-                    {daysOfWeek.map((dayName, idx) => {
-                      const weekStart = getWeekStart(currentDate);
-                      const cellDate = new Date(weekStart);
-                      cellDate.setDate(cellDate.getDate() + idx);
-                      const dateStr = formatDateKey(cellDate);
+                ))}
+              </div>
 
-                      return (
-                        <div key={dayName} className="border-r border-gray-100 last:border-r-0 h-full relative flex flex-col">
+              {/* 7 Day Columns */}
+              <div className="flex-1 grid grid-cols-7 relative">
+                {daysOfWeek.map((dayName, idx) => {
+                  const weekStart = getWeekStart(currentDate);
+                  const cellDate = new Date(weekStart);
+                  cellDate.setDate(cellDate.getDate() + idx);
+                  const dateStr = formatDateKey(cellDate);
+
+                  const dayColTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, dayName, dateStr));
+                  const layouts = computeColumnTaskLayouts(dayColTasks);
+
+                  return (
+                    <div key={dayName} className="border-r border-gray-200 last:border-r-0 relative h-[800px]">
+                      {/* 15-Minute Sub-Slot Drop Grid */}
+                      {timeSlots.map(hour => (
+                        <div key={hour} className="h-20 border-b border-gray-200 flex flex-col">
                           {minuteSubSlots.map(subOffset => (
                             <div 
                               key={subOffset}
-                              onDragOver={handleDragOver}
+                              onDragOver={(e) => handleSubSlotDragOver(e, dateStr, hour + subOffset, null)}
                               onDrop={(e) => handleDropSlot(e, dateStr, hour + subOffset, null)}
-                              className="flex-1 hover:bg-blue-50/40 transition border-b border-dashed border-gray-100/40 last:border-b-0"
-                              title={`${decimalToTimeString(hour + subOffset)} - ${dateStr}`}>
+                              className="flex-1 hover:bg-blue-50/50 transition border-b border-dashed border-gray-100 last:border-b-0"
+                              title={`${dateStr} @ ${decimalToTimeString(hour + subOffset)}`}>
                             </div>
                           ))}
-
-                          {visibleTasks
-                            .filter(t => isTaskActiveOnDay(t, dayName, dateStr) && t.startHour !== null && Math.floor(t.startHour) === hour)
-                            .map(task => {
-                              const topOffset = (task.startHour - hour) * 80;
-                              const height = (task.duration || 1) * 80;
-                              const member = getMemberConfig(task.assignees[0]);
-
-                              return (
-                                <div
-                                  key={`${task.id}-${dateStr}`}
-                                  draggable={userRole === 'admin'}
-                                  onDragStart={(e) => handleDragStart(e, task.id)}
-                                  onClick={() => handleOpenModal(task, dateStr)}
-                                  style={{ top: `${topOffset}px`, height: `${height - 2}px`, backgroundColor: member.color }}
-                                  className={`absolute inset-x-0.5 text-white rounded p-1.5 shadow ${userRole === 'admin' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 transition z-10 flex flex-col justify-between overflow-hidden ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
-                                  <div>
-                                    <div className="flex justify-between items-center text-[10px] font-bold leading-tight">
-                                      <span className="truncate">{task.title}</span>
-                                      {task.isOverdue && <span className="bg-red-600 px-0.5 rounded text-[8px]">!</span>}
-                                    </div>
-                                    <span className="text-[9px] opacity-80 font-mono block truncate">{task.timeLabel}</span>
-                                  </div>
-                                  <span className="text-[8px] bg-black/20 px-1 rounded truncate w-max">{task.assignees.join(', ')}</span>
-                                </div>
-                              );
-                            })}
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
+                      ))}
+
+                      {/* REAL-TIME HOVER GHOST PREVIEW CARD (WEEK VIEW) */}
+                      {draggedTaskObj && hoverSlot && hoverSlot.dateStr === dateStr && (
+                        <div 
+                          style={{
+                            top: `${(hoverSlot.targetHour - 8) * 80}px`,
+                            height: `${Math.max(32, (draggedTaskObj.duration || 1) * 80)}px`,
+                            left: '2px',
+                            right: '2px'
+                          }}
+                          className="absolute z-30 bg-blue-500/20 border-2 border-dashed border-blue-600 rounded p-1.5 shadow-lg pointer-events-none flex flex-col justify-between text-blue-950 font-bold backdrop-blur-[2px] animate-pulse">
+                          <div className="flex justify-between items-center text-[9px] font-bold">
+                            <span className="bg-blue-600 text-white px-1 py-0.5 rounded font-mono truncate">
+                              🎯 {formatTimeLabel(decimalToTimeString(hoverSlot.targetHour), decimalToTimeString(hoverSlot.targetHour + (draggedTaskObj.duration || 1)))}
+                            </span>
+                          </div>
+                          <span className="text-[10px] truncate text-blue-950 mt-0.5">{draggedTaskObj.title}</span>
+                        </div>
+                      )}
+
+                      {/* SIDE-BY-SIDE RENDERED TASKS FOR WEEK VIEW */}
+                      {dayColTasks.map(task => {
+                        const layout = layouts[task.id] || { left: '0%', width: '100%', startPx: 0, heightPx: 80, isFlex: false };
+                        const member = getMemberConfig(task.assignees[0]);
+                        const isFlex = layout.isFlex;
+
+                        return (
+                          <div
+                            key={`${task.id}-${dateStr}`}
+                            draggable={userRole === 'admin'}
+                            onDragStart={(e) => handleDragStart(e, task.id)}
+                            onDragEnd={handleDragEnd}
+                            onClick={() => handleOpenModal(task, dateStr)}
+                            style={{ 
+                              top: `${layout.startPx}px`, 
+                              height: `${layout.heightPx}px`, 
+                              left: layout.left, 
+                              width: layout.width, 
+                              backgroundColor: member.color 
+                            }}
+                            className={`absolute text-white rounded p-1.5 shadow ${userRole === 'admin' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 transition z-10 flex flex-col justify-between overflow-hidden ${task.isOverdue ? 'ring-2 ring-red-500' : ''} ${isFlex ? 'opacity-95' : ''}`}>
+                            <div>
+                              <div className="flex justify-between items-center text-[10px] font-bold leading-tight">
+                                <span className="truncate">{task.title}</span>
+                                {task.isOverdue ? (
+                                  <span className="bg-red-600 px-0.5 rounded text-[8px] shrink-0">!</span>
+                                ) : (
+                                  isFlex && <span className="bg-black/30 px-0.5 rounded text-[7px] shrink-0">ALL-DAY</span>
+                                )}
+                              </div>
+                              <span className="text-[9px] opacity-80 font-mono block truncate">{task.timeLabel}</span>
+                            </div>
+                            <span className="text-[8px] bg-black/20 px-1 rounded truncate w-max mt-auto">{task.assignees.join(', ')}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
 
-        {/* MONTH VIEW DRAG & DROP */}
+        {/* MONTH VIEW */}
         {currentView === 'month' && (
           <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm">
             <div className="grid grid-cols-7 bg-gray-100 border-b border-gray-300 text-center py-2 text-xs font-bold text-gray-600">
@@ -1226,6 +1421,7 @@ export default function App() {
                             key={`${task.id}-${dateStr}`} 
                             draggable={userRole === 'admin'}
                             onDragStart={(e) => handleDragStart(e, task.id)}
+                            onDragEnd={handleDragEnd}
                             onClick={() => handleOpenModal(task, dateStr)}
                             style={{ backgroundColor: member.color }}
                             className={`text-white text-[10px] font-semibold p-1 rounded truncate ${userRole === 'admin' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 shadow-2xs flex items-center justify-between ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
@@ -1535,7 +1731,7 @@ export default function App() {
                   )}
                 </>
               ) : (
-                /* FULL FEATURE DEPTH EDITING SCREEN */
+                /* FULL FEATURE EDITING SCREEN */
                 <div className="flex flex-col gap-4 text-xs">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
