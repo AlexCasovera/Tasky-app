@@ -168,7 +168,7 @@ export default function App() {
     return `${formatSingle(startStr)} - ${formatSingle(endStr)}`;
   };
 
-  // SIDE-BY-SIDE OVERLAPPING TASK LAYOUT ENGINE
+  // SIDE-BY-SIDE OVERLAPPING TASK LAYOUT ENGINE WITH 12PX LANDING GUTTER
   const computeColumnTaskLayouts = (colTasks) => {
     if (!colTasks || colTasks.length === 0) return {};
 
@@ -231,7 +231,7 @@ export default function App() {
           const widthPct = (1.0 / numCols) * 100;
           layouts[item.id] = {
             left: `${leftPct}%`,
-            width: `calc(${widthPct}% - 2px)`,
+            width: `calc(${widthPct}% - 12px)`, // Increased to 12px to guarantee an easy visual drop target area
             startPx: (item.start - 8) * 80,
             heightPx: Math.max(28, (item.end - item.start) * 80 - 2),
             numCols,
@@ -1574,7 +1574,7 @@ export default function App() {
                   {recurrenceType === 'completion' && (
                     <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
                       <span className="text-sm text-gray-600">Re-deploy task</span>
-                      <input type="number" value={cadenceDays} onChange={(e) => setCadenceDays(Number(e.target.value))} className="border border-gray-300 rounded px-2 py-1 text-sm w-16 text-center font-bold" />
+                      <input type="number" value={cadenceDays} onChange={(e) => setCadenceDays(Number(e.target.value))} className="w-12 p-1 border rounded text-center font-bold" />
                       <span className="text-sm text-gray-600">days after completion</span>
                     </div>
                   )}
