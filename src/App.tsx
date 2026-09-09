@@ -381,6 +381,12 @@ export default function App() {
     e.dataTransfer.effectAllowed = 'move';
   };
 
+  const handleDragOver = (e) => {
+    if (userRole !== 'admin') return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
   const handleDragEnd = () => {
     setDraggedTaskId(null);
     setHoverSlot(null);
