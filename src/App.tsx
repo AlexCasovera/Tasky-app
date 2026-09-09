@@ -63,14 +63,15 @@ export default function App() {
 
   // DRAG & DROP, HOVER GHOST & RESCHEDULE PROMPT STATE
   const [draggedTaskId, setDraggedTaskId] = useState(null);
-  const [hoverSlot, setHoverSlot] = useState(null); // { dateStr, targetHour, memberName }
+  const [hoverSlot, setHoverSlot] = useState(null);
   const [reschedulePrompt, setReschedulePrompt] = useState(null);
 
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const timeSlots = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17]; // 8 AM to 5 PM
-  const minuteSubSlots = [0, 0.25, 0.5, 0.75]; // :00, :15, :30, :45
+  const timeSlots = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
+  const minuteSubSlots = [0, 0.25, 0.5, 0.75];
 
   const formatDateKey = (d) => {
+    if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
@@ -78,6 +79,7 @@ export default function App() {
   };
 
   const addDaysToDateStr = (dateStr, days) => {
+    if (!dateStr) return '';
     const parts = dateStr.split('-');
     const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
     d.setDate(d.getDate() + days);
@@ -166,11 +168,13 @@ export default function App() {
     return `${formatSingle(startStr)} - ${formatSingle(endStr)}`;
   };
 
-  // SIDE-BY-SIDE OVERLAPPING TASK LAYOUT COMPUTATION
+  // SIDE-BY-SIDE OVERLAPPING TASK LAYOUT ENGINE
   const computeColumnTaskLayouts = (colTasks) => {
+    if (!colTasks || colTasks.length === 0) return {};
+
     const items = colTasks.map(t => {
       const isFlex = (t.type === 'flexible' || t.startHour === null || t.startHour === undefined);
-      const start = isFlex ? 8.0 : Number(t.startHour);
+      const start = isFlex ? 8.0 : Number(t.startHour || 8.0);
       const dur = isFlex ? 10.0 : Number(t.duration || 1.0);
       return {
         id: t.id,
@@ -338,7 +342,7 @@ export default function App() {
     }
   ]);
 
-  // DYNAMIC OVERDUE STATUS ENGINE
+  // AUTOMATED OVERDUE DETECTION
   useEffect(() => {
     const todayStr = formatDateKey(new Date());
 
@@ -349,7 +353,7 @@ export default function App() {
 
         if (isPastDue && !task.overdueNotified) {
           changed = true;
-          const assigneeLabel = task.assignees.length > 0 ? task.assignees.join(', ') : 'Unassigned';
+          const assigneeLabel = task.assignees && task.assignees.length > 0 ? task.assignees.join(', ') : 'Unassigned';
           const notifMsg = `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was due on ${task.date}`;
 
           setNotifications(prev => [
@@ -367,9 +371,9 @@ export default function App() {
 
       return changed ? updated : prevTasks;
     });
-  }, [tasks]);
+  }, []);
 
-  // DRAG & DROP HANDLERS WITH CLEANUP
+  // DRAG & DROP HANDLERS
   const handleDragStart = (e, taskId) => {
     if (userRole !== 'admin') return;
     setDraggedTaskId(taskId);
@@ -416,7 +420,7 @@ export default function App() {
             ...t,
             id: Date.now(),
             date: targetDate,
-            assignees: targetMemberName ? [targetMemberName] : t.assignees,
+            assignees: targetMemberName ? [targetMemberName] : (t.assignees || []),
             startHour: targetHour !== null ? startDec : t.startHour,
             duration: dur,
             startTime: targetHour !== null ? sStr : t.startTime,
@@ -440,7 +444,7 @@ export default function App() {
         return {
           ...t,
           date: targetDate,
-          assignees: targetMemberName ? [targetMemberName] : t.assignees,
+          assignees: targetMemberName ? [targetMemberName] : (t.assignees || []),
           startHour: targetHour !== null ? startDec : t.startHour,
           duration: targetHour !== null ? dur : t.duration,
           startTime: targetHour !== null ? sStr : t.startTime,
@@ -604,7 +608,7 @@ export default function App() {
         badgeText: found.color
       };
     }
-    return { name, initials: '??', color: '#6B7280', badgeBg: '#F3F4F6', badgeText: '#374151' };
+    return { name: name || 'Unassigned', initials: '??', color: '#6B7280', badgeBg: '#F3F4F6', badgeText: '#374151' };
   };
 
   const handleAddAssignee = (name) => {
@@ -726,8 +730,8 @@ export default function App() {
     if (!openCommentInput.trim()) return;
     const commentText = `${userRole === 'admin' ? 'Admin' : 'Assignee'} (${selectedInstanceDate}): ${openCommentInput}`;
     
-    setTasks(tasks.map(t => t.id === id ? { ...t, comments: [...t.comments, commentText] } : t));
-    setSelectedTask(prev => ({ ...prev, comments: [...prev.comments, commentText] }));
+    setTasks(tasks.map(t => t.id === id ? { ...t, comments: [...(t.comments || []), commentText] } : t));
+    setSelectedTask(prev => ({ ...prev, comments: [...(prev.comments || []), commentText] }));
     
     setNotifications([{ id: Date.now(), text: `New comment on "${selectedTask.title}"`, type: 'comment', read: false, time: 'Just now' }, ...notifications]);
     setExecutionComment('');
@@ -735,7 +739,7 @@ export default function App() {
 
   const handleCompleteTask = (id) => {
     if (selectedTask.requiresPhoto && !photoUploaded) return alert('Photo upload required to complete.');
-    if (selectedTask.requiresComment && !openCommentInput.trim() && selectedTask.comments.length === 0) {
+    if (selectedTask.requiresComment && !openCommentInput.trim() && (!selectedTask.comments || selectedTask.comments.length === 0)) {
       return alert('Execution notes required to complete.');
     }
 
@@ -745,7 +749,7 @@ export default function App() {
 
     let updatedTasks = tasks.map(t => {
       if (t.id === id) {
-        const newComments = noteText ? [...t.comments, noteText] : t.comments;
+        const newComments = noteText ? [...(t.comments || []), noteText] : (t.comments || []);
 
         if (t.recurrenceType === 'once') {
           return { ...t, status: 'completed', isOverdue: false, comments: newComments };
@@ -818,16 +822,16 @@ export default function App() {
   const handleAppendNote = (id) => {
     if (!additionalNote.trim()) return;
     const noteText = `${userRole === 'admin' ? 'Admin Note' : 'Assignee Note'}: ${additionalNote}`;
-    setTasks(tasks.map(t => t.id === id ? { ...t, comments: [...t.comments, noteText] } : t));
+    setTasks(tasks.map(t => t.id === id ? { ...t, comments: [...(t.comments || []), noteText] } : t));
     setAdditionalNote('');
-    setSelectedTask(prev => ({ ...prev, comments: [...prev.comments, noteText] }));
+    setSelectedTask(prev => ({ ...prev, comments: [...(prev.comments || []), noteText] }));
   };
 
   const handleReopenTask = (id) => {
     setTasks(tasks.map(t => {
       if (t.id === id) {
         if (t.recurrenceType === 'once') return { ...t, status: 'pending' };
-        return { ...t, completedDates: t.completedDates.filter(d => d !== selectedInstanceDate) };
+        return { ...t, completedDates: (t.completedDates || []).filter(d => d !== selectedInstanceDate) };
       }
       return t;
     }));
@@ -854,16 +858,16 @@ export default function App() {
     : teamMembers.filter(m => m.name === 'Adrian R.');
 
   const visibleTasks = tasks.filter(t => {
-    if (!t.assignees || t.assignees.length === 0) return false;
+    if (!t || !t.assignees) return false;
 
     const isAssigneeMatch = userRole === 'admin' 
-      ? t.assignees.some(a => activeEmployeeFilters.includes(a))
+      ? (t.assignees.length === 0 || t.assignees.some(a => activeEmployeeFilters.includes(a)))
       : t.assignees.includes('Adrian R.');
 
     const isSearchMatch = !searchQuery.trim() || 
-      t.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      t.desc.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.assignees.some(a => a.toLowerCase().includes(searchQuery.toLowerCase()));
+      (t.title && t.title.toLowerCase().includes(searchQuery.toLowerCase())) || 
+      (t.desc && t.desc.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (t.assignees && t.assignees.some(a => a && a.toLowerCase().includes(searchQuery.toLowerCase())));
 
     return isAssigneeMatch && isSearchMatch;
   });
@@ -871,16 +875,18 @@ export default function App() {
   const backlogTasks = tasks.filter(t => (!t.assignees || t.assignees.length === 0) && t.status !== 'completed');
 
   const isTaskActiveOnDay = (task, dayOfWeekStr, dateStr) => {
+    if (!task) return false;
     if (task.completedDates && task.completedDates.includes(dateStr)) return false;
     if (task.status === 'completed') return false;
 
     if (task.recurrenceType === 'fixed') {
-      return task.activeDays.includes(dayOfWeekStr);
+      return task.activeDays && task.activeDays.includes(dayOfWeekStr);
     }
     return task.date === dateStr;
   };
 
   const isTaskCompletedOnDay = (task, dateStr) => {
+    if (!task) return false;
     if (task.status === 'completed' && task.date === dateStr) return true;
     return task.completedDates && task.completedDates.includes(dateStr);
   };
@@ -1084,7 +1090,7 @@ export default function App() {
                         <div className="flex items-center gap-4">
                           <span className={`text-xs font-semibold px-3 py-1 rounded-full ${style.badge}`}>{task.priority}</span>
                           <div className="flex -space-x-2">
-                            {task.assignees.map((a, idx) => {
+                            {(task.assignees || []).map((a, idx) => {
                               const m = getMemberConfig(a);
                               return (
                                 <div key={idx} style={{ backgroundColor: m.color }} className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-xs text-white shadow-sm font-bold">
@@ -1117,7 +1123,7 @@ export default function App() {
                       className="bg-gray-200/60 p-3 rounded flex justify-between items-center cursor-pointer hover:bg-gray-200 transition">
                       <div>
                         <span className="line-through text-sm font-bold text-gray-600 block">{task.title}</span>
-                        <span className="text-xs text-gray-500">Assignees: {task.assignees.join(', ')}</span>
+                        <span className="text-xs text-gray-500">Assignees: {(task.assignees || []).join(', ')}</span>
                       </div>
                       <span className="text-xs font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-300">
                         ✓ Completed
@@ -1163,7 +1169,7 @@ export default function App() {
               <div className="flex-1 grid relative" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
                 {visibleMembers.map(member => {
                   const dayDateStr = formatDateKey(currentDate);
-                  const memberColTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], dayDateStr) && t.assignees.includes(member.name));
+                  const memberColTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], dayDateStr) && t.assignees && t.assignees.includes(member.name));
                   const layouts = computeColumnTaskLayouts(memberColTasks);
 
                   return (
@@ -1338,7 +1344,7 @@ export default function App() {
                       {/* SIDE-BY-SIDE RENDERED TASKS FOR WEEK VIEW */}
                       {dayColTasks.map(task => {
                         const layout = layouts[task.id] || { left: '0%', width: '100%', startPx: 0, heightPx: 80, isFlex: false };
-                        const member = getMemberConfig(task.assignees[0]);
+                        const member = getMemberConfig(task.assignees && task.assignees[0]);
                         const isFlex = layout.isFlex;
 
                         return (
@@ -1367,7 +1373,7 @@ export default function App() {
                               </div>
                               <span className="text-[9px] opacity-80 font-mono block truncate">{task.timeLabel}</span>
                             </div>
-                            <span className="text-[8px] bg-black/20 px-1 rounded truncate w-max mt-auto">{task.assignees.join(', ')}</span>
+                            <span className="text-[8px] bg-black/20 px-1 rounded truncate w-max mt-auto">{(task.assignees || []).join(', ')}</span>
                           </div>
                         );
                       })}
@@ -1415,7 +1421,7 @@ export default function App() {
                     </span>
                     <div className="flex flex-col gap-1 mt-1 overflow-y-auto max-h-24">
                       {pendingDayTasks.map(task => {
-                        const member = getMemberConfig(task.assignees[0]);
+                        const member = getMemberConfig(task.assignees && task.assignees[0]);
                         return (
                           <div 
                             key={`${task.id}-${dateStr}`} 
@@ -1667,14 +1673,14 @@ export default function App() {
                   <p className="text-sm text-gray-600 bg-white p-3 rounded border border-gray-200">{selectedTask.desc}</p>
 
                   <div className="flex justify-between text-xs text-gray-500 bg-gray-100 p-2 rounded">
-                    <span>Assignees: <strong>{selectedTask.assignees.length > 0 ? selectedTask.assignees.join(', ') : 'Unassigned (Backlog)'}</strong></span>
+                    <span>Assignees: <strong>{selectedTask.assignees && selectedTask.assignees.length > 0 ? selectedTask.assignees.join(', ') : 'Unassigned (Backlog)'}</strong></span>
                     <span>Occurrence Date: <strong>{selectedInstanceDate}</strong></span>
                   </div>
 
                   <div className="bg-white p-3 rounded border border-gray-200">
                     <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500 mb-2">Task Activity & Comments</h4>
                     
-                    {selectedTask.comments.length > 0 ? (
+                    {selectedTask.comments && selectedTask.comments.length > 0 ? (
                       <div className="flex flex-col gap-1 max-h-28 overflow-y-auto pr-1 mb-3">
                         {selectedTask.comments.map((c, i) => (
                           <div key={i} className="text-xs text-gray-700 bg-gray-50 p-1.5 rounded border border-gray-100">{c}</div>
