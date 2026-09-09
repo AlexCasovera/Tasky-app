@@ -61,11 +61,13 @@ export default function App() {
   const [photoUploaded, setPhotoUploaded] = useState(false);
   const [additionalNote, setAdditionalNote] = useState('');
 
-  // DRAG & DROP STATE
+  // DRAG & DROP & RESCHEDULE PROMPT STATE
   const [draggedTaskId, setDraggedTaskId] = useState(null);
+  const [reschedulePrompt, setReschedulePrompt] = useState(null);
 
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const timeSlots = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
+  const minuteSubSlots = [0, 0.25, 0.5, 0.75]; // 00m, 15m, 30m, 45m
 
   const formatDateKey = (d) => {
     const year = d.getFullYear();
@@ -144,6 +146,14 @@ export default function App() {
     return h + m / 60;
   };
 
+  const decimalToTimeString = (dec) => {
+    const hours = Math.floor(dec);
+    const minutes = Math.round((dec - hours) * 60);
+    const hStr = String(hours).padStart(2, '0');
+    const mStr = String(minutes).padStart(2, '0');
+    return `${hStr}:${mStr}`;
+  };
+
   const formatTimeLabel = (startStr, endStr) => {
     if (!startStr || !endStr) return 'All-Day';
     const formatSingle = (t) => {
@@ -153,14 +163,6 @@ export default function App() {
       return `${h12 < 10 ? '0' + h12 : h12}:${m < 10 ? '0' + m : m} ${ampm}`;
     };
     return `${formatSingle(startStr)} - ${formatSingle(endStr)}`;
-  };
-
-  const decimalToTimeString = (dec) => {
-    const hours = Math.floor(dec);
-    const minutes = Math.round((dec - hours) * 60);
-    const hStr = String(hours).padStart(2, '0');
-    const mStr = String(minutes).padStart(2, '0');
-    return `${hStr}:${mStr}`;
   };
 
   const [tasks, setTasks] = useState([
@@ -260,28 +262,38 @@ export default function App() {
     }
   ]);
 
-  // AUTOMATED OVERDUE MONITORING ENGINE
+  // DYNAMIC OVERDUE STATUS & NOTIFICATION ENGINE
   useEffect(() => {
     const todayStr = formatDateKey(new Date());
 
-    tasks.forEach(task => {
-      const isPastDue = task.date && task.date < todayStr && task.status !== 'completed';
+    setTasks(prevTasks => {
+      let changed = false;
+      const updated = prevTasks.map(task => {
+        const isPastDue = task.date && task.date < todayStr && task.status !== 'completed';
 
-      if (isPastDue && !task.overdueNotified) {
-        const assigneeLabel = task.assignees.length > 0 ? task.assignees.join(', ') : 'Unassigned';
-        const notifMsg = `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was due on ${task.date}`;
+        if (isPastDue && !task.overdueNotified) {
+          changed = true;
+          const assigneeLabel = task.assignees.length > 0 ? task.assignees.join(', ') : 'Unassigned';
+          const notifMsg = `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was due on ${task.date}`;
 
-        setNotifications(prev => [
-          { id: Date.now() + Math.random(), text: notifMsg, type: 'overdue', read: false, time: 'Just now' },
-          ...prev
-        ]);
+          setNotifications(prev => [
+            { id: Date.now() + Math.random(), text: notifMsg, type: 'overdue', read: false, time: 'Just now' },
+            ...prev
+          ]);
 
-        setTasks(prevTasks => prevTasks.map(t => t.id === task.id ? { ...t, isOverdue: true, overdueNotified: true } : t));
-      }
+          return { ...task, isOverdue: true, overdueNotified: true };
+        } else if (!isPastDue && task.isOverdue) {
+          changed = true;
+          return { ...task, isOverdue: false, overdueNotified: false };
+        }
+        return task;
+      });
+
+      return changed ? updated : prevTasks;
     });
   }, [tasks]);
 
-  // DRAG & DROP HANDLERS
+  // DRAG & DROP LOGIC WITH 15-MIN GRANULARITY & RECURRING SCOPE PROMPT
   const handleDragStart = (e, taskId) => {
     if (userRole !== 'admin') return;
     setDraggedTaskId(taskId);
@@ -295,56 +307,79 @@ export default function App() {
     e.dataTransfer.dropEffect = 'move';
   };
 
-  const handleDayDrop = (e, targetHour, targetMemberName) => {
-    if (userRole !== 'admin') return;
-    e.preventDefault();
-    const taskIdStr = e.dataTransfer.getData('text/plain') || draggedTaskId;
-    const taskId = Number(taskIdStr);
+  const applyTaskMove = (taskId, targetDate, targetHour, targetMemberName, updateSeries = false) => {
+    const todayStr = formatDateKey(new Date());
 
     setTasks(prevTasks => prevTasks.map(t => {
       if (t.id === taskId) {
-        const dur = t.duration || 1;
-        const newStartHour = targetHour;
-        const newEndHour = newStartHour + dur;
+        if (t.recurrenceType !== 'once' && !updateSeries) {
+          // CREATE SINGLE INSTANCE OVERRIDE FOR RECURRING TASK
+          const dur = t.duration || 1;
+          const startDec = targetHour !== null ? targetHour : (t.startHour || 9);
+          const endDec = startDec + dur;
+          const sStr = decimalToTimeString(startDec);
+          const eStr = decimalToTimeString(endDec);
 
-        const newStartStr = decimalToTimeString(newStartHour);
-        const newEndStr = decimalToTimeString(newEndHour);
+          const standaloneTask = {
+            ...t,
+            id: Date.now(),
+            date: targetDate,
+            assignees: targetMemberName ? [targetMemberName] : t.assignees,
+            startHour: startDec,
+            duration: dur,
+            startTime: sStr,
+            endTime: eStr,
+            timeLabel: formatTimeLabel(sStr, eStr),
+            recurrenceType: 'once',
+            isOverdue: targetDate < todayStr,
+            overdueNotified: targetDate < todayStr
+          };
+          return standaloneTask;
+        }
+
+        // UPDATE TASK OR ENTIRE RECURRING SERIES
+        const dur = t.duration || 1;
+        const startDec = targetHour !== null ? targetHour : (t.startHour || 9);
+        const endDec = startDec + dur;
+        const sStr = decimalToTimeString(startDec);
+        const eStr = decimalToTimeString(endDec);
+
+        const newIsOverdue = targetDate < todayStr && t.status !== 'completed';
 
         return {
           ...t,
-          assignees: [targetMemberName],
-          startHour: newStartHour,
-          duration: dur,
-          startTime: newStartStr,
-          endTime: newEndStr,
-          timeLabel: formatTimeLabel(newStartStr, newEndStr),
-          date: formatDateKey(currentDate),
-          type: 'timed'
+          date: targetDate,
+          assignees: targetMemberName ? [targetMemberName] : t.assignees,
+          startHour: targetHour !== null ? startDec : t.startHour,
+          duration: targetHour !== null ? dur : t.duration,
+          startTime: targetHour !== null ? sStr : t.startTime,
+          endTime: targetHour !== null ? eStr : t.endTime,
+          timeLabel: targetHour !== null ? formatTimeLabel(sStr, eStr) : t.timeLabel,
+          isOverdue: newIsOverdue,
+          overdueNotified: newIsOverdue
         };
       }
       return t;
     }));
 
+    setReschedulePrompt(null);
     setDraggedTaskId(null);
   };
 
-  const handleDateDrop = (e, targetDateStr) => {
+  const handleDropSlot = (e, targetDate, targetHour = null, targetMemberName = null) => {
     if (userRole !== 'admin') return;
     e.preventDefault();
     const taskIdStr = e.dataTransfer.getData('text/plain') || draggedTaskId;
     const taskId = Number(taskIdStr);
+    const task = tasks.find(t => t.id === taskId);
 
-    setTasks(prevTasks => prevTasks.map(t => {
-      if (t.id === taskId) {
-        return {
-          ...t,
-          date: targetDateStr
-        };
-      }
-      return t;
-    }));
+    if (!task) return;
 
-    setDraggedTaskId(null);
+    if (task.recurrenceType !== 'once') {
+      setReschedulePrompt({ task, targetDate, targetHour, targetMemberName });
+    } else {
+      applyTaskMove(taskId, targetDate, targetHour, targetMemberName, false);
+    }
   };
 
   const resetMemberForm = () => {
@@ -529,19 +564,23 @@ export default function App() {
     setPhotoUploaded(false);
     setAdditionalNote('');
 
+    // POPULATE ALL EDITABLE FIELDS
     setTaskTitle(task.title);
     setTaskDesc(task.desc);
-    setSelectedAssignees(task.assignees);
+    setSelectedAssignees(task.assignees || []);
     setTaskPriority(task.priority);
-    setTaskDate(task.date || formatDateKey(currentDate));
+    setTaskDate(task.date || instanceDateStr);
     setHasSpecificTime(task.type === 'timed');
     setStartTime(task.startTime || '09:00');
     setEndTime(task.endTime || '11:00');
     setRecurrenceType(task.recurrenceType || 'once');
     setActiveDays(task.activeDays || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+    setGenerationTime(task.generationTime || '13:00');
     setCadenceDays(task.cadenceDays || 14);
     setRequiresPhoto(task.requiresPhoto || false);
     setRequiresComment(task.requiresComment || false);
+    setNotifyOnComplete(task.notifyOnComplete ?? true);
+    setNotifyOnComment(task.notifyOnComment ?? false);
     setChainedSteps(task.chainedSteps || []);
   };
 
@@ -551,6 +590,8 @@ export default function App() {
     const startDec = timeToDecimal(startTime);
     const endDec = timeToDecimal(endTime);
     const dur = Math.max(0.5, endDec - startDec);
+    const todayStr = formatDateKey(new Date());
+    const isStillOverdue = taskDate < todayStr && selectedTask.status !== 'completed';
 
     const updatedTask = {
       ...selectedTask,
@@ -570,7 +611,11 @@ export default function App() {
       cadenceDays: Number(cadenceDays),
       requiresPhoto,
       requiresComment,
-      chainedSteps: chainedSteps.filter(s => s.title.trim() !== '')
+      notifyOnComplete,
+      notifyOnComment,
+      chainedSteps: chainedSteps.filter(s => s.title.trim() !== ''),
+      isOverdue: isStillOverdue,
+      overdueNotified: isStillOverdue
     };
 
     setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t));
@@ -784,7 +829,6 @@ export default function App() {
         </div>
 
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4 border-b border-gray-300 pb-4">
-          
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1 bg-white border border-gray-300 rounded-lg p-1 shadow-2xs">
               <button onClick={handlePrevDate} className="px-2.5 py-1 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded transition">‹</button>
@@ -921,7 +965,7 @@ export default function App() {
                       <div 
                         key={task.id}
                         onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                        className={`bg-white p-4 rounded border-l-4 ${task.isOverdue ? 'border-red-600 bg-red-50/50' : style.border} shadow-sm flex justify-between items-center cursor-pointer hover:bg-gray-50 transition`}>
+                        className={`bg-white p-4 rounded border-l-4 ${task.isOverdue ? 'border-red-600 bg-red-50/50 ring-1 ring-red-400' : style.border} shadow-sm flex justify-between items-center cursor-pointer hover:bg-gray-50 transition`}>
                         <div className="w-1/2 flex items-center gap-4">
                           <span className="font-mono text-sm font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200">{task.timeLabel}</span>
                           <div>
@@ -982,6 +1026,7 @@ export default function App() {
           </div>
         )}
 
+        {/* DAY VIEW WITH 15-MIN SUB-SLOT DROP ZONES */}
         {currentView === 'day' && (
           <div className="flex-1 flex flex-col overflow-x-auto">
             <div className="flex border-b border-gray-300 bg-gray-100 rounded-t-lg min-w-[600px]">
@@ -998,40 +1043,25 @@ export default function App() {
               </div>
             </div>
 
-            {visibleTasks.some(t => t.type === 'flexible') && (
-              <div className="bg-amber-50 border-b border-amber-200 py-2 px-4 flex items-center gap-3 min-w-[600px]">
-                <span className="text-xs font-bold uppercase tracking-wider text-amber-800 bg-amber-200/60 px-2 py-0.5 rounded">All-Day Flexible Tasks:</span>
-                <div className="flex flex-wrap gap-2">
-                  {visibleTasks.filter(t => t.type === 'flexible' && isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate))).map(task => {
-                    const member = getMemberConfig(task.assignees[0]);
-                    return (
-                      <div 
-                        key={task.id} 
-                        onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                        style={{ backgroundColor: member.color }}
-                        className="text-xs px-3 py-1 rounded text-white font-semibold cursor-pointer shadow-sm hover:opacity-90 flex items-center gap-1.5">
-                        <span>{task.title}</span>
-                        <span className="opacity-75 text-[10px]">({task.assignees.join(', ')})</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
             <div className="flex-1 min-w-[600px] relative bg-white border-b border-l border-r border-gray-300 rounded-b-lg overflow-y-auto max-h-[580px]">
               {timeSlots.map(hour => (
-                <div key={hour} className="flex h-20 border-b border-gray-200 last:border-b-0">
+                <div key={hour} className="flex h-20 border-b border-gray-200 last:border-b-0 relative">
                   <div className="w-20 border-r border-gray-300 p-2 text-xs font-mono font-bold text-gray-400 text-right pr-3 bg-gray-50 select-none">
                     {hour === 12 ? '12:00 PM' : hour > 12 ? `${hour - 12}:00 PM` : `${hour}:00 AM`}
                   </div>
                   <div className="flex-1 grid relative" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
                     {visibleMembers.map(member => (
-                      <div 
-                        key={member.id} 
-                        onDragOver={handleDragOver}
-                        onDrop={(e) => handleDayDrop(e, hour, member.name)}
-                        className="border-r border-gray-100 last:border-r-0 h-full relative transition hover:bg-blue-50/30">
+                      <div key={member.id} className="border-r border-gray-100 last:border-r-0 h-full relative flex flex-col">
+                        {minuteSubSlots.map(subOffset => (
+                          <div 
+                            key={subOffset}
+                            onDragOver={handleDragOver}
+                            onDrop={(e) => handleDropSlot(e, formatDateKey(currentDate), hour + subOffset, member.name)}
+                            className="flex-1 hover:bg-blue-50/40 transition border-b border-dashed border-gray-100/50 last:border-b-0"
+                            title={`${decimalToTimeString(hour + subOffset)} - ${member.name}`}>
+                          </div>
+                        ))}
+
                         {visibleTasks
                           .filter(t => t.type === 'timed' && isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)) && t.assignees.includes(member.name) && Math.floor(t.startHour) === hour)
                           .map(task => {
@@ -1043,20 +1073,20 @@ export default function App() {
                                 draggable={userRole === 'admin'}
                                 onDragStart={(e) => handleDragStart(e, task.id)}
                                 onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                                style={{ top: `${topOffset}px`, height: `${height - 4}px`, backgroundColor: member.color }}
-                                className={`absolute inset-x-1 text-white rounded-md p-2.5 shadow-md border-l-4 ${task.isOverdue ? 'border-red-500 ring-2 ring-red-400' : 'border-black/20'} ${userRole === 'admin' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden`}>
+                                style={{ top: `${topOffset}px`, height: `${height - 2}px`, backgroundColor: member.color }}
+                                className={`absolute inset-x-1 text-white rounded-md p-2 shadow-md border-l-4 ${task.isOverdue ? 'border-red-500 ring-2 ring-red-400' : 'border-black/20'} ${userRole === 'admin' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden`}>
                                 <div>
                                   <div className="flex justify-between items-start">
-                                    <h4 className="font-bold text-xs leading-tight drop-shadow-sm flex items-center gap-1">
+                                    <h4 className="font-bold text-xs leading-tight drop-shadow-sm flex items-center gap-1 truncate">
                                       {task.title}
                                       {task.isOverdue && <span className="bg-red-600 text-[8px] font-bold px-1 rounded">OVERDUE</span>}
                                     </h4>
-                                    <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded font-mono">{task.timeLabel}</span>
+                                    <span className="text-[9px] bg-black/20 px-1 rounded font-mono ml-1">{task.timeLabel}</span>
                                   </div>
-                                  <p className="text-[11px] opacity-90 truncate mt-1">{task.desc}</p>
+                                  <p className="text-[10px] opacity-90 truncate mt-0.5">{task.desc}</p>
                                 </div>
-                                <div className="flex items-center justify-between text-[10px] opacity-80 pt-1 border-t border-white/20">
-                                  <span>Priority: {task.priority}</span>
+                                <div className="flex items-center justify-between text-[9px] opacity-80 pt-0.5 border-t border-white/20">
+                                  <span>{task.priority}</span>
                                   <span>{task.recurrenceType === 'completion' ? '🔄' : task.recurrenceType === 'fixed' ? '↻' : ''}</span>
                                 </div>
                               </div>
@@ -1071,56 +1101,90 @@ export default function App() {
           </div>
         )}
 
+        {/* WEEK VIEW WITH 15-MIN TIME GRID DRAG & DROP */}
         {currentView === 'week' && (
-          <div className="flex-1 grid grid-cols-7 gap-2 overflow-x-auto min-w-[700px]">
-            {daysOfWeek.map((dayName, idx) => {
-              const weekStart = getWeekStart(currentDate);
-              const cellDate = new Date(weekStart);
-              cellDate.setDate(cellDate.getDate() + idx);
-              const dateStr = formatDateKey(cellDate);
-              const isTodayCell = dateStr === formatDateKey(new Date());
+          <div className="flex-1 flex flex-col overflow-x-auto min-w-[800px] border border-gray-300 rounded-lg bg-white shadow-sm">
+            <div className="flex border-b border-gray-300 bg-gray-100 font-bold text-xs text-gray-700">
+              <div className="w-16 py-2 text-center border-r border-gray-300">Time</div>
+              <div className="flex-1 grid grid-cols-7">
+                {daysOfWeek.map((dayName, idx) => {
+                  const weekStart = getWeekStart(currentDate);
+                  const cellDate = new Date(weekStart);
+                  cellDate.setDate(cellDate.getDate() + idx);
+                  const isTodayCell = formatDateKey(cellDate) === formatDateKey(new Date());
 
-              return (
-                <div 
-                  key={dayName} 
-                  onDragOver={handleDragOver}
-                  onDrop={(e) => handleDateDrop(e, dateStr)}
-                  className="bg-white rounded-lg border border-gray-300 flex flex-col h-[550px] shadow-sm hover:border-blue-400 transition">
-                  <div className={`p-2 border-b border-gray-300 text-center ${isTodayCell ? 'bg-[#A9B1A6] text-white' : 'bg-gray-100 text-gray-700'}`}>
-                    <span className="block text-xs font-bold uppercase">{dayName}</span>
-                    <span className="text-sm font-serif font-bold">
-                      {cellDate.toLocaleString('default', { month: 'short' })} {cellDate.getDate()}
-                    </span>
+                  return (
+                    <div key={dayName} className={`py-2 text-center border-r border-gray-300 last:border-r-0 ${isTodayCell ? 'bg-[#A9B1A6] text-white' : ''}`}>
+                      <span className="block text-[10px] uppercase">{dayName}</span>
+                      <span className="text-xs font-serif">{cellDate.getMonth() + 1}/{cellDate.getDate()}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex-1 relative overflow-y-auto max-h-[550px]">
+              {timeSlots.map(hour => (
+                <div key={hour} className="flex h-20 border-b border-gray-200 last:border-b-0 relative">
+                  <div className="w-16 border-r border-gray-300 p-1 text-[10px] font-mono font-bold text-gray-400 text-right pr-2 bg-gray-50 select-none">
+                    {hour === 12 ? '12 PM' : hour > 12 ? `${hour - 12} PM` : `${hour} AM`}
                   </div>
-                  <div className="p-2 flex-1 flex flex-col gap-2 overflow-y-auto">
-                    {visibleTasks
-                      .filter(t => isTaskActiveOnDay(t, dayName, dateStr))
-                      .map(task => {
-                        const member = getMemberConfig(task.assignees[0]);
-                        return (
-                          <div 
-                            key={`${task.id}-${dateStr}`} 
-                            draggable={userRole === 'admin'}
-                            onDragStart={(e) => handleDragStart(e, task.id)}
-                            onClick={() => handleOpenModal(task, dateStr)}
-                            style={{ backgroundColor: member.color }}
-                            className={`text-white p-2 rounded text-xs shadow ${userRole === 'admin' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 flex flex-col gap-1 ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
-                            <div className="flex justify-between items-center">
-                              <span className="font-bold leading-snug">{task.title}</span>
-                              {task.isOverdue && <span className="bg-red-600 text-[8px] font-bold px-1 rounded">!</span>}
+                  <div className="flex-1 grid grid-cols-7 relative">
+                    {daysOfWeek.map((dayName, idx) => {
+                      const weekStart = getWeekStart(currentDate);
+                      const cellDate = new Date(weekStart);
+                      cellDate.setDate(cellDate.getDate() + idx);
+                      const dateStr = formatDateKey(cellDate);
+
+                      return (
+                        <div key={dayName} className="border-r border-gray-100 last:border-r-0 h-full relative flex flex-col">
+                          {minuteSubSlots.map(subOffset => (
+                            <div 
+                              key={subOffset}
+                              onDragOver={handleDragOver}
+                              onDrop={(e) => handleDropSlot(e, dateStr, hour + subOffset, null)}
+                              className="flex-1 hover:bg-blue-50/40 transition border-b border-dashed border-gray-100/40 last:border-b-0"
+                              title={`${decimalToTimeString(hour + subOffset)} - ${dateStr}`}>
                             </div>
-                            <span className="text-[10px] opacity-80 font-mono">{task.timeLabel}</span>
-                            <span className="text-[10px] bg-black/20 px-1 rounded w-max">{task.assignees.join(', ')}</span>
-                          </div>
-                        );
-                      })}
+                          ))}
+
+                          {visibleTasks
+                            .filter(t => isTaskActiveOnDay(t, dayName, dateStr) && t.startHour !== null && Math.floor(t.startHour) === hour)
+                            .map(task => {
+                              const topOffset = (task.startHour - hour) * 80;
+                              const height = (task.duration || 1) * 80;
+                              const member = getMemberConfig(task.assignees[0]);
+
+                              return (
+                                <div
+                                  key={`${task.id}-${dateStr}`}
+                                  draggable={userRole === 'admin'}
+                                  onDragStart={(e) => handleDragStart(e, task.id)}
+                                  onClick={() => handleOpenModal(task, dateStr)}
+                                  style={{ top: `${topOffset}px`, height: `${height - 2}px`, backgroundColor: member.color }}
+                                  className={`absolute inset-x-0.5 text-white rounded p-1.5 shadow ${userRole === 'admin' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 transition z-10 flex flex-col justify-between overflow-hidden ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
+                                  <div>
+                                    <div className="flex justify-between items-center text-[10px] font-bold leading-tight">
+                                      <span className="truncate">{task.title}</span>
+                                      {task.isOverdue && <span className="bg-red-600 px-0.5 rounded text-[8px]">!</span>}
+                                    </div>
+                                    <span className="text-[9px] opacity-80 font-mono block truncate">{task.timeLabel}</span>
+                                  </div>
+                                  <span className="text-[8px] bg-black/20 px-1 rounded truncate w-max">{task.assignees.join(', ')}</span>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-              );
-            })}
+              ))}
+            </div>
           </div>
         )}
 
+        {/* MONTH VIEW DRAG & DROP */}
         {currentView === 'month' && (
           <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm">
             <div className="grid grid-cols-7 bg-gray-100 border-b border-gray-300 text-center py-2 text-xs font-bold text-gray-600">
@@ -1149,7 +1213,7 @@ export default function App() {
                   <div 
                     key={i} 
                     onDragOver={handleDragOver}
-                    onDrop={(e) => handleDateDrop(e, dateStr)}
+                    onDrop={(e) => handleDropSlot(e, dateStr, null, null)}
                     className={`p-1.5 flex flex-col transition hover:bg-blue-50/20 ${isCurrentMonthCell ? 'bg-white' : 'bg-gray-50/50 text-gray-300'}`}>
                     <span className={`text-xs font-bold p-1 ${isTodayCell ? 'bg-[#A9B1A6] text-white rounded-full w-5 h-5 flex items-center justify-center' : 'text-gray-500'}`}>
                       {cellDate.getDate()}
@@ -1191,6 +1255,7 @@ export default function App() {
           </div>
         )}
 
+        {/* TASK BUILDER VIEW */}
         {currentView === 'create' && (
           <div className="flex flex-col h-full animate-fade-in">
             <div className="flex justify-between items-center mb-6 border-b border-gray-300 pb-4">
@@ -1384,13 +1449,14 @@ export default function App() {
           </div>
         )}
 
+        {/* TASK INSPECTOR & FULL EDITING MODAL */}
         {selectedTask && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-[#F4F3ED] max-w-lg w-full rounded-lg shadow-xl p-6 border border-gray-300 flex flex-col gap-4 animate-fade-in max-h-[90vh] overflow-y-auto">
+            <div className="bg-[#F4F3ED] max-w-2xl w-full rounded-lg shadow-xl p-6 border border-gray-300 flex flex-col gap-4 animate-fade-in max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-start border-b border-gray-300 pb-3">
                 <div>
                   <span className="text-xs font-bold text-[#A9B1A6] uppercase tracking-wider">
-                    {isCurrentInstanceCompleted ? 'Completed Occurrence Review' : (userRole === 'admin' ? (isEditing ? 'Admin Task Editor' : 'Admin Inspector Mode') : 'Assignee Execution View')}
+                    {isCurrentInstanceCompleted ? 'Completed Occurrence Review' : (userRole === 'admin' ? (isEditing ? 'Admin Full Task Editor' : 'Admin Inspector Mode') : 'Assignee Execution View')}
                   </span>
                   <div className="flex items-center gap-2">
                     <h2 className="text-2xl font-serif font-bold">{selectedTask.title}</h2>
@@ -1469,36 +1535,17 @@ export default function App() {
                   )}
                 </>
               ) : (
-                <div className="flex flex-col gap-3 text-sm">
-                  <div>
-                    <label className="block font-bold text-xs mb-1 text-gray-700">Task Title</label>
-                    <input type="text" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} className="w-full p-2 border rounded text-xs bg-white" />
-                  </div>
-                  
-                  <div>
-                    <label className="block font-bold text-xs mb-1 text-gray-700">Description</label>
-                    <textarea value={taskDesc} onChange={(e) => setTaskDesc(e.target.value)} className="w-full p-2 border rounded text-xs bg-white" rows={3}></textarea>
-                  </div>
-
-                  <div className="flex gap-3">
-                    <div className="w-1/2">
-                      <label className="block font-bold text-xs mb-1 text-gray-700">Assignees</label>
-                      <select value="" onChange={(e) => { if (e.target.value) handleAddAssignee(e.target.value); }} className="w-full p-2 border rounded text-xs bg-white mb-1">
-                        <option value="">Add assignee...</option>
-                        {teamMembers.filter(m => !selectedAssignees.includes(m.name)).map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
-                      </select>
-                      <div className="flex flex-wrap gap-1">
-                        {selectedAssignees.map(name => (
-                          <span key={name} className="bg-gray-200 text-xs px-2 py-0.5 rounded flex items-center gap-1 font-bold">
-                            {name} <button onClick={() => handleRemoveAssignee(name)} className="text-red-600">✕</button>
-                          </span>
-                        ))}
-                      </div>
+                /* FULL FEATURE DEPTH EDITING SCREEN */
+                <div className="flex flex-col gap-4 text-xs">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold mb-1 text-gray-700">Task Title</label>
+                      <input type="text" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} className="w-full p-2 border rounded bg-white" />
                     </div>
 
-                    <div className="w-1/2">
-                      <label className="block font-bold text-xs mb-1 text-gray-700">Priority</label>
-                      <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)} className="w-full p-2 border rounded text-xs bg-white">
+                    <div>
+                      <label className="block font-bold mb-1 text-gray-700">Priority Level</label>
+                      <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)} className="w-full p-2 border rounded bg-white">
                         <option value="High">High (Red)</option>
                         <option value="Medium">Medium (Orange)</option>
                         <option value="Low">Low (Green)</option>
@@ -1507,28 +1554,104 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="flex gap-3 pt-2 border-t border-gray-200">
-                    <div className="w-1/2">
-                      <label className="block font-bold text-xs mb-1 text-gray-700">Recurrence Rule</label>
-                      <select value={recurrenceType} onChange={(e) => setRecurrenceType(e.target.value)} className="w-full p-1.5 border rounded text-xs bg-white">
-                        <option value="once">One-time Task</option>
-                        <option value="fixed">Fixed Schedule</option>
-                        <option value="completion">Completion-Triggered</option>
-                      </select>
-                    </div>
+                  <div>
+                    <label className="block font-bold mb-1 text-gray-700">Description / Instructions</label>
+                    <textarea value={taskDesc} onChange={(e) => setTaskDesc(e.target.value)} className="w-full p-2 border rounded bg-white" rows={2}></textarea>
+                  </div>
 
-                    <div className="w-1/2">
-                      <div className="flex items-center gap-1 mb-1">
-                        <input type="checkbox" id="modalTimeToggle" checked={hasSpecificTime} onChange={(e) => setHasSpecificTime(e.target.checked)} className="accent-[#A9B1A6]" />
-                        <label htmlFor="modalTimeToggle" className="font-bold text-xs text-gray-700 cursor-pointer">Timed Slot</label>
+                  <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded border border-gray-200">
+                    <div>
+                      <label className="block font-bold mb-1 text-gray-700">Deadline Date</label>
+                      <input type="date" value={taskDate} onChange={(e) => setTaskDate(e.target.value)} className="w-full p-1.5 border rounded bg-white mb-2" />
+                      
+                      <div className="flex items-center gap-1.5">
+                        <input type="checkbox" id="editTimeToggle" checked={hasSpecificTime} onChange={(e) => setHasSpecificTime(e.target.checked)} className="accent-[#A9B1A6]" />
+                        <label htmlFor="editTimeToggle" className="font-bold text-gray-700 cursor-pointer">Timed Slot</label>
                       </div>
+
                       {hasSpecificTime && (
-                        <div className="flex gap-1">
-                          <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-1/2 p-1 border rounded text-xs bg-white" />
-                          <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-1/2 p-1 border rounded text-xs bg-white" />
+                        <div className="flex gap-2 mt-1">
+                          <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-1/2 p-1 border rounded bg-white" />
+                          <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-1/2 p-1 border rounded bg-white" />
                         </div>
                       )}
                     </div>
+
+                    <div>
+                      <label className="block font-bold mb-1 text-gray-700">Assignees</label>
+                      <select value="" onChange={(e) => { if (e.target.value) handleAddAssignee(e.target.value); }} className="w-full p-1.5 border rounded bg-white mb-1">
+                        <option value="">Add assignee...</option>
+                        {teamMembers.filter(m => !selectedAssignees.includes(m.name)).map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+                      </select>
+                      <div className="flex flex-wrap gap-1">
+                        {selectedAssignees.map(name => (
+                          <span key={name} className="bg-gray-200 text-[10px] px-2 py-0.5 rounded flex items-center gap-1 font-bold">
+                            {name} <button onClick={() => handleRemoveAssignee(name)} className="text-red-600">✕</button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-3 rounded border border-gray-200">
+                    <h4 className="font-bold mb-2 text-gray-700">Recurrence Engine</h4>
+                    <select value={recurrenceType} onChange={(e) => setRecurrenceType(e.target.value)} className="w-full p-1.5 border rounded bg-gray-50 mb-2">
+                      <option value="once">One-time Task</option>
+                      <option value="fixed">Fixed Calendar Schedule</option>
+                      <option value="completion">Completion-Triggered</option>
+                    </select>
+
+                    {recurrenceType === 'fixed' && (
+                      <div className="flex gap-1 mt-2">
+                        {daysOfWeek.map(day => (
+                          <button 
+                            key={day}
+                            type="button"
+                            onClick={() => toggleDay(day)}
+                            className={`flex-1 py-1 text-[10px] font-bold rounded border ${activeDays.includes(day) ? 'bg-[#A9B1A6] text-white border-[#A9B1A6]' : 'bg-white text-gray-500'}`}>
+                            {day}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {recurrenceType === 'completion' && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <span>Re-deploy</span>
+                        <input type="number" value={cadenceDays} onChange={(e) => setCadenceDays(Number(e.target.value))} className="w-12 p-1 border rounded text-center font-bold" />
+                        <span>days after completion</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bg-white p-3 rounded border border-gray-200">
+                    <div className="flex justify-between items-center mb-2">
+                      <h4 className="font-bold text-gray-700">Chained Workflow Steps ({chainedSteps.length})</h4>
+                      <button type="button" onClick={handleAddChainedStep} className="text-[10px] font-bold bg-[#A9B1A6] text-white px-2 py-0.5 rounded">+ Step</button>
+                    </div>
+
+                    {chainedSteps.map((step, idx) => (
+                      <div key={idx} className="bg-gray-50 p-2 rounded border border-gray-200 mb-2 flex flex-col gap-1.5">
+                        <div className="flex justify-between font-bold text-gray-600">
+                          <span>Step {idx + 1} Follow-up</span>
+                          <button type="button" onClick={() => handleRemoveChainedStep(idx)} className="text-red-600">Remove</button>
+                        </div>
+                        <input type="text" value={step.title} onChange={(e) => handleUpdateChainedStep(idx, 'title', e.target.value)} placeholder="Step Title" className="p-1 border rounded bg-white" />
+                        <div className="flex gap-2">
+                          <input type="number" value={step.relativeDays} onChange={(e) => handleUpdateChainedStep(idx, 'relativeDays', Number(e.target.value))} className="w-12 p-1 border rounded bg-white text-center font-bold" />
+                          <span className="self-center">days after</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="bg-white p-3 rounded border border-gray-200 flex justify-between">
+                    <label className="flex items-center gap-1.5 font-bold cursor-pointer">
+                      <input type="checkbox" checked={requiresPhoto} onChange={(e) => setRequiresPhoto(e.target.checked)} className="accent-[#A9B1A6]" /> Require Photo
+                    </label>
+                    <label className="flex items-center gap-1.5 font-bold cursor-pointer">
+                      <input type="checkbox" checked={requiresComment} onChange={(e) => setRequiresComment(e.target.checked)} className="accent-[#A9B1A6]" /> Require Comment
+                    </label>
                   </div>
                 </div>
               )}
@@ -1537,7 +1660,7 @@ export default function App() {
                 {userRole === 'admin' && !isCurrentInstanceCompleted && (
                   <div className="flex gap-2">
                     <button onClick={() => setIsEditing(!isEditing)} className="text-xs text-blue-700 font-bold hover:underline">
-                      {isEditing ? 'Cancel Edit' : 'Edit Settings'}
+                      {isEditing ? 'Cancel Edit' : 'Full Edit Settings'}
                     </button>
                     <button onClick={() => handleDeleteTask(selectedTask.id)} className="text-xs text-red-600 font-bold hover:underline">
                       Delete Rule
@@ -1552,7 +1675,7 @@ export default function App() {
                 <div className="flex gap-2 ml-auto">
                   {isEditing ? (
                     <button onClick={handleSaveChanges} className="bg-[#333333] text-white px-4 py-2 rounded text-xs font-bold hover:bg-black transition">
-                      Save Changes
+                      Save All Changes
                     </button>
                   ) : (
                     !isCurrentInstanceCompleted && (
@@ -1567,6 +1690,44 @@ export default function App() {
           </div>
         )}
 
+        {/* RECURRING TASK RESCHEDULE SCOPE PROMPT MODAL */}
+        {reschedulePrompt && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-white max-w-md w-full rounded-lg shadow-2xl p-6 border border-gray-300 flex flex-col gap-4 animate-fade-in">
+              <div className="border-b pb-2">
+                <span className="text-xs font-bold text-amber-600 uppercase tracking-wider">Recurring Task Reschedule</span>
+                <h3 className="text-xl font-serif font-bold text-gray-900 mt-0.5">{reschedulePrompt.task.title}</h3>
+              </div>
+
+              <p className="text-xs text-gray-600 leading-relaxed">
+                You are moving a recurring task to <strong>{reschedulePrompt.targetDate}</strong>
+                {reschedulePrompt.targetHour !== null && ` at ${decimalToTimeString(reschedulePrompt.targetHour)}`}. How would you like to apply this change?
+              </p>
+
+              <div className="flex flex-col gap-2 mt-2">
+                <button 
+                  onClick={() => applyTaskMove(reschedulePrompt.task.id, reschedulePrompt.targetDate, reschedulePrompt.targetHour, reschedulePrompt.targetMemberName, false)}
+                  className="bg-[#A9B1A6] text-white py-2.5 px-4 rounded text-xs font-bold hover:bg-gray-600 transition text-left flex justify-between items-center">
+                  <span>Only This Occurrence</span>
+                  <span className="text-[10px] opacity-80">(Creates standalone task)</span>
+                </button>
+
+                <button 
+                  onClick={() => applyTaskMove(reschedulePrompt.task.id, reschedulePrompt.targetDate, reschedulePrompt.targetHour, reschedulePrompt.targetMemberName, true)}
+                  className="bg-[#333333] text-white py-2.5 px-4 rounded text-xs font-bold hover:bg-black transition text-left flex justify-between items-center">
+                  <span>Entire Series / Future Tasks</span>
+                  <span className="text-[10px] opacity-80">(Updates master rule)</span>
+                </button>
+              </div>
+
+              <div className="pt-2 border-t flex justify-end">
+                <button onClick={() => setReschedulePrompt(null)} className="text-xs text-gray-500 font-bold hover:underline">Cancel Move</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SETTINGS & GOVERNANCE MODAL */}
         {isSettingsOpen && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-end p-4 z-50">
             <div className="bg-[#F4F3ED] max-w-md w-full h-full rounded-l-lg shadow-2xl p-6 border-l border-gray-300 flex flex-col gap-4 animate-fade-in overflow-y-auto">
