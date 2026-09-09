@@ -81,7 +81,6 @@ export default function App() {
   const [completionPrompt, setCompletionPrompt] = useState(null);
 
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const timeSlots = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
   const minuteSubSlots = [0, 0.25, 0.5, 0.75];
 
   const formatDateKey = (d) => {
@@ -186,83 +185,6 @@ export default function App() {
     setPreviousView(currentView);
     resetForm();
     setCurrentView('create');
-  };
-
-  // SIDE-BY-SIDE OVERLAPPING TASK LAYOUT ENGINE
-  const computeColumnTaskLayouts = (colTasks) => {
-    if (!colTasks || colTasks.length === 0) return {};
-
-    const items = colTasks.map(t => {
-      const isFlex = (t.type === 'flexible' || t.startHour === null || t.startHour === undefined);
-      const start = isFlex ? 8.0 : Number(t.startHour || 8.0);
-      const dur = isFlex ? 10.0 : Number(t.duration || 1.0);
-      return {
-        id: t.id,
-        start,
-        end: start + dur,
-        isFlex,
-        task: t
-      };
-    });
-
-    items.sort((a, b) => {
-      if (a.isFlex !== b.isFlex) return a.isFlex ? -1 : 1;
-      if (a.start !== b.start) return a.start - b.start;
-      return (b.end - b.start) - (a.end - a.start);
-    });
-
-    const clusters = [];
-    items.forEach(item => {
-      let targetCluster = null;
-      for (let cluster of clusters) {
-        if (cluster.some(c => Math.max(item.start, c.start) < Math.min(item.end, c.end))) {
-          targetCluster = cluster;
-          break;
-        }
-      }
-      if (targetCluster) {
-        targetCluster.push(item);
-      } else {
-        clusters.push([item]);
-      }
-    });
-
-    const layouts = {};
-    clusters.forEach(cluster => {
-      const cols = [];
-      cluster.forEach(item => {
-        let placed = false;
-        for (let col of cols) {
-          if (col[col.length - 1].end <= item.start) {
-            col.push(item);
-            placed = true;
-            break;
-          }
-        }
-        if (!placed) {
-          cols.push([item]);
-        }
-      });
-
-      const numCols = cols.length;
-      cols.forEach((col, colIdx) => {
-        col.forEach(item => {
-          const leftPct = (colIdx / numCols) * 100;
-          const widthPct = (1.0 / numCols) * 100;
-          layouts[item.id] = {
-            left: `${leftPct}%`,
-            width: `calc(${widthPct}% - 12px)`,
-            startPx: (item.start - 8) * 80,
-            heightPx: Math.max(28, (item.end - item.start) * 80 - 2),
-            numCols,
-            colIdx,
-            isFlex: item.isFlex
-          };
-        });
-      });
-    });
-
-    return layouts;
   };
 
   const [tasks, setTasks] = useState([
@@ -374,7 +296,7 @@ export default function App() {
     }
   ]);
 
-  // LIVE TASK RESIZING ENGINE
+  // LIVE TASK RESIZING ENGINE (Unshackled from 8-6 boundaries)
   const handleResizeStart = (e, task, edge) => {
     e.stopPropagation();
     e.preventDefault(); 
@@ -408,15 +330,15 @@ export default function App() {
           newDuration = 0.5;
           newStartHour = state.initialStartHour + state.initialDuration - 0.5;
         }
-        if (newStartHour < 8) {
-          newStartHour = 8;
-          newDuration = state.initialStartHour + state.initialDuration - 8;
+        if (newStartHour < 0) { // Unshackled limit
+          newStartHour = 0;
+          newDuration = state.initialStartHour + state.initialDuration;
         }
       } else {
         newDuration = state.initialDuration + deltaHours;
         if (newDuration < 0.5) newDuration = 0.5;
-        if (state.initialStartHour + newDuration > 18) {
-          newDuration = 18 - state.initialStartHour;
+        if (state.initialStartHour + newDuration > 24) { // Unshackled limit
+          newDuration = 24 - state.initialStartHour;
         }
       }
 
@@ -483,7 +405,7 @@ export default function App() {
     });
   }, []);
 
-  // DRAG & DROP HANDLERS WITH SOURCE DATE TRACKING
+  // DRAG & DROP HANDLERS WITH HTML5 DATA TRANSFER
   const handleDragStart = (e, taskId, sourceDate = null) => {
     if (userRole !== 'admin') return;
     setDraggedTaskId(taskId);
@@ -548,7 +470,6 @@ export default function App() {
 
       const effectiveSourceDate = sourceDateFromPrompt || targetTask.date;
 
-      // BRANCH 1: "Only This Occurrence" on a recurring task
       if (targetTask.recurrenceType !== 'once' && !updateSeries) {
         const standaloneTask = {
           ...targetTask,
@@ -567,7 +488,6 @@ export default function App() {
           overdueNotified: targetDate < todayStr
         };
 
-        // Add effectiveSourceDate as an EXCEPTION to the master recurring rule
         return prevTasks.map(t => {
           if (t.id === taskId) {
             const currentExceptions = t.exceptionDates || [];
@@ -580,7 +500,6 @@ export default function App() {
         }).concat(standaloneTask);
       }
 
-      // BRANCH 2: "Entire Series / Future Tasks" (SPLIT SERIES FIX)
       if (targetTask.recurrenceType !== 'once' && updateSeries) {
         const parts = targetDate.split('-');
         const targetD = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
@@ -590,7 +509,7 @@ export default function App() {
           ...targetTask,
           id: Date.now(),
           date: targetDate,
-          seriesStartDate: targetDate, // Enforces forward-only rendering for the new rule
+          seriesStartDate: targetDate, 
           activeDays: [targetDayName],
           assignees: targetMemberName ? [targetMemberName] : (targetTask.assignees || []),
           startHour: startDec,
@@ -606,7 +525,6 @@ export default function App() {
 
         return prevTasks.map(t => {
           if (t.id === taskId) {
-            // Cap the old series so it stops rendering on or after the effectiveSourceDate
             return { 
               ...t, 
               endDate: effectiveSourceDate ? addDaysToDateStr(effectiveSourceDate, -1) : addDaysToDateStr(targetDate, -1) 
@@ -616,7 +534,6 @@ export default function App() {
         }).concat(newMasterTask);
       }
 
-      // BRANCH 3: Standard One-Time Task Move
       return prevTasks.map(t => {
         if (t.id === taskId) {
           const newIsOverdue = targetDate < todayStr && t.status !== 'completed';
@@ -757,8 +674,8 @@ export default function App() {
     setRequiresPhoto(false);
     setRequiresComment(false);
     setAllowAssigneeDeadlineChange(false);
-    setNotifyOnComplete(true); // DEFAULT ALL NOTIFS ON
-    setNotifyOnComment(true);   // DEFAULT ALL NOTIFS ON
+    setNotifyOnComplete(true); 
+    setNotifyOnComment(true);   
   };
 
   const handleAddChainedStep = () => {
@@ -980,14 +897,13 @@ export default function App() {
       ...notifications
     ]);
 
-    // AD-HOC FOLLOW-UP SPAWNER
     if (withFollowUp && completionPrompt) {
       const targetDate = addDaysToDateStr(selectedInstanceDate, completionPrompt.offsetDays || 1);
       const newAdHocTask = {
         id: Date.now() + 5,
         title: completionPrompt.title || 'Follow-up Task',
         desc: completionPrompt.desc || `Ad-hoc follow-up from: "${selectedTask.title}"`,
-        company: selectedTask.company, // INHERIT COMPANY
+        company: selectedTask.company,
         assignees: [completionPrompt.assignee],
         date: targetDate,
         startTime: null,
@@ -1014,7 +930,6 @@ export default function App() {
       alert(`Follow-up task "${completionPrompt.title}" deployed to backlog/schedule for ${targetDate}.`);
     }
 
-    // PRE-CONFIGURED CHAINED WORKFLOW SPAWNER
     if (selectedTask.recurrenceType === 'completion') {
       const nextDueDate = addDaysToDateStr(selectedInstanceDate, selectedTask.cadenceDays || 14);
       const nextInstanceTask = {
@@ -1039,7 +954,7 @@ export default function App() {
         id: Date.now() + 1,
         title: nextStep.title || 'Follow-up Task',
         desc: nextStep.desc || `Chained step from completed task: "${selectedTask.title}"`,
-        company: selectedTask.company, // INHERIT COMPANY
+        company: selectedTask.company,
         assignees: stepAssignees,
         date: targetDate,
         startTime: '09:00',
@@ -1131,11 +1046,9 @@ export default function App() {
     if (task.exceptionDates && task.exceptionDates.includes(dateStr)) return false; 
     if (task.status === 'completed') return false;
 
-    // SPLIT SERIES END CAP
     if (task.endDate && dateStr > task.endDate) return false;
 
     if (task.recurrenceType === 'fixed') {
-      // SPLIT SERIES START CAP (PREVENTS GLOBAL SHIFTS IN THE PAST)
       if (task.seriesStartDate && dateStr < task.seriesStartDate) return false;
       return task.activeDays && task.activeDays.includes(dayOfWeekStr);
     }
@@ -1154,6 +1067,99 @@ export default function App() {
   );
 
   const draggedTaskObj = draggedTaskId ? tasks.find(t => t.id === draggedTaskId) : null;
+
+  // DYNAMIC TIME GRID BOUNDS
+  let gridStartHour = 6;
+  let gridEndHour = 20;
+  
+  const viewTasks = currentView === 'day' 
+    ? visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)))
+    : currentView === 'week'
+    ? visibleTasks.filter(t => t.type === 'timed' && t.startHour !== null) 
+    : [];
+
+  viewTasks.forEach(t => {
+    if (t.type === 'timed' && t.startHour !== null) {
+      if (t.startHour < gridStartHour) gridStartHour = Math.floor(t.startHour);
+      if (t.startHour + (t.duration || 1) > gridEndHour + 1) gridEndHour = Math.ceil(t.startHour + (t.duration || 1)) - 1;
+    }
+  });
+
+  if (gridStartHour < 0) gridStartHour = 0;
+  if (gridEndHour > 23) gridEndHour = 23;
+
+  const dynamicTimeSlots = Array.from({ length: gridEndHour - gridStartHour + 1 }, (_, i) => gridStartHour + i);
+
+  // REDEFINED LAYOUT ENGINE WITH DYNAMIC BOUNDS
+  const computeDynamicLayouts = (colTasks) => {
+    if (!colTasks || colTasks.length === 0) return {};
+
+    const items = colTasks.map(t => {
+      const isFlex = (t.type === 'flexible' || t.startHour === null || t.startHour === undefined);
+      const start = isFlex ? gridStartHour : Number(t.startHour || gridStartHour);
+      const dur = isFlex ? (gridEndHour - gridStartHour + 1) : Number(t.duration || 1.0);
+      return { id: t.id, start, end: start + dur, isFlex, task: t };
+    });
+
+    items.sort((a, b) => {
+      if (a.isFlex !== b.isFlex) return a.isFlex ? -1 : 1;
+      if (a.start !== b.start) return a.start - b.start;
+      return (b.end - b.start) - (a.end - a.start);
+    });
+
+    const clusters = [];
+    items.forEach(item => {
+      let targetCluster = null;
+      for (let cluster of clusters) {
+        if (cluster.some(c => Math.max(item.start, c.start) < Math.min(item.end, c.end))) {
+          targetCluster = cluster;
+          break;
+        }
+      }
+      if (targetCluster) {
+        targetCluster.push(item);
+      } else {
+        clusters.push([item]);
+      }
+    });
+
+    const layouts = {};
+    clusters.forEach(cluster => {
+      const cols = [];
+      cluster.forEach(item => {
+        let placed = false;
+        for (let col of cols) {
+          if (col[col.length - 1].end <= item.start) {
+            col.push(item);
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          cols.push([item]);
+        }
+      });
+
+      const numCols = cols.length;
+      cols.forEach((col, colIdx) => {
+        col.forEach(item => {
+          const leftPct = (colIdx / numCols) * 100;
+          const widthPct = (1.0 / numCols) * 100;
+          layouts[item.id] = {
+            left: `${leftPct}%`,
+            width: `calc(${widthPct}% - 12px)`,
+            startPx: (item.start - gridStartHour) * 80,
+            heightPx: Math.max(28, (item.end - item.start) * 80 - 2),
+            numCols,
+            colIdx,
+            isFlex: item.isFlex
+          };
+        });
+      });
+    });
+
+    return layouts;
+  };
 
   return (
     <div className="min-h-screen bg-[#A9B1A6] p-4 sm:p-8 font-sans text-[#333333]">
@@ -1288,7 +1294,7 @@ export default function App() {
           </div>
         )}
 
-        {/* UNASSIGNED BACKLOG TRAY (HIDDEN IN LIST VIEW FOR ADMIN) */}
+        {/* UNASSIGNED BACKLOG TRAY */}
         {userRole === 'admin' && backlogTasks.length > 0 && currentView !== 'create' && currentView !== 'list' && (
           <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-4">
             <div className="flex justify-between items-center mb-2">
@@ -1325,8 +1331,6 @@ export default function App() {
                 const compActive = visibleTasks.filter(t => t.company === company && isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)));
                 const compCompleted = visibleTasks.filter(t => t.company === company && isTaskCompletedOnDay(t, formatDateKey(currentDate)));
                 const compBacklog = backlogTasks.filter(t => t.company === company);
-
-                if (compActive.length === 0 && compCompleted.length === 0 && compBacklog.length === 0) return null;
 
                 return (
                   <div key={company} className="flex flex-col gap-4 mb-4">
@@ -1394,8 +1398,13 @@ export default function App() {
                           </div>
                         );
                       })}
-                      {compActive.length === 0 && compBacklog.length === 0 && (
-                        <p className="text-xs text-gray-400 italic py-2">No active tasks for {company} today.</p>
+                      {compActive.length === 0 && compBacklog.length === 0 && compCompleted.length === 0 && (
+                        <div className="bg-white p-6 rounded text-center border border-dashed border-gray-300">
+                          <p className="text-sm text-gray-500 font-bold">No tasks scheduled for {company} today.</p>
+                        </div>
+                      )}
+                      {compActive.length === 0 && (compBacklog.length > 0 || compCompleted.length > 0) && (
+                        <p className="text-xs text-gray-400 italic py-1">No active queue.</p>
                       )}
                     </div>
 
@@ -1524,28 +1533,28 @@ export default function App() {
               </div>
             </div>
 
-            {/* Continuous 10-Hour Column Grid */}
-            <div className="flex-1 relative overflow-y-auto max-h-[580px] flex">
+            {/* Dynamic Time Grid Container */}
+            <div className="flex-1 relative overflow-y-auto flex" style={{ maxHeight: '580px' }}>
               {/* Time Label Sidebar */}
-              <div className="w-20 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0">
-                {timeSlots.map(hour => (
+              <div className="w-20 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
+                {dynamicTimeSlots.map(hour => (
                   <div key={hour} className="h-20 border-b border-gray-200 p-2 text-xs font-mono font-bold text-gray-400 text-right pr-3">
-                    {hour === 12 ? '12:00 PM' : hour > 12 ? `${hour - 12}:00 PM` : `${hour}:00 AM`}
+                    {hour === 12 ? '12:00 PM' : hour > 12 ? `${hour - 12}:00 PM` : hour === 0 ? '12:00 AM' : `${hour}:00 AM`}
                   </div>
                 ))}
               </div>
 
               {/* Interactive Member Columns */}
-              <div className="flex-1 grid relative" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
+              <div className="flex-1 grid relative" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))`, height: `${dynamicTimeSlots.length * 80}px` }}>
                 {visibleMembers.map(member => {
                   const dayDateStr = formatDateKey(currentDate);
                   const memberColTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], dayDateStr) && t.assignees && t.assignees.includes(member.name));
-                  const layouts = computeColumnTaskLayouts(memberColTasks);
+                  const layouts = computeDynamicLayouts(memberColTasks);
 
                   return (
-                    <div key={member.id} className="border-r border-gray-200 last:border-r-0 relative h-[800px]">
+                    <div key={member.id} className="border-r border-gray-200 last:border-r-0 relative h-full">
                       {/* 15-Minute Sub-Slot Drop Grid */}
-                      {timeSlots.map(hour => (
+                      {dynamicTimeSlots.map(hour => (
                         <div key={hour} className="h-20 border-b border-gray-200 flex flex-col">
                           {minuteSubSlots.map(subOffset => (
                             <div 
@@ -1563,7 +1572,7 @@ export default function App() {
                       {draggedTaskObj && hoverSlot && hoverSlot.memberName === member.name && hoverSlot.dateStr === dayDateStr && (
                         <div 
                           style={{
-                            top: `${(hoverSlot.targetHour - 8) * 80}px`,
+                            top: `${(hoverSlot.targetHour - gridStartHour) * 80}px`,
                             height: `${Math.max(32, (draggedTaskObj.duration || 1) * 80)}px`,
                             left: '2px',
                             right: '2px'
@@ -1670,19 +1679,19 @@ export default function App() {
               </div>
             </div>
 
-            {/* Continuous 7-Day Time Grid */}
-            <div className="flex-1 relative overflow-y-auto max-h-[550px] flex">
+            {/* Dynamic Time Grid Container */}
+            <div className="flex-1 relative overflow-y-auto flex" style={{ maxHeight: '550px' }}>
               {/* Time Label Sidebar */}
-              <div className="w-16 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0">
-                {timeSlots.map(hour => (
+              <div className="w-16 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
+                {dynamicTimeSlots.map(hour => (
                   <div key={hour} className="h-20 border-b border-gray-200 p-1 text-[10px] font-mono font-bold text-gray-400 text-right pr-2">
-                    {hour === 12 ? '12 PM' : hour > 12 ? `${hour - 12} PM` : `${hour} AM`}
+                    {hour === 12 ? '12 PM' : hour > 12 ? `${hour - 12} PM` : hour === 0 ? '12 AM' : `${hour} AM`}
                   </div>
                 ))}
               </div>
 
               {/* 7 Day Columns */}
-              <div className="flex-1 grid grid-cols-7 relative">
+              <div className="flex-1 grid grid-cols-7 relative" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
                 {daysOfWeek.map((dayName, idx) => {
                   const weekStart = getWeekStart(currentDate);
                   const cellDate = new Date(weekStart);
@@ -1690,12 +1699,12 @@ export default function App() {
                   const dateStr = formatDateKey(cellDate);
 
                   const dayColTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, dayName, dateStr));
-                  const layouts = computeColumnTaskLayouts(dayColTasks);
+                  const layouts = computeDynamicLayouts(dayColTasks);
 
                   return (
-                    <div key={dayName} className="border-r border-gray-200 last:border-r-0 relative h-[800px]">
+                    <div key={dayName} className="border-r border-gray-200 last:border-r-0 relative h-full">
                       {/* 15-Minute Sub-Slot Drop Grid */}
-                      {timeSlots.map(hour => (
+                      {dynamicTimeSlots.map(hour => (
                         <div key={hour} className="h-20 border-b border-gray-200 flex flex-col">
                           {minuteSubSlots.map(subOffset => (
                             <div 
@@ -1713,7 +1722,7 @@ export default function App() {
                       {draggedTaskObj && hoverSlot && hoverSlot.dateStr === dateStr && (
                         <div 
                           style={{
-                            top: `${(hoverSlot.targetHour - 8) * 80}px`,
+                            top: `${(hoverSlot.targetHour - gridStartHour) * 80}px`,
                             height: `${Math.max(32, (draggedTaskObj.duration || 1) * 80)}px`,
                             left: '2px',
                             right: '2px'
@@ -2040,7 +2049,7 @@ export default function App() {
                       <input type="checkbox" checked={requiresComment} onChange={(e) => setRequiresComment(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require execution notes/comment to complete
                     </label>
                     <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer border-t pt-2 mt-1 border-gray-100">
-                      <input type="checkbox" checked={allowAssigneeDeadlineChange} onChange={(e) => setAllowAssigneeDeadlineChange(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Allow assignee to adjust deadline date
+                      <input type="checkbox" checked={allowAssigneeDeadlineChange} onChange={(e) => setAllowAssigneeDeadlineChange(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Allow Assignee to Adjust Deadline Date
                     </label>
                   </div>
                 </div>
