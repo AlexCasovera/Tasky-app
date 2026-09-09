@@ -42,7 +42,7 @@ export default function App() {
   const [selectedAssignees, setSelectedAssignees] = useState([]);
   const [taskPriority, setTaskPriority] = useState('Medium');
   const [taskDate, setTaskDate] = useState('');
-  const [hasSpecificTime, setHasSpecificTime] = useState(true);
+  const [hasSpecificTime, setHasSpecificTime] = useState(false); // DEFAULT TO DAYLONG
   const [startTime, setStartTime] = useState('13:00');
   const [endTime, setEndTime] = useState('14:00');
 
@@ -54,9 +54,10 @@ export default function App() {
   const [chainedSteps, setChainedSteps] = useState([]);
   const [requiresPhoto, setRequiresPhoto] = useState(false);
   const [requiresComment, setRequiresComment] = useState(false);
+  const [allowAssigneeDeadlineChange, setAllowAssigneeDeadlineChange] = useState(false);
 
-  const [notifyOnComplete, setNotifyOnComplete] = useState(true);
-  const [notifyOnComment, setNotifyOnComment] = useState(false);
+  const [notifyOnComplete, setNotifyOnComplete] = useState(true); // DEFAULT ALL NOTIFS ON
+  const [notifyOnComment, setNotifyOnComment] = useState(true);   // DEFAULT ALL NOTIFS ON
   
   const [openCommentInput, setExecutionComment] = useState('');
   const [photoUploaded, setPhotoUploaded] = useState(false);
@@ -64,12 +65,16 @@ export default function App() {
 
   // DRAG & DROP, HOVER GHOST & RESCHEDULE PROMPT STATE
   const [draggedTaskId, setDraggedTaskId] = useState(null);
+  const [draggedInstanceDate, setDraggedInstanceDate] = useState(null);
   const [hoverSlot, setHoverSlot] = useState(null);
   const [reschedulePrompt, setReschedulePrompt] = useState(null);
   
   // LIVE RESIZING STATE
   const [resizingTaskId, setResizingTaskId] = useState(null);
   const resizeStateRef = useRef(null);
+
+  // AD-HOC FOLLOW-UP PROMPT STATE
+  const [completionPrompt, setCompletionPrompt] = useState(null);
 
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const timeSlots = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
@@ -173,7 +178,6 @@ export default function App() {
     return `${formatSingle(startStr)} - ${formatSingle(endStr)}`;
   };
 
-  // OPEN TASK CREATOR & CAPTURE PREVIOUS VIEW
   const handleOpenCreateView = () => {
     setPreviousView(currentView);
     resetForm();
@@ -272,10 +276,12 @@ export default function App() {
       priority: 'Routine',
       requiresPhoto: false,
       requiresComment: false,
+      allowAssigneeDeadlineChange: false,
       recurrenceType: 'fixed',
       activeDays: ['Fri'],
       cadenceDays: 14,
       completedDates: [],
+      exceptionDates: [],
       chainedSteps: [],
       type: 'timed',
       status: 'pending',
@@ -295,10 +301,12 @@ export default function App() {
       priority: 'High',
       requiresPhoto: false,
       requiresComment: true,
+      allowAssigneeDeadlineChange: true,
       recurrenceType: 'once',
       activeDays: [],
       cadenceDays: 14,
       completedDates: [],
+      exceptionDates: [],
       chainedSteps: [],
       type: 'timed',
       status: 'pending',
@@ -320,10 +328,12 @@ export default function App() {
       priority: 'Medium',
       requiresPhoto: true,
       requiresComment: true,
+      allowAssigneeDeadlineChange: false,
       recurrenceType: 'completion',
       activeDays: [],
       cadenceDays: 14,
       completedDates: [],
+      exceptionDates: [],
       chainedSteps: [],
       type: 'timed',
       status: 'pending',
@@ -343,10 +353,12 @@ export default function App() {
       priority: 'Low',
       requiresPhoto: false,
       requiresComment: false,
+      allowAssigneeDeadlineChange: false,
       recurrenceType: 'once',
       activeDays: [],
       cadenceDays: 14,
       completedDates: [],
+      exceptionDates: [],
       chainedSteps: [],
       type: 'flexible',
       status: 'pending',
@@ -463,11 +475,14 @@ export default function App() {
     });
   }, []);
 
-  // DRAG & DROP HANDLERS
-  const handleDragStart = (e, taskId) => {
+  // DRAG & DROP HANDLERS WITH HTML5 DATA TRANSFER FOR BULLETPROOF SOURCE TRACKING
+  const handleDragStart = (e, taskId, sourceDate = null) => {
     if (userRole !== 'admin') return;
     setDraggedTaskId(taskId);
-    e.dataTransfer.setData('text/plain', String(taskId));
+    setDraggedInstanceDate(sourceDate);
+    
+    const payload = JSON.stringify({ taskId, sourceDate });
+    e.dataTransfer.setData('application/json', payload);
     e.dataTransfer.effectAllowed = 'move';
   };
 
@@ -479,6 +494,7 @@ export default function App() {
 
   const handleDragEnd = () => {
     setDraggedTaskId(null);
+    setDraggedInstanceDate(null);
     setHoverSlot(null);
   };
 
@@ -500,30 +516,104 @@ export default function App() {
     });
   };
 
-  const applyTaskMove = (taskId, targetDate, targetHour, targetMemberName, updateSeries = false) => {
+  const applyTaskMove = (taskId, targetDate, targetHour, targetMemberName, updateSeries = false, sourceDateFromPrompt = null) => {
     const todayStr = formatDateKey(new Date());
 
-    setTasks(prevTasks => prevTasks.map(t => {
-      if (t.id === taskId) {
-        const isFlex = t.type === 'flexible' || t.startHour === null || t.startHour === undefined;
-        
-        let startDec = t.startHour;
-        let dur = t.duration || 1;
-        let sStr = t.startTime;
-        let eStr = t.endTime;
-        let label = t.timeLabel;
+    setTasks(prevTasks => {
+      const targetTask = prevTasks.find(t => t.id === taskId);
+      if (!targetTask) return prevTasks;
 
-        if (!isFlex && targetHour !== null) {
-          startDec = targetHour;
-          sStr = decimalToTimeString(startDec);
-          eStr = decimalToTimeString(startDec + dur);
-          label = formatTimeLabel(sStr, eStr);
-        }
+      const isFlex = targetTask.type === 'flexible' || targetTask.startHour === null || targetTask.startHour === undefined;
+      
+      let startDec = targetTask.startHour;
+      let dur = targetTask.duration || 1;
+      let sStr = targetTask.startTime;
+      let eStr = targetTask.endTime;
+      let label = targetTask.timeLabel;
 
-        if (t.recurrenceType !== 'once' && !updateSeries) {
+      if (!isFlex && targetHour !== null) {
+        startDec = targetHour;
+        sStr = decimalToTimeString(startDec);
+        eStr = decimalToTimeString(startDec + dur);
+        label = formatTimeLabel(sStr, eStr);
+      }
+
+      const effectiveSourceDate = sourceDateFromPrompt || targetTask.date;
+
+      // BRANCH 1: "Only This Occurrence" on a recurring task
+      if (targetTask.recurrenceType !== 'once' && !updateSeries) {
+        const standaloneTask = {
+          ...targetTask,
+          id: Date.now(),
+          date: targetDate,
+          assignees: targetMemberName ? [targetMemberName] : (targetTask.assignees || []),
+          startHour: startDec,
+          duration: dur,
+          startTime: sStr,
+          endTime: eStr,
+          timeLabel: label,
+          type: isFlex ? 'flexible' : 'timed',
+          recurrenceType: 'once',
+          exceptionDates: [],
+          isOverdue: targetDate < todayStr,
+          overdueNotified: targetDate < todayStr
+        };
+
+        // Add effectiveSourceDate as an EXCEPTION to the master recurring rule
+        return prevTasks.map(t => {
+          if (t.id === taskId) {
+            const currentExceptions = t.exceptionDates || [];
+            const updatedExceptions = effectiveSourceDate && !currentExceptions.includes(effectiveSourceDate)
+              ? [...currentExceptions, effectiveSourceDate]
+              : currentExceptions;
+            return { ...t, exceptionDates: updatedExceptions };
+          }
+          return t;
+        }).concat(standaloneTask);
+      }
+
+      // BRANCH 2: "Entire Series / Future Tasks" (SPLIT SERIES FIX)
+      if (targetTask.recurrenceType !== 'once' && updateSeries) {
+        const parts = targetDate.split('-');
+        const targetD = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        const targetDayName = !isNaN(targetD.getTime()) ? daysOfWeek[targetD.getDay()] : (targetTask.activeDays?.[0] || 'Mon');
+
+        const newMasterTask = {
+          ...targetTask,
+          id: Date.now(),
+          date: targetDate,
+          seriesStartDate: targetDate, // Enforces forward-only rendering for the new rule
+          activeDays: [targetDayName],
+          assignees: targetMemberName ? [targetMemberName] : (targetTask.assignees || []),
+          startHour: startDec,
+          duration: dur,
+          startTime: sStr,
+          endTime: eStr,
+          timeLabel: label,
+          type: isFlex ? 'flexible' : 'timed',
+          exceptionDates: [],
+          completedDates: [],
+          endDate: null 
+        };
+
+        return prevTasks.map(t => {
+          if (t.id === taskId) {
+            // Cap the old series so it stops rendering on or after the effectiveSourceDate
+            return { 
+              ...t, 
+              endDate: effectiveSourceDate ? addDaysToDateStr(effectiveSourceDate, -1) : addDaysToDateStr(targetDate, -1) 
+            };
+          }
+          return t;
+        }).concat(newMasterTask);
+      }
+
+      // BRANCH 3: Standard One-Time Task Move
+      return prevTasks.map(t => {
+        if (t.id === taskId) {
+          const newIsOverdue = targetDate < todayStr && t.status !== 'completed';
           return {
             ...t,
-            id: Date.now(),
             date: targetDate,
             assignees: targetMemberName ? [targetMemberName] : (t.assignees || []),
             startHour: startDec,
@@ -532,51 +622,49 @@ export default function App() {
             endTime: eStr,
             timeLabel: label,
             type: isFlex ? 'flexible' : 'timed',
-            recurrenceType: 'once',
-            isOverdue: targetDate < todayStr,
-            overdueNotified: targetDate < todayStr
+            isOverdue: newIsOverdue,
+            overdueNotified: newIsOverdue
           };
         }
-
-        const newIsOverdue = targetDate < todayStr && t.status !== 'completed';
-
-        return {
-          ...t,
-          date: targetDate,
-          assignees: targetMemberName ? [targetMemberName] : (t.assignees || []),
-          startHour: startDec,
-          duration: dur,
-          startTime: sStr,
-          endTime: eStr,
-          timeLabel: label,
-          type: isFlex ? 'flexible' : 'timed',
-          isOverdue: newIsOverdue,
-          overdueNotified: newIsOverdue
-        };
-      }
-      return t;
-    }));
+        return t;
+      });
+    });
 
     setReschedulePrompt(null);
     setDraggedTaskId(null);
+    setDraggedInstanceDate(null);
     setHoverSlot(null);
   };
 
   const handleDropSlot = (e, targetDate, targetHour = null, targetMemberName = null) => {
     if (userRole !== 'admin') return;
     e.preventDefault();
-    const taskIdStr = e.dataTransfer.getData('text/plain') || draggedTaskId;
-    const taskId = Number(taskIdStr);
-    const task = tasks.find(t => t.id === taskId);
+    
+    let taskId, sourceDate;
+    try {
+      const payload = JSON.parse(e.dataTransfer.getData('application/json'));
+      taskId = payload.taskId;
+      sourceDate = payload.sourceDate;
+    } catch (err) {
+      taskId = Number(e.dataTransfer.getData('text/plain') || draggedTaskId);
+      sourceDate = draggedInstanceDate;
+    }
 
+    const task = tasks.find(t => t.id === taskId);
     setHoverSlot(null);
 
     if (!task) return;
 
     if (task.recurrenceType !== 'once') {
-      setReschedulePrompt({ task, targetDate, targetHour, targetMemberName });
+      setReschedulePrompt({ 
+        task, 
+        targetDate, 
+        targetHour, 
+        targetMemberName,
+        sourceDate: sourceDate || targetDate
+      });
     } else {
-      applyTaskMove(taskId, targetDate, targetHour, targetMemberName, false);
+      applyTaskMove(taskId, targetDate, targetHour, targetMemberName, false, sourceDate);
     }
   };
 
@@ -649,7 +737,7 @@ export default function App() {
     setSelectedAssignees([]);
     setTaskPriority('Medium');
     setTaskDate(formatDateKey(currentDate));
-    setHasSpecificTime(true);
+    setHasSpecificTime(false); // DEFAULT TO DAYLONG / FLEXIBLE
     setStartTime('09:00');
     setEndTime('11:00');
     setRecurrenceType('once');
@@ -659,8 +747,9 @@ export default function App() {
     setChainedSteps([]);
     setRequiresPhoto(false);
     setRequiresComment(false);
-    setNotifyOnComplete(true);
-    setNotifyOnComment(false);
+    setAllowAssigneeDeadlineChange(false);
+    setNotifyOnComplete(true); // DEFAULT ALL NOTIFS ON
+    setNotifyOnComment(true);   // DEFAULT ALL NOTIFS ON
   };
 
   const handleAddChainedStep = () => {
@@ -739,10 +828,12 @@ export default function App() {
       priority: taskPriority,
       requiresPhoto,
       requiresComment,
+      allowAssigneeDeadlineChange,
       recurrenceType,
       activeDays: recurrenceType === 'fixed' ? activeDays : [],
       cadenceDays: Number(cadenceDays),
       completedDates: [],
+      exceptionDates: [],
       chainedSteps: chainedSteps.filter(s => s.title.trim() !== ''),
       type: hasSpecificTime ? 'timed' : 'flexible',
       status: 'pending',
@@ -751,7 +842,7 @@ export default function App() {
 
     setTasks([newTask, ...tasks]);
     resetForm();
-    setCurrentView(previousView); // Routes back to the view you were previously on
+    setCurrentView(previousView);
   };
 
   const handleOpenModal = (task, instanceDateStr) => {
@@ -776,8 +867,9 @@ export default function App() {
     setCadenceDays(task.cadenceDays || 14);
     setRequiresPhoto(task.requiresPhoto || false);
     setRequiresComment(task.requiresComment || false);
+    setAllowAssigneeDeadlineChange(task.allowAssigneeDeadlineChange || false);
     setNotifyOnComplete(task.notifyOnComplete ?? true);
-    setNotifyOnComment(task.notifyOnComment ?? false);
+    setNotifyOnComment(task.notifyOnComment ?? true);
     setChainedSteps(task.chainedSteps || []);
   };
 
@@ -808,6 +900,7 @@ export default function App() {
       cadenceDays: Number(cadenceDays),
       requiresPhoto,
       requiresComment,
+      allowAssigneeDeadlineChange,
       notifyOnComplete,
       notifyOnComment,
       chainedSteps: chainedSteps.filter(s => s.title.trim() !== ''),
@@ -836,20 +929,30 @@ export default function App() {
     setExecutionComment('');
   };
 
-  const handleCompleteTask = (id) => {
-    if (selectedTask.requiresPhoto && !photoUploaded) return alert('Photo upload required to complete.');
+  // INTERCEPT COMPLETION TO TRIGGER AD-HOC FOLLOW-UP PROMPT
+  const handleInitiateCompletion = () => {
+    if (selectedTask.requiresPhoto && !photoUploaded) return alert('Photo upload required to complete this task.');
     if (selectedTask.requiresComment && !openCommentInput.trim() && (!selectedTask.comments || selectedTask.comments.length === 0)) {
-      return alert('Execution notes required to complete.');
+      return alert('Execution notes required to complete this task.');
     }
+    
+    setCompletionPrompt({
+      showForm: false,
+      title: `Follow-up: ${selectedTask.title}`,
+      desc: '',
+      assignee: selectedTask.assignees[0] || teamMembers[0].name,
+      offsetDays: 1
+    });
+  };
 
+  const executeCompletion = (withFollowUp) => {
     const noteText = openCommentInput.trim() 
       ? `${userRole === 'admin' ? 'Admin' : 'Assignee'} (${selectedInstanceDate}): ${openCommentInput}`
       : null;
 
     let updatedTasks = tasks.map(t => {
-      if (t.id === id) {
+      if (t.id === selectedTask.id) {
         const newComments = noteText ? [...(t.comments || []), noteText] : (t.comments || []);
-
         if (t.recurrenceType === 'once') {
           return { ...t, status: 'completed', isOverdue: false, comments: newComments };
         } else {
@@ -865,6 +968,40 @@ export default function App() {
       ...notifications
     ]);
 
+    // AD-HOC FOLLOW-UP SPAWNER
+    if (withFollowUp && completionPrompt) {
+      const targetDate = addDaysToDateStr(selectedInstanceDate, completionPrompt.offsetDays || 1);
+      const newAdHocTask = {
+        id: Date.now() + 5,
+        title: completionPrompt.title || 'Follow-up Task',
+        desc: completionPrompt.desc || `Ad-hoc follow-up from: "${selectedTask.title}"`,
+        assignees: [completionPrompt.assignee],
+        date: targetDate,
+        startTime: null,
+        endTime: null,
+        startHour: null,
+        duration: null,
+        timeLabel: 'Unscheduled',
+        priority: selectedTask.priority || 'Medium',
+        requiresPhoto: false,
+        requiresComment: false,
+        allowAssigneeDeadlineChange: false,
+        recurrenceType: 'once',
+        activeDays: [],
+        cadenceDays: 14,
+        completedDates: [],
+        exceptionDates: [],
+        chainedSteps: [],
+        type: 'flexible',
+        status: 'pending',
+        isOverdue: false,
+        comments: [`Auto-deployed via Ad-Hoc Follow-up prompt upon completion of "${selectedTask.title}"`]
+      };
+      updatedTasks = [newAdHocTask, ...updatedTasks];
+      alert(`Follow-up task "${completionPrompt.title}" deployed to backlog/schedule for ${targetDate}.`);
+    }
+
+    // PRE-CONFIGURED CHAINED WORKFLOW SPAWNER
     if (selectedTask.recurrenceType === 'completion') {
       const nextDueDate = addDaysToDateStr(selectedInstanceDate, selectedTask.cadenceDays || 14);
       const nextInstanceTask = {
@@ -872,12 +1009,12 @@ export default function App() {
         id: Date.now() + 2,
         date: nextDueDate,
         completedDates: [],
+        exceptionDates: [],
         status: 'pending',
         isOverdue: false,
         comments: [`Auto-deployed ${selectedTask.cadenceDays || 14} days after completion on ${selectedInstanceDate}`]
       };
       updatedTasks = [nextInstanceTask, ...updatedTasks];
-      alert(`Task completed! Next completion-triggered task scheduled for ${nextDueDate}.`);
     }
 
     if (selectedTask.chainedSteps && selectedTask.chainedSteps.length > 0) {
@@ -899,22 +1036,23 @@ export default function App() {
         priority: nextStep.priority || 'Medium',
         requiresPhoto: nextStep.requiresPhoto || false,
         requiresComment: nextStep.requiresComment || false,
+        allowAssigneeDeadlineChange: false,
         recurrenceType: 'once',
         activeDays: [],
         cadenceDays: 14,
         completedDates: [],
+        exceptionDates: [],
         chainedSteps: selectedTask.chainedSteps.slice(1),
         type: 'timed',
         status: 'pending',
         isOverdue: false,
-        comments: [`Auto-deployed via Chained Workflow from "${selectedTask.title}"`]
+        comments: [`Auto-deployed via Pre-Configured Workflow from "${selectedTask.title}"`]
       };
-
       updatedTasks = [chainedTask, ...updatedTasks];
-      alert(`Chained follow-up task "${nextStep.title}" deployed for ${targetDate}.`);
     }
 
     setTasks(updatedTasks);
+    setCompletionPrompt(null);
     setSelectedTask(null);
   };
 
@@ -976,9 +1114,15 @@ export default function App() {
   const isTaskActiveOnDay = (task, dayOfWeekStr, dateStr) => {
     if (!task) return false;
     if (task.completedDates && task.completedDates.includes(dateStr)) return false;
+    if (task.exceptionDates && task.exceptionDates.includes(dateStr)) return false; 
     if (task.status === 'completed') return false;
 
+    // SPLIT SERIES END CAP
+    if (task.endDate && dateStr > task.endDate) return false;
+
     if (task.recurrenceType === 'fixed') {
+      // SPLIT SERIES START CAP (PREVENTS GLOBAL SHIFTS IN THE PAST)
+      if (task.seriesStartDate && dateStr < task.seriesStartDate) return false;
       return task.activeDays && task.activeDays.includes(dayOfWeekStr);
     }
     return task.date === dateStr;
@@ -1144,7 +1288,7 @@ export default function App() {
                 <div 
                   key={task.id}
                   draggable={userRole === 'admin' && !resizingTaskId}
-                  onDragStart={(e) => handleDragStart(e, task.id)}
+                  onDragStart={(e) => handleDragStart(e, task.id, task.date)}
                   onDragEnd={handleDragEnd}
                   onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
                   className="bg-white px-3 py-1.5 rounded border border-amber-200 text-xs font-bold text-gray-800 cursor-grab active:cursor-grabbing hover:bg-amber-100 transition shadow-2xs flex items-center gap-2">
@@ -1319,7 +1463,7 @@ export default function App() {
                           <div
                             key={task.id}
                             draggable={userRole === 'admin' && !resizingTaskId}
-                            onDragStart={(e) => handleDragStart(e, task.id)}
+                            onDragStart={(e) => handleDragStart(e, task.id, dayDateStr)}
                             onDragEnd={handleDragEnd}
                             onClick={() => handleOpenModal(task, dayDateStr)}
                             style={{ 
@@ -1467,7 +1611,7 @@ export default function App() {
                           <div
                             key={`${task.id}-${dateStr}`}
                             draggable={userRole === 'admin' && !resizingTaskId}
-                            onDragStart={(e) => handleDragStart(e, task.id)}
+                            onDragStart={(e) => handleDragStart(e, task.id, dateStr)}
                             onDragEnd={handleDragEnd}
                             onClick={() => handleOpenModal(task, dateStr)}
                             style={{ 
@@ -1559,7 +1703,7 @@ export default function App() {
                           <div 
                             key={`${task.id}-${dateStr}`} 
                             draggable={userRole === 'admin' && !resizingTaskId}
-                            onDragStart={(e) => handleDragStart(e, task.id)}
+                            onDragStart={(e) => handleDragStart(e, task.id, dateStr)}
                             onDragEnd={handleDragEnd}
                             onClick={() => handleOpenModal(task, dateStr)}
                             style={{ backgroundColor: member.color }}
@@ -1701,7 +1845,7 @@ export default function App() {
                   {recurrenceType === 'completion' && (
                     <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
                       <span className="text-sm text-gray-600">Re-deploy task</span>
-                      <input type="number" value={cadenceDays} onChange={(e) => setCadenceDays(Number(e.target.value))} className="border border-gray-300 rounded px-2 py-1 text-sm w-16 text-center font-bold" />
+                      <input type="number" value={cadenceDays} onChange={(e) => setCadenceDays(Number(e.target.value))} className="w-12 p-1 border rounded text-center font-bold" />
                       <span className="text-sm text-gray-600">days after completion</span>
                     </div>
                   )}
@@ -1710,7 +1854,7 @@ export default function App() {
                 <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
                   <div className="flex justify-between items-center mb-2">
                     <h4 className="font-bold text-sm">Multi-Step Task Chaining Engine</h4>
-                    <button type="button" onClick={handleAddChainedStep} className="text-xs font-bold bg-[#A9B1A6] text-white px-2.5 py-1 rounded hover:bg-gray-600 transition">+ Add Step</button>
+                    <button type="button" onClick={handleAddChainedStep} className="text-[10px] font-bold bg-[#A9B1A6] text-white px-2.5 py-1 rounded hover:bg-gray-600 transition">+ Add Step</button>
                   </div>
                   <p className="text-xs text-gray-500 mb-3">Build an automated pipeline of follow-up tasks triggered upon completion.</p>
 
@@ -1752,13 +1896,16 @@ export default function App() {
                 </div>
 
                 <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
-                  <h4 className="font-bold text-sm mb-2">Proof of Work Controls</h4>
+                  <h4 className="font-bold text-sm mb-2">Proof of Work & Permissions</h4>
                   <div className="flex flex-col gap-2">
                     <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                       <input type="checkbox" checked={requiresPhoto} onChange={(e) => setRequiresPhoto(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require photo upload to complete
                     </label>
                     <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                       <input type="checkbox" checked={requiresComment} onChange={(e) => setRequiresComment(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require execution notes/comment to complete
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer border-t pt-2 mt-1 border-gray-100">
+                      <input type="checkbox" checked={allowAssigneeDeadlineChange} onChange={(e) => setAllowAssigneeDeadlineChange(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Allow assignee to adjust deadline date
                     </label>
                   </div>
                 </div>
@@ -1785,7 +1932,7 @@ export default function App() {
         )}
 
         {/* TASK INSPECTOR & FULL EDITING MODAL */}
-        {selectedTask && (
+        {selectedTask && !completionPrompt && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
             <div className="bg-[#F4F3ED] max-w-2xl w-full rounded-lg shadow-xl p-6 border border-gray-300 flex flex-col gap-4 animate-fade-in max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-start border-b border-gray-300 pb-3">
@@ -1809,6 +1956,29 @@ export default function App() {
                     <span>Assignees: <strong>{selectedTask.assignees && selectedTask.assignees.length > 0 ? selectedTask.assignees.join(', ') : 'Unassigned (Backlog)'}</strong></span>
                     <span>Occurrence Date: <strong>{selectedInstanceDate}</strong></span>
                   </div>
+
+                  {/* ASSIGNEE DEADLINE CHANGE CONTROL */}
+                  {selectedTask.allowAssigneeDeadlineChange && !isCurrentInstanceCompleted && (
+                    <div className="bg-blue-50 p-3 rounded border border-blue-200 flex flex-col gap-2">
+                      <span className="text-xs font-bold text-blue-900">📅 Admin Permission Granted: Adjust Deadline</span>
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="date" 
+                          value={selectedTask.date} 
+                          onChange={(e) => {
+                            const newDate = e.target.value;
+                            const todayStr = formatDateKey(new Date());
+                            const newOverdue = newDate < todayStr;
+                            const updated = { ...selectedTask, date: newDate, isOverdue: newOverdue, overdueNotified: newOverdue };
+                            setSelectedTask(updated);
+                            setTasks(tasks.map(t => t.id === selectedTask.id ? updated : t));
+                          }} 
+                          className="p-1.5 text-xs border rounded bg-white font-bold text-gray-800 focus:outline-none cursor-pointer"
+                        />
+                        <span className="text-[11px] text-gray-500 italic">(Reschedules task on dispatch board)</span>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="bg-white p-3 rounded border border-gray-200">
                     <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500 mb-2">Task Activity & Comments</h4>
@@ -1980,12 +2150,15 @@ export default function App() {
                     ))}
                   </div>
 
-                  <div className="bg-white p-3 rounded border border-gray-200 flex justify-between">
+                  <div className="bg-white p-3 rounded border border-gray-200 flex flex-col gap-1.5">
                     <label className="flex items-center gap-1.5 font-bold cursor-pointer">
                       <input type="checkbox" checked={requiresPhoto} onChange={(e) => setRequiresPhoto(e.target.checked)} className="accent-[#A9B1A6]" /> Require Photo
                     </label>
                     <label className="flex items-center gap-1.5 font-bold cursor-pointer">
                       <input type="checkbox" checked={requiresComment} onChange={(e) => setRequiresComment(e.target.checked)} className="accent-[#A9B1A6]" /> Require Comment
+                    </label>
+                    <label className="flex items-center gap-1.5 font-bold cursor-pointer border-t pt-1.5 mt-1 border-gray-100">
+                      <input type="checkbox" checked={allowAssigneeDeadlineChange} onChange={(e) => setAllowAssigneeDeadlineChange(e.target.checked)} className="accent-[#A9B1A6]" /> Allow Assignee to Adjust Deadline Date
                     </label>
                   </div>
                 </div>
@@ -2014,13 +2187,113 @@ export default function App() {
                     </button>
                   ) : (
                     !isCurrentInstanceCompleted && (
-                      <button onClick={() => handleCompleteTask(selectedTask.id)} className="bg-[#A9B1A6] text-white px-5 py-2 rounded text-xs font-bold shadow-sm hover:bg-gray-600 transition">
+                      <button onClick={handleInitiateCompletion} className="bg-[#A9B1A6] text-white px-5 py-2 rounded text-xs font-bold shadow-sm hover:bg-gray-600 transition">
                         Mark Occurrence Complete
                       </button>
                     )
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* AD-HOC FOLLOW-UP COMPLETION PROMPT MODAL */}
+        {completionPrompt && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+            <div className="bg-white max-w-md w-full rounded-lg shadow-2xl p-6 border border-gray-300 flex flex-col gap-4 animate-fade-in">
+              <div className="border-b pb-2">
+                <span className="text-xs font-bold text-[#A9B1A6] uppercase tracking-wider">Complete Task Confirmation</span>
+                <h3 className="text-xl font-serif font-bold text-gray-900 mt-0.5">{selectedTask?.title}</h3>
+              </div>
+
+              {!completionPrompt.showForm ? (
+                <>
+                  <p className="text-sm text-gray-700 leading-relaxed">
+                    Is this task fully resolved, or do you need to branch a new follow-up task to address unexpected issues (e.g., ordering parts, rescheduling vendor)?
+                  </p>
+                  
+                  <div className="flex flex-col gap-2 mt-2">
+                    <button 
+                      onClick={() => executeCompletion(false)}
+                      className="bg-gray-100 text-gray-800 border border-gray-300 py-2.5 px-4 rounded text-sm font-bold hover:bg-gray-200 transition text-center">
+                      ✓ Mark Fully Complete & Close
+                    </button>
+
+                    <button 
+                      onClick={() => setCompletionPrompt({ ...completionPrompt, showForm: true })}
+                      className="bg-[#333333] text-white py-2.5 px-4 rounded text-sm font-bold hover:bg-black transition text-center">
+                      + Create Follow-up Task
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <h4 className="font-bold text-sm text-gray-800">Follow-up Task Details</h4>
+                  
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Title</label>
+                    <input 
+                      type="text" 
+                      value={completionPrompt.title} 
+                      onChange={(e) => setCompletionPrompt({ ...completionPrompt, title: e.target.value })} 
+                      className="w-full p-2 text-sm border rounded bg-gray-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#A9B1A6]" />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Details / Notes</label>
+                    <textarea 
+                      rows={2}
+                      value={completionPrompt.desc} 
+                      onChange={(e) => setCompletionPrompt({ ...completionPrompt, desc: e.target.value })} 
+                      placeholder="Why is this follow-up needed?"
+                      className="w-full p-2 text-sm border rounded bg-gray-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#A9B1A6]"></textarea>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <div className="w-1/2">
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Assign To</label>
+                      <select 
+                        value={completionPrompt.assignee} 
+                        onChange={(e) => setCompletionPrompt({ ...completionPrompt, assignee: e.target.value })} 
+                        className="w-full p-2 border rounded bg-white text-xs focus:outline-none">
+                        {teamMembers.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+                      </select>
+                    </div>
+
+                    <div className="w-1/2">
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Schedule For</label>
+                      <div className="flex items-center gap-1 bg-white border rounded p-1">
+                        <input 
+                          type="number" 
+                          value={completionPrompt.offsetDays} 
+                          onChange={(e) => setCompletionPrompt({ ...completionPrompt, offsetDays: Number(e.target.value) })} 
+                          className="w-12 p-1 text-center font-bold text-sm focus:outline-none" />
+                        <span className="text-xs text-gray-600">days from now</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 mt-2 pt-3 border-t">
+                    <button 
+                      onClick={() => executeCompletion(false)}
+                      className="w-1/3 bg-gray-100 text-gray-600 font-bold py-2 rounded text-xs hover:bg-gray-200 transition">
+                      Skip Follow-up
+                    </button>
+                    <button 
+                      onClick={() => executeCompletion(true)}
+                      className="w-2/3 bg-[#A9B1A6] text-white font-bold py-2 rounded text-xs hover:bg-gray-600 transition shadow-sm">
+                      Complete Original & Deploy
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!completionPrompt.showForm && (
+                <div className="pt-2 border-t flex justify-end">
+                  <button onClick={() => setCompletionPrompt(null)} className="text-xs text-gray-400 font-bold hover:text-gray-700">Cancel</button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -2041,14 +2314,14 @@ export default function App() {
 
               <div className="flex flex-col gap-2 mt-2">
                 <button 
-                  onClick={() => applyTaskMove(reschedulePrompt.task.id, reschedulePrompt.targetDate, reschedulePrompt.targetHour, reschedulePrompt.targetMemberName, false)}
+                  onClick={() => applyTaskMove(reschedulePrompt.task.id, reschedulePrompt.targetDate, reschedulePrompt.targetHour, reschedulePrompt.targetMemberName, false, reschedulePrompt.sourceDate)}
                   className="bg-[#A9B1A6] text-white py-2.5 px-4 rounded text-xs font-bold hover:bg-gray-600 transition text-left flex justify-between items-center">
                   <span>Only This Occurrence</span>
                   <span className="text-[10px] opacity-80">(Creates standalone task)</span>
                 </button>
 
                 <button 
-                  onClick={() => applyTaskMove(reschedulePrompt.task.id, reschedulePrompt.targetDate, reschedulePrompt.targetHour, reschedulePrompt.targetMemberName, true)}
+                  onClick={() => applyTaskMove(reschedulePrompt.task.id, reschedulePrompt.targetDate, reschedulePrompt.targetHour, reschedulePrompt.targetMemberName, true, reschedulePrompt.sourceDate)}
                   className="bg-[#333333] text-white py-2.5 px-4 rounded text-xs font-bold hover:bg-black transition text-left flex justify-between items-center">
                   <span>Entire Series / Future Tasks</span>
                   <span className="text-[10px] opacity-80">(Updates master rule)</span>
