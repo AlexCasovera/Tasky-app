@@ -19,6 +19,7 @@ export default function App() {
   const [editingMemberId, setEditingMemberId] = useState(null);
 
   const [companies, setCompanies] = useState(['Sparkulous', 'Casovera', 'TMFLO', 'Leprino Personal']);
+  const [activeCompanyFilters, setActiveCompanyFilters] = useState(['Sparkulous', 'Casovera', 'TMFLO', 'Leprino Personal']);
   const [newCompanyInput, setNewCompanyInput] = useState('');
 
   const [teamMembers, setTeamMembers] = useState([
@@ -187,6 +188,15 @@ export default function App() {
     setCurrentView('create');
   };
 
+  const toggleCompanyFilter = (comp) => {
+    if (activeCompanyFilters.includes(comp)) {
+      if (activeCompanyFilters.length === 1) return;
+      setActiveCompanyFilters(activeCompanyFilters.filter(c => c !== comp));
+    } else {
+      setActiveCompanyFilters([...activeCompanyFilters, comp]);
+    }
+  };
+
   const [tasks, setTasks] = useState([
     {
       id: 1,
@@ -296,7 +306,7 @@ export default function App() {
     }
   ]);
 
-  // LIVE TASK RESIZING ENGINE (Unshackled from 8-6 boundaries)
+  // LIVE TASK RESIZING ENGINE
   const handleResizeStart = (e, task, edge) => {
     e.stopPropagation();
     e.preventDefault(); 
@@ -330,14 +340,14 @@ export default function App() {
           newDuration = 0.5;
           newStartHour = state.initialStartHour + state.initialDuration - 0.5;
         }
-        if (newStartHour < 0) { // Unshackled limit
+        if (newStartHour < 0) {
           newStartHour = 0;
           newDuration = state.initialStartHour + state.initialDuration;
         }
       } else {
         newDuration = state.initialDuration + deltaHours;
         if (newDuration < 0.5) newDuration = 0.5;
-        if (state.initialStartHour + newDuration > 24) { // Unshackled limit
+        if (state.initialStartHour + newDuration > 24) {
           newDuration = 24 - state.initialStartHour;
         }
       }
@@ -659,11 +669,11 @@ export default function App() {
   const resetForm = () => {
     setTaskTitle('');
     setTaskDesc('');
-    setTaskCompany(companies[0] || ''); // SET DEFAULT COMPANY
+    setTaskCompany(companies[0] || ''); 
     setSelectedAssignees([]);
     setTaskPriority('Medium');
     setTaskDate(formatDateKey(currentDate));
-    setHasSpecificTime(false); // DEFAULT TO DAYLONG / FLEXIBLE
+    setHasSpecificTime(false); 
     setStartTime('09:00');
     setEndTime('11:00');
     setRecurrenceType('once');
@@ -1030,15 +1040,17 @@ export default function App() {
       ? (t.assignees.length === 0 || t.assignees.some(a => activeEmployeeFilters.includes(a)))
       : t.assignees.includes('Adrian R.');
 
+    const isCompanyMatch = activeCompanyFilters.includes(t.company);
+
     const isSearchMatch = !searchQuery.trim() || 
       (t.title && t.title.toLowerCase().includes(searchQuery.toLowerCase())) || 
       (t.desc && t.desc.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (t.assignees && t.assignees.some(a => a && a.toLowerCase().includes(searchQuery.toLowerCase())));
 
-    return isAssigneeMatch && isSearchMatch;
+    return isAssigneeMatch && isCompanyMatch && isSearchMatch;
   });
 
-  const backlogTasks = tasks.filter(t => (!t.assignees || t.assignees.length === 0) && t.status !== 'completed');
+  const backlogTasks = tasks.filter(t => (!t.assignees || t.assignees.length === 0) && t.status !== 'completed' && activeCompanyFilters.includes(t.company));
 
   const isTaskActiveOnDay = (task, dayOfWeekStr, dateStr) => {
     if (!task) return false;
@@ -1068,7 +1080,7 @@ export default function App() {
 
   const draggedTaskObj = draggedTaskId ? tasks.find(t => t.id === draggedTaskId) : null;
 
-  // DYNAMIC TIME GRID BOUNDS
+  // DYNAMIC ELASTIC TIME GRID BOUNDS (Standard 6am to 8pm, expands for outliers)
   let gridStartHour = 6;
   let gridEndHour = 20;
   
@@ -1266,35 +1278,64 @@ export default function App() {
           </div>
         </div>
 
-        {/* TEAM MEMBER FILTER BAR */}
+        {/* TEAM MEMBER & COMPANY FILTER BAR */}
         {userRole === 'admin' && currentView !== 'create' && (
-          <div className="bg-white p-2.5 rounded-lg border border-gray-200 mb-4 flex items-center justify-between shadow-2xs">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-gray-500">Filter Visible Team:</span>
-              <div className="flex gap-1.5">
-                {teamMembers.map(m => {
-                  const isActive = activeEmployeeFilters.includes(m.name);
-                  return (
-                    <button
-                      key={m.id}
-                      onClick={() => toggleEmployeeFilter(m.name)}
-                      className={`text-xs px-2.5 py-1 rounded-full font-bold border transition flex items-center gap-1.5 ${
-                        isActive ? 'bg-white shadow-2xs border-gray-300' : 'bg-gray-100 text-gray-400 border-gray-200 line-through'
-                      }`}>
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: m.color }}></span>
-                      {m.name}
-                    </button>
-                  );
-                })}
+          <div className="bg-white p-3 rounded-lg border border-gray-200 mb-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-2xs">
+            <div className="flex flex-wrap items-center gap-4">
+              {/* COMPANY FILTERS */}
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Companies:</span>
+                <div className="flex flex-wrap gap-1">
+                  {companies.map(comp => {
+                    const isActive = activeCompanyFilters.includes(comp);
+                    return (
+                      <button
+                        key={comp}
+                        onClick={() => toggleCompanyFilter(comp)}
+                        className={`text-xs px-2.5 py-1 rounded-md font-bold border transition ${
+                          isActive ? 'bg-[#333333] text-white border-[#333333] shadow-2xs' : 'bg-gray-100 text-gray-400 border-gray-200 line-through'
+                        }`}>
+                        {comp}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* TEAM FILTERS */}
+              <div className="flex items-center gap-2 border-l border-gray-200 pl-4">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Team:</span>
+                <div className="flex flex-wrap gap-1">
+                  {teamMembers.map(m => {
+                    const isActive = activeEmployeeFilters.includes(m.name);
+                    return (
+                      <button
+                        key={m.id}
+                        onClick={() => toggleEmployeeFilter(m.name)}
+                        className={`text-xs px-2.5 py-1 rounded-full font-bold border transition flex items-center gap-1.5 ${
+                          isActive ? 'bg-white shadow-2xs border-gray-300 text-gray-800' : 'bg-gray-100 text-gray-400 border-gray-200 line-through'
+                        }`}>
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: m.color }}></span>
+                        {m.name}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
-            <button onClick={() => setActiveEmployeeFilters(teamMembers.map(m => m.name))} className="text-[11px] font-bold text-[#A9B1A6] hover:underline">
-              Show All Team Members
+
+            <button 
+              onClick={() => {
+                setActiveCompanyFilters([...companies]);
+                setActiveEmployeeFilters(teamMembers.map(m => m.name));
+              }} 
+              className="text-[11px] font-bold text-[#A9B1A6] hover:underline self-end md:self-center">
+              Reset All Filters
             </button>
           </div>
         )}
 
-        {/* UNASSIGNED BACKLOG TRAY */}
+        {/* UNASSIGNED BACKLOG TRAY (HIDDEN IN LIST VIEW FOR ADMIN) */}
         {userRole === 'admin' && backlogTasks.length > 0 && currentView !== 'create' && currentView !== 'list' && (
           <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-4">
             <div className="flex justify-between items-center mb-2">
@@ -1326,8 +1367,8 @@ export default function App() {
           <div className="flex-col flex gap-6 overflow-y-auto pr-2">
             
             {userRole === 'admin' ? (
-              // ADMIN GROUPED COMPANY VIEW
-              Array.from(new Set([...companies, ...tasks.map(t => t.company).filter(Boolean)])).map(company => {
+              // ADMIN GROUPED COMPANY VIEW (Render active filtered companies)
+              companies.filter(c => activeCompanyFilters.includes(c)).map(company => {
                 const compActive = visibleTasks.filter(t => t.company === company && isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)));
                 const compCompleted = visibleTasks.filter(t => t.company === company && isTaskCompletedOnDay(t, formatDateKey(currentDate)));
                 const compBacklog = backlogTasks.filter(t => t.company === company);
@@ -1398,11 +1439,14 @@ export default function App() {
                           </div>
                         );
                       })}
+                      
+                      {/* PERMANENT VISIBILITY EMPTY STATE */}
                       {compActive.length === 0 && compBacklog.length === 0 && compCompleted.length === 0 && (
                         <div className="bg-white p-6 rounded text-center border border-dashed border-gray-300">
                           <p className="text-sm text-gray-500 font-bold">No tasks scheduled for {company} today.</p>
                         </div>
                       )}
+                      
                       {compActive.length === 0 && (compBacklog.length > 0 || compCompleted.length > 0) && (
                         <p className="text-xs text-gray-400 italic py-1">No active queue.</p>
                       )}
@@ -1515,7 +1559,7 @@ export default function App() {
           </div>
         )}
 
-        {/* DAY VIEW WITH SIDE-BY-SIDE OVERLAPPING TASKS & HOVER GHOST PREVIEW */}
+        {/* DAY VIEW WITH ELASTIC TIME GRID & HOVER GHOST PREVIEW */}
         {currentView === 'day' && (
           <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm min-w-[600px]">
             {/* Column Headers */}
@@ -1533,7 +1577,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Dynamic Time Grid Container */}
+            {/* Dynamic Elastic Container */}
             <div className="flex-1 relative overflow-y-auto flex" style={{ maxHeight: '580px' }}>
               {/* Time Label Sidebar */}
               <div className="w-20 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
@@ -1679,7 +1723,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Dynamic Time Grid Container */}
+            {/* Dynamic Elastic Container */}
             <div className="flex-1 relative overflow-y-auto flex" style={{ maxHeight: '550px' }}>
               {/* Time Label Sidebar */}
               <div className="w-16 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
@@ -1989,7 +2033,7 @@ export default function App() {
                   {recurrenceType === 'completion' && (
                     <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
                       <span className="text-sm text-gray-600">Re-deploy task</span>
-                      <input type="number" value={cadenceDays} onChange={(e) => setCadenceDays(Number(e.target.value))} className="w-12 p-1 border rounded text-center font-bold" />
+                      <input type="number" value={cadenceDays} onChange={(e) => setCadenceDays(Number(e.target.value))} className="border border-gray-300 rounded px-2 py-1 text-sm w-16 text-center font-bold" />
                       <span className="text-sm text-gray-600">days after completion</span>
                     </div>
                   )}
@@ -1998,7 +2042,7 @@ export default function App() {
                 <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
                   <div className="flex justify-between items-center mb-2">
                     <h4 className="font-bold text-sm">Multi-Step Task Chaining Engine</h4>
-                    <button type="button" onClick={handleAddChainedStep} className="text-[10px] font-bold bg-[#A9B1A6] text-white px-2.5 py-1 rounded hover:bg-gray-600 transition">+ Add Step</button>
+                    <button type="button" onClick={handleAddChainedStep} className="text-xs font-bold bg-[#A9B1A6] text-white px-2.5 py-1 rounded hover:bg-gray-600 transition">+ Add Step</button>
                   </div>
                   <p className="text-xs text-gray-500 mb-3">Build an automated pipeline of follow-up tasks triggered upon completion.</p>
 
@@ -2049,7 +2093,7 @@ export default function App() {
                       <input type="checkbox" checked={requiresComment} onChange={(e) => setRequiresComment(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require execution notes/comment to complete
                     </label>
                     <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer border-t pt-2 mt-1 border-gray-100">
-                      <input type="checkbox" checked={allowAssigneeDeadlineChange} onChange={(e) => setAllowAssigneeDeadlineChange(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Allow Assignee to Adjust Deadline Date
+                      <input type="checkbox" checked={allowAssigneeDeadlineChange} onChange={(e) => setAllowAssigneeDeadlineChange(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Allow assignee to adjust deadline date
                     </label>
                   </div>
                 </div>
@@ -2637,7 +2681,9 @@ export default function App() {
                   <button 
                     onClick={() => {
                       if(newCompanyInput.trim() && !companies.includes(newCompanyInput.trim())) {
-                        setCompanies([...companies, newCompanyInput.trim()]);
+                        const added = newCompanyInput.trim();
+                        setCompanies([...companies, added]);
+                        setActiveCompanyFilters([...activeCompanyFilters, added]);
                         setNewCompanyInput('');
                       }
                     }}
@@ -2653,6 +2699,7 @@ export default function App() {
                         onClick={() => {
                           if(companies.length > 1) {
                             setCompanies(companies.filter(c => c !== comp));
+                            setActiveCompanyFilters(activeCompanyFilters.filter(c => c !== comp));
                           } else {
                             alert('You must have at least one company in the system.');
                           }
