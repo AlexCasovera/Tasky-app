@@ -2,8 +2,8 @@
 import { useState, useEffect, useRef } from 'react';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState('month');
-  const [previousView, setPreviousView] = useState('month');
+  const [currentView, setCurrentView] = useState('list');
+  const [previousView, setPreviousView] = useState('list');
   const [userRole, setUserRole] = useState('admin');
   
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -11,8 +11,9 @@ export default function App() {
 
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState([
-    { id: 1, text: 'ALERT: "Client Follow-up" is past due!', type: 'overdue', read: false, time: '10m ago' },
-    { id: 2, text: 'Marc S. completed "Wash Laundry & Linens"', type: 'completion', read: false, time: '1h ago' }
+    { id: 1, text: '⚠️ OVERDUE: "Client Follow-up" (Alex M.) was not completed by 2026-09-02', type: 'overdue', recipientRole: 'admin', read: false, time: '10m ago' },
+    { id: 2, text: '✓ Task Completed: "Wash Laundry & Linens" by Marc S.', type: 'completion', recipientRole: 'admin', read: false, time: '1h ago' },
+    { id: 3, text: '📋 New Task Assigned: "Grab the Mail" (Sparkulous)', type: 'created', recipientRole: 'employee', read: false, time: '2h ago' }
   ]);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -24,14 +25,14 @@ export default function App() {
 
   const [teamMembers, setTeamMembers] = useState([
     { id: '1', name: 'Alex M.', initials: 'AM', email: 'alex@company.com', password: 'password123', role: 'admin', color: '#E63946' },
-    { id: '2', name: 'Adrian R.', initials: 'AR', email: 'adrian@company.com', password: 'password123', role: 'assignee', color: '#7209B7' },
-    { id: '3', name: 'Marc S.', initials: 'MS', email: 'marc@company.com', password: 'password123', role: 'assignee', color: '#0077B6' }
+    { id: '2', name: 'Adrian R.', initials: 'AR', email: 'adrian@company.com', password: 'password123', role: 'employee', color: '#7209B7' },
+    { id: '3', name: 'Marc S.', initials: 'MS', email: 'marc@company.com', password: 'password123', role: 'employee', color: '#0077B6' }
   ]);
 
   const [memberName, setMemberName] = useState('');
   const [memberEmail, setMemberEmail] = useState('');
   const [memberPassword, setMemberPassword] = useState('');
-  const [memberRole, setMemberRole] = useState('assignee');
+  const [memberRole, setMemberRole] = useState('employee');
   const [memberColor, setMemberColor] = useState('#2A9D8F');
   const [showPassword, setShowPassword] = useState(false);
 
@@ -43,7 +44,7 @@ export default function App() {
 
   const [taskTitle, setTaskTitle] = useState('');
   const [taskDesc, setTaskDesc] = useState('');
-  const [taskCompany, setTaskCompany] = useState('Sparkulous');
+  const [taskCompany, setTaskCompany] = useState(''); 
   const [selectedAssignees, setSelectedAssignees] = useState([]);
   const [taskPriority, setTaskPriority] = useState('Medium');
   const [taskDate, setTaskDate] = useState('');
@@ -61,24 +62,22 @@ export default function App() {
   const [requiresComment, setRequiresComment] = useState(false);
   const [allowAssigneeDeadlineChange, setAllowAssigneeDeadlineChange] = useState(false);
 
+  // ALL NOTIFICATION RULES ON BY DEFAULT
   const [notifyOnComplete, setNotifyOnComplete] = useState(true); 
   const [notifyOnComment, setNotifyOnComment] = useState(true);   
+  const [notifyOnDeadlineChange, setNotifyOnDeadlineChange] = useState(true); 
+  const [notifyOnTaskCreated, setNotifyOnTaskCreated] = useState(true); 
   
   const [openCommentInput, setExecutionComment] = useState('');
   const [photoUploaded, setPhotoUploaded] = useState(false);
   const [additionalNote, setAdditionalNote] = useState('');
 
-  // DRAG & DROP, HOVER GHOST & RESCHEDULE PROMPT STATE
   const [draggedTaskId, setDraggedTaskId] = useState(null);
   const [draggedInstanceDate, setDraggedInstanceDate] = useState(null);
   const [hoverSlot, setHoverSlot] = useState(null);
   const [reschedulePrompt, setReschedulePrompt] = useState(null);
-  
-  // LIVE RESIZING STATE
   const [resizingTaskId, setResizingTaskId] = useState(null);
   const resizeStateRef = useRef(null);
-
-  // AD-HOC FOLLOW-UP PROMPT STATE
   const [completionPrompt, setCompletionPrompt] = useState(null);
 
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -102,9 +101,9 @@ export default function App() {
 
   const handlePrevDate = () => {
     const d = new Date(currentDate);
-    if (currentView === 'day' || currentView === 'list') {
+    if (currentView === 'day' || (currentView === 'list' && userRole !== 'admin')) {
       d.setDate(d.getDate() - 1);
-    } else if (currentView === 'week') {
+    } else if (currentView === 'week' || (currentView === 'list' && userRole === 'admin')) {
       d.setDate(d.getDate() - 7);
     } else if (currentView === 'month') {
       d.setMonth(d.getMonth() - 1);
@@ -114,9 +113,9 @@ export default function App() {
 
   const handleNextDate = () => {
     const d = new Date(currentDate);
-    if (currentView === 'day' || currentView === 'list') {
+    if (currentView === 'day' || (currentView === 'list' && userRole !== 'admin')) {
       d.setDate(d.getDate() + 1);
-    } else if (currentView === 'week') {
+    } else if (currentView === 'week' || (currentView === 'list' && userRole === 'admin')) {
       d.setDate(d.getDate() + 7);
     } else if (currentView === 'month') {
       d.setMonth(d.getMonth() + 1);
@@ -139,15 +138,22 @@ export default function App() {
     const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-    if (currentView === 'day' || currentView === 'list') {
+    if (currentView === 'day' || (currentView === 'list' && userRole !== 'admin')) {
       return `${dayNames[currentDate.getDay()]}, ${monthNames[currentDate.getMonth()]} ${currentDate.getDate()}, ${currentDate.getFullYear()}`;
     }
 
-    if (currentView === 'week') {
-      const start = getWeekStart(currentDate);
+    if (currentView === 'week' || (currentView === 'list' && userRole === 'admin')) {
+      let start = new Date(currentDate);
+      if (currentView === 'list') {
+        const day = start.getDay();
+        const diff = start.getDate() - day + (day === 0 ? -6 : 1);
+        start.setDate(diff);
+      } else {
+        start = getWeekStart(currentDate);
+      }
       const end = new Date(start);
       end.setDate(end.getDate() + 6);
-      return `${monthNames[start.getMonth()].slice(0, 3)} ${start.getDate()} - ${monthNames[end.getMonth()].slice(0, 3)} ${end.getDate()}, ${end.getFullYear()}`;
+      return `Week of ${monthNames[start.getMonth()].slice(0, 3)} ${start.getDate()} - ${monthNames[end.getMonth()].slice(0, 3)} ${end.getDate()}, ${end.getFullYear()}`;
     }
 
     if (currentView === 'month') {
@@ -188,13 +194,74 @@ export default function App() {
     setCurrentView('create');
   };
 
-  const toggleCompanyFilter = (comp) => {
-    if (activeCompanyFilters.includes(comp)) {
-      if (activeCompanyFilters.length === 1) return;
-      setActiveCompanyFilters(activeCompanyFilters.filter(c => c !== comp));
-    } else {
-      setActiveCompanyFilters([...activeCompanyFilters, comp]);
-    }
+  const computeDynamicLayouts = (colTasks) => {
+    if (!colTasks || colTasks.length === 0) return {};
+
+    const items = colTasks.map(t => {
+      const isFlex = (t.type === 'flexible' || t.startHour === null || t.startHour === undefined);
+      const start = isFlex ? gridStartHour : Number(t.startHour || gridStartHour);
+      const dur = isFlex ? (gridEndHour - gridStartHour + 1) : Number(t.duration || 1.0);
+      return { id: t.id, start, end: start + dur, isFlex, task: t };
+    });
+
+    items.sort((a, b) => {
+      if (a.isFlex !== b.isFlex) return a.isFlex ? -1 : 1;
+      if (a.start !== b.start) return a.start - b.start;
+      return (b.end - b.start) - (a.end - a.start);
+    });
+
+    const clusters = [];
+    items.forEach(item => {
+      let targetCluster = null;
+      for (let cluster of clusters) {
+        if (cluster.some(c => Math.max(item.start, c.start) < Math.min(item.end, c.end))) {
+          targetCluster = cluster;
+          break;
+        }
+      }
+      if (targetCluster) {
+        targetCluster.push(item);
+      } else {
+        clusters.push([item]);
+      }
+    });
+
+    const layouts = {};
+    clusters.forEach(cluster => {
+      const cols = [];
+      cluster.forEach(item => {
+        let placed = false;
+        for (let col of cols) {
+          if (col[col.length - 1].end <= item.start) {
+            col.push(item);
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          cols.push([item]);
+        }
+      });
+
+      const numCols = cols.length;
+      cols.forEach((col, colIdx) => {
+        col.forEach(item => {
+          const leftPct = (colIdx / numCols) * 100;
+          const widthPct = (1.0 / numCols) * 100;
+          layouts[item.id] = {
+            left: `${leftPct}%`,
+            width: `calc(${widthPct}% - 12px)`,
+            startPx: (item.start - gridStartHour) * 80,
+            heightPx: Math.max(28, (item.end - item.start) * 80 - 2),
+            numCols,
+            colIdx,
+            isFlex: item.isFlex
+          };
+        });
+      });
+    });
+
+    return layouts;
   };
 
   const [tasks, setTasks] = useState([
@@ -222,6 +289,10 @@ export default function App() {
       chainedSteps: [],
       type: 'timed',
       status: 'pending',
+      notifyOnComplete: true,
+      notifyOnComment: true,
+      notifyOnDeadlineChange: true,
+      notifyOnTaskCreated: true,
       comments: []
     },
     {
@@ -250,6 +321,10 @@ export default function App() {
       status: 'pending',
       isOverdue: true,
       overdueNotified: true,
+      notifyOnComplete: true,
+      notifyOnComment: true,
+      notifyOnDeadlineChange: true,
+      notifyOnTaskCreated: true,
       comments: ['Admin created task.']
     },
     {
@@ -276,6 +351,10 @@ export default function App() {
       chainedSteps: [],
       type: 'timed',
       status: 'pending',
+      notifyOnComplete: true,
+      notifyOnComment: true,
+      notifyOnDeadlineChange: true,
+      notifyOnTaskCreated: true,
       comments: []
     },
     {
@@ -302,11 +381,14 @@ export default function App() {
       chainedSteps: [],
       type: 'flexible',
       status: 'pending',
+      notifyOnComplete: true,
+      notifyOnComment: true,
+      notifyOnDeadlineChange: true,
+      notifyOnTaskCreated: true,
       comments: []
     }
   ]);
 
-  // LIVE TASK RESIZING ENGINE
   const handleResizeStart = (e, task, edge) => {
     e.stopPropagation();
     e.preventDefault(); 
@@ -371,6 +453,21 @@ export default function App() {
 
     const handleUp = () => {
       if (resizeStateRef.current) {
+        const state = resizeStateRef.current;
+        const resizedTask = tasks.find(t => t.id === state.id);
+        if (resizedTask) {
+          setNotifications(prev => [
+            {
+              id: Date.now() + Math.random(),
+              text: `⏱️ Time Slot Adjusted: "${resizedTask.title}" duration modified`,
+              type: 'update',
+              recipientRole: 'employee',
+              read: false,
+              time: 'Just now'
+            },
+            ...prev
+          ]);
+        }
         resizeStateRef.current = null;
         setResizingTaskId(null);
       }
@@ -382,9 +479,8 @@ export default function App() {
       window.removeEventListener('pointermove', handleMove);
       window.removeEventListener('pointerup', handleUp);
     };
-  }, []);
+  }, [tasks]);
 
-  // AUTOMATED OVERDUE DETECTION
   useEffect(() => {
     const todayStr = formatDateKey(new Date());
 
@@ -396,10 +492,10 @@ export default function App() {
         if (isPastDue && !task.overdueNotified) {
           changed = true;
           const assigneeLabel = task.assignees && task.assignees.length > 0 ? task.assignees.join(', ') : 'Unassigned';
-          const notifMsg = `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was due on ${task.date}`;
+          const notifMsg = `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was not completed by ${task.date}`;
 
           setNotifications(prev => [
-            { id: Date.now() + Math.random(), text: notifMsg, type: 'overdue', read: false, time: 'Just now' },
+            { id: Date.now() + Math.random(), text: notifMsg, type: 'overdue', recipientRole: 'admin', read: false, time: 'Just now' },
             ...prev
           ]);
 
@@ -415,14 +511,13 @@ export default function App() {
     });
   }, []);
 
-  // DRAG & DROP HANDLERS WITH HTML5 DATA TRANSFER
   const handleDragStart = (e, taskId, sourceDate = null) => {
     if (userRole !== 'admin') return;
     setDraggedTaskId(taskId);
     setDraggedInstanceDate(sourceDate);
     
     const payload = JSON.stringify({ taskId, sourceDate });
-    e.dataTransfer.setData('application/json', payload);
+    e.dataTransfer.setData('text/plain', payload);
     e.dataTransfer.effectAllowed = 'move';
   };
 
@@ -479,6 +574,18 @@ export default function App() {
       }
 
       const effectiveSourceDate = sourceDateFromPrompt || targetTask.date;
+
+      setNotifications(prev => [
+        {
+          id: Date.now() + Math.random(),
+          text: `📅 Schedule Shifted: "${targetTask.title}" moved to ${targetDate}`,
+          type: 'update',
+          recipientRole: 'employee',
+          read: false,
+          time: 'Just now'
+        },
+        ...prev
+      ]);
 
       if (targetTask.recurrenceType !== 'once' && !updateSeries) {
         const standaloneTask = {
@@ -576,14 +683,19 @@ export default function App() {
     e.preventDefault();
     
     let taskId, sourceDate;
-    try {
-      const payload = JSON.parse(e.dataTransfer.getData('application/json'));
-      taskId = payload.taskId;
-      sourceDate = payload.sourceDate;
-    } catch (err) {
-      taskId = Number(e.dataTransfer.getData('text/plain') || draggedTaskId);
-      sourceDate = draggedInstanceDate;
+    const data = e.dataTransfer.getData('text/plain');
+    if (data) {
+      try {
+        const payload = JSON.parse(data);
+        taskId = payload.taskId;
+        sourceDate = payload.sourceDate;
+      } catch (err) {
+        taskId = Number(data);
+      }
     }
+    
+    if (!taskId) taskId = draggedTaskId;
+    if (!sourceDate) sourceDate = draggedInstanceDate;
 
     const task = tasks.find(t => t.id === taskId);
     setHoverSlot(null);
@@ -607,7 +719,7 @@ export default function App() {
     setMemberName('');
     setMemberEmail('');
     setMemberPassword('');
-    setMemberRole('assignee');
+    setMemberRole('employee');
     setMemberColor('#2A9D8F');
     setEditingMemberId(null);
     setShowPassword(false);
@@ -669,7 +781,7 @@ export default function App() {
   const resetForm = () => {
     setTaskTitle('');
     setTaskDesc('');
-    setTaskCompany(companies[0] || ''); 
+    setTaskCompany(''); 
     setSelectedAssignees([]);
     setTaskPriority('Medium');
     setTaskDate(formatDateKey(currentDate));
@@ -686,6 +798,8 @@ export default function App() {
     setAllowAssigneeDeadlineChange(false);
     setNotifyOnComplete(true); 
     setNotifyOnComment(true);   
+    setNotifyOnDeadlineChange(true);
+    setNotifyOnTaskCreated(true);
   };
 
   const handleAddChainedStep = () => {
@@ -717,6 +831,15 @@ export default function App() {
     }
   };
 
+  const toggleCompanyFilter = (comp) => {
+    if (activeCompanyFilters.includes(comp)) {
+      if (activeCompanyFilters.length === 1) return;
+      setActiveCompanyFilters(activeCompanyFilters.filter(c => c !== comp));
+    } else {
+      setActiveCompanyFilters([...activeCompanyFilters, comp]);
+    }
+  };
+
   const toggleDay = (day) => {
     setActiveDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]);
   };
@@ -745,6 +868,7 @@ export default function App() {
 
   const handleDeployTask = () => {
     if (!taskTitle.trim()) return alert('Please provide a task title.');
+    if (!taskCompany) return alert('Please select a company for this task.');
 
     const startDec = timeToDecimal(startTime);
     const endDec = timeToDecimal(endTime);
@@ -774,10 +898,28 @@ export default function App() {
       chainedSteps: chainedSteps.filter(s => s.title.trim() !== ''),
       type: hasSpecificTime ? 'timed' : 'flexible',
       status: 'pending',
+      notifyOnComplete,
+      notifyOnComment,
+      notifyOnDeadlineChange,
+      notifyOnTaskCreated,
       comments: []
     };
 
     setTasks([newTask, ...tasks]);
+
+    // NOTIFICATION TRIGGER: EMPLOYEE TASK CREATED
+    setNotifications(prev => [
+      {
+        id: Date.now() + Math.random(),
+        text: `📋 New Task Assigned: "${taskTitle}" (${taskCompany})`,
+        type: 'created',
+        recipientRole: 'employee',
+        read: false,
+        time: 'Just now'
+      },
+      ...prev
+    ]);
+
     resetForm();
     setCurrentView(previousView);
   };
@@ -792,7 +934,7 @@ export default function App() {
 
     setTaskTitle(task.title);
     setTaskDesc(task.desc);
-    setTaskCompany(task.company || companies[0] || '');
+    setTaskCompany(task.company || '');
     setSelectedAssignees(task.assignees || []);
     setTaskPriority(task.priority);
     setTaskDate(task.date || instanceDateStr);
@@ -808,11 +950,14 @@ export default function App() {
     setAllowAssigneeDeadlineChange(task.allowAssigneeDeadlineChange || false);
     setNotifyOnComplete(task.notifyOnComplete ?? true);
     setNotifyOnComment(task.notifyOnComment ?? true);
+    setNotifyOnDeadlineChange(task.notifyOnDeadlineChange ?? true);
+    setNotifyOnTaskCreated(task.notifyOnTaskCreated ?? true);
     setChainedSteps(task.chainedSteps || []);
   };
 
   const handleSaveChanges = () => {
     if (!taskTitle.trim()) return alert('Title cannot be empty.');
+    if (!taskCompany) return alert('Please select a company for this task.');
 
     const startDec = timeToDecimal(startTime);
     const endDec = timeToDecimal(endTime);
@@ -842,12 +987,27 @@ export default function App() {
       allowAssigneeDeadlineChange,
       notifyOnComplete,
       notifyOnComment,
+      notifyOnDeadlineChange,
+      notifyOnTaskCreated,
       chainedSteps: chainedSteps.filter(s => s.title.trim() !== ''),
       isOverdue: isStillOverdue,
       overdueNotified: isStillOverdue
     };
 
     setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t));
+
+    setNotifications(prev => [
+      {
+        id: Date.now() + Math.random(),
+        text: `✏️ Task Updated: "${taskTitle}" (Details/Deadline modified by Admin)`,
+        type: 'update',
+        recipientRole: 'employee',
+        read: false,
+        time: 'Just now'
+      },
+      ...prev
+    ]);
+
     setSelectedTask(updatedTask);
     setIsEditing(false);
   };
@@ -859,16 +1019,28 @@ export default function App() {
 
   const handlePostOpenComment = (id) => {
     if (!openCommentInput.trim()) return;
-    const commentText = `${userRole === 'admin' ? 'Admin' : 'Assignee'} (${selectedInstanceDate}): ${openCommentInput}`;
+    const commentText = `${userRole === 'admin' ? 'Admin' : 'Employee'} (${selectedInstanceDate}): ${openCommentInput}`;
     
     setTasks(tasks.map(t => t.id === id ? { ...t, comments: [...(t.comments || []), commentText] } : t));
     setSelectedTask(prev => ({ ...prev, comments: [...(prev.comments || []), commentText] }));
     
-    setNotifications([{ id: Date.now(), text: `New comment on "${selectedTask.title}"`, type: 'comment', read: false, time: 'Just now' }, ...notifications]);
+    if (userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
+      setNotifications(prev => [
+        {
+          id: Date.now() + Math.random(),
+          text: `💬 New Note on "${selectedTask.title}" by Employee`,
+          type: 'comment',
+          recipientRole: 'admin',
+          read: false,
+          time: 'Just now'
+        },
+        ...prev
+      ]);
+    }
+
     setExecutionComment('');
   };
 
-  // INTERCEPT COMPLETION TO TRIGGER AD-HOC FOLLOW-UP PROMPT
   const handleInitiateCompletion = () => {
     if (selectedTask.requiresPhoto && !photoUploaded) return alert('Photo upload required to complete this task.');
     if (selectedTask.requiresComment && !openCommentInput.trim() && (!selectedTask.comments || selectedTask.comments.length === 0)) {
@@ -877,17 +1049,23 @@ export default function App() {
     
     setCompletionPrompt({
       showForm: false,
-      title: `Follow-up: ${selectedTask.title}`,
+      title: '', 
       desc: '',
       assignee: selectedTask.assignees[0] || teamMembers[0].name,
-      offsetDays: 1
+      targetDate: formatDateKey(new Date()) 
     });
   };
 
   const executeCompletion = (withFollowUp) => {
     const noteText = openCommentInput.trim() 
-      ? `${userRole === 'admin' ? 'Admin' : 'Assignee'} (${selectedInstanceDate}): ${openCommentInput}`
+      ? `${userRole === 'admin' ? 'Admin' : 'Employee'} (${selectedInstanceDate}): ${openCommentInput}`
       : null;
+
+    if (withFollowUp && completionPrompt) {
+      if (!completionPrompt.title.trim()) {
+        return alert("Please enter a title for the sub task.");
+      }
+    }
 
     let updatedTasks = tasks.map(t => {
       if (t.id === selectedTask.id) {
@@ -902,17 +1080,26 @@ export default function App() {
       return t;
     });
 
-    setNotifications([
-      { id: Date.now(), text: `${userRole === 'admin' ? 'Admin' : 'Assignee'} completed "${selectedTask.title}"`, type: 'completion', read: false, time: 'Just now' },
-      ...notifications
-    ]);
+    if (selectedTask?.notifyOnComplete !== false) {
+      setNotifications(prev => [
+        {
+          id: Date.now() + Math.random(),
+          text: `✓ Task Completed: "${selectedTask.title}" by ${userRole === 'admin' ? 'Admin' : 'Employee'}`,
+          type: 'completion',
+          recipientRole: 'admin',
+          read: false,
+          time: 'Just now'
+        },
+        ...prev
+      ]);
+    }
 
     if (withFollowUp && completionPrompt) {
-      const targetDate = addDaysToDateStr(selectedInstanceDate, completionPrompt.offsetDays || 1);
+      const targetDate = completionPrompt.targetDate || formatDateKey(new Date());
       const newAdHocTask = {
         id: Date.now() + 5,
-        title: completionPrompt.title || 'Follow-up Task',
-        desc: completionPrompt.desc || `Ad-hoc follow-up from: "${selectedTask.title}"`,
+        title: completionPrompt.title,
+        desc: completionPrompt.desc || `Ad-hoc sub task from: "${selectedTask.title}"`,
         company: selectedTask.company,
         assignees: [completionPrompt.assignee],
         date: targetDate,
@@ -934,10 +1121,32 @@ export default function App() {
         type: 'flexible',
         status: 'pending',
         isOverdue: false,
-        comments: [`Auto-deployed via Ad-Hoc Follow-up prompt upon completion of "${selectedTask.title}"`]
+        parentTaskId: selectedTask.id,
+        parentTaskTitle: selectedTask.title,
+        parentInstanceDate: selectedInstanceDate,
+        notifyOnComplete: true,
+        notifyOnComment: true,
+        notifyOnDeadlineChange: true,
+        notifyOnTaskCreated: true,
+        comments: [`Auto-deployed via Sub Task prompt upon completion of "${selectedTask.title}"`]
       };
+
+      if (selectedTask?.notifyOnTaskCreated !== false) {
+        setNotifications(prev => [
+          {
+            id: Date.now() + Math.random(),
+            text: `➕ New Sub Task Spawned: "${completionPrompt.title}" for ${targetDate}`,
+            type: 'subtask',
+            recipientRole: 'admin',
+            read: false,
+            time: 'Just now'
+          },
+          ...prev
+        ]);
+      }
+
       updatedTasks = [newAdHocTask, ...updatedTasks];
-      alert(`Follow-up task "${completionPrompt.title}" deployed to backlog/schedule for ${targetDate}.`);
+      alert(`Sub task "${completionPrompt.title}" deployed to backlog/schedule for ${targetDate}.`);
     }
 
     if (selectedTask.recurrenceType === 'completion') {
@@ -985,6 +1194,13 @@ export default function App() {
         type: 'timed',
         status: 'pending',
         isOverdue: false,
+        parentTaskId: selectedTask.id,
+        parentTaskTitle: selectedTask.title,
+        parentInstanceDate: selectedInstanceDate,
+        notifyOnComplete: true,
+        notifyOnComment: true,
+        notifyOnDeadlineChange: true,
+        notifyOnTaskCreated: true,
         comments: [`Auto-deployed via Pre-Configured Workflow from "${selectedTask.title}"`]
       };
       updatedTasks = [chainedTask, ...updatedTasks];
@@ -997,7 +1213,7 @@ export default function App() {
 
   const handleAppendNote = (id) => {
     if (!additionalNote.trim()) return;
-    const noteText = `${userRole === 'admin' ? 'Admin Note' : 'Assignee Note'}: ${additionalNote}`;
+    const noteText = `${userRole === 'admin' ? 'Admin Note' : 'Employee Note'}: ${additionalNote}`;
     setTasks(tasks.map(t => t.id === id ? { ...t, comments: [...(t.comments || []), noteText] } : t));
     setAdditionalNote('');
     setSelectedTask(prev => ({ ...prev, comments: [...(prev.comments || []), noteText] }));
@@ -1018,7 +1234,10 @@ export default function App() {
     setNotifications(notifications.map(n => ({ ...n, read: true })));
   };
 
-  const unreadNotifCount = notifications.filter(n => !n.read).length;
+  const roleNotifications = notifications.filter(n => 
+    !n.recipientRole || n.recipientRole === 'all' || n.recipientRole === userRole
+  );
+  const unreadNotifCount = roleNotifications.filter(n => !n.read).length;
 
   const getPriorityStyle = (priority) => {
     switch (priority) {
@@ -1080,7 +1299,6 @@ export default function App() {
 
   const draggedTaskObj = draggedTaskId ? tasks.find(t => t.id === draggedTaskId) : null;
 
-  // DYNAMIC ELASTIC TIME GRID BOUNDS (Standard 6am to 8pm, expands for outliers)
   let gridStartHour = 6;
   let gridEndHour = 20;
   
@@ -1102,80 +1320,9 @@ export default function App() {
 
   const dynamicTimeSlots = Array.from({ length: gridEndHour - gridStartHour + 1 }, (_, i) => gridStartHour + i);
 
-  // REDEFINED LAYOUT ENGINE WITH DYNAMIC BOUNDS
-  const computeDynamicLayouts = (colTasks) => {
-    if (!colTasks || colTasks.length === 0) return {};
-
-    const items = colTasks.map(t => {
-      const isFlex = (t.type === 'flexible' || t.startHour === null || t.startHour === undefined);
-      const start = isFlex ? gridStartHour : Number(t.startHour || gridStartHour);
-      const dur = isFlex ? (gridEndHour - gridStartHour + 1) : Number(t.duration || 1.0);
-      return { id: t.id, start, end: start + dur, isFlex, task: t };
-    });
-
-    items.sort((a, b) => {
-      if (a.isFlex !== b.isFlex) return a.isFlex ? -1 : 1;
-      if (a.start !== b.start) return a.start - b.start;
-      return (b.end - b.start) - (a.end - a.start);
-    });
-
-    const clusters = [];
-    items.forEach(item => {
-      let targetCluster = null;
-      for (let cluster of clusters) {
-        if (cluster.some(c => Math.max(item.start, c.start) < Math.min(item.end, c.end))) {
-          targetCluster = cluster;
-          break;
-        }
-      }
-      if (targetCluster) {
-        targetCluster.push(item);
-      } else {
-        clusters.push([item]);
-      }
-    });
-
-    const layouts = {};
-    clusters.forEach(cluster => {
-      const cols = [];
-      cluster.forEach(item => {
-        let placed = false;
-        for (let col of cols) {
-          if (col[col.length - 1].end <= item.start) {
-            col.push(item);
-            placed = true;
-            break;
-          }
-        }
-        if (!placed) {
-          cols.push([item]);
-        }
-      });
-
-      const numCols = cols.length;
-      cols.forEach((col, colIdx) => {
-        col.forEach(item => {
-          const leftPct = (colIdx / numCols) * 100;
-          const widthPct = (1.0 / numCols) * 100;
-          layouts[item.id] = {
-            left: `${leftPct}%`,
-            width: `calc(${widthPct}% - 12px)`,
-            startPx: (item.start - gridStartHour) * 80,
-            heightPx: Math.max(28, (item.end - item.start) * 80 - 2),
-            numCols,
-            colIdx,
-            isFlex: item.isFlex
-          };
-        });
-      });
-    });
-
-    return layouts;
-  };
-
   return (
     <div className="min-h-screen bg-[#A9B1A6] p-4 sm:p-8 font-sans text-[#333333]">
-      <div className="max-w-7xl mx-auto bg-[#F4F3ED] p-6 rounded-lg shadow-sm min-h-[850px] flex flex-col relative">
+      <div className="max-w-[95%] mx-auto bg-[#F4F3ED] p-6 rounded-lg shadow-sm min-h-[850px] flex flex-col relative">
         
         {/* ROLE SIMULATION HEADER */}
         <div className="bg-[#333333] text-white px-4 py-2 rounded-md mb-4 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs shadow-md">
@@ -1187,9 +1334,9 @@ export default function App() {
               Admin View
             </button>
             <button 
-              onClick={() => setUserRole('assignee')}
-              className={`px-3 py-1 rounded font-bold transition ${userRole === 'assignee' ? 'bg-[#A9B1A6] text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>
-              Assignee View (Adrian R.)
+              onClick={() => setUserRole('employee')}
+              className={`px-3 py-1 rounded font-bold transition ${userRole === 'employee' ? 'bg-[#A9B1A6] text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>
+              Employee View (Adrian R.)
             </button>
           </div>
 
@@ -1244,18 +1391,21 @@ export default function App() {
               {isNotifOpen && (
                 <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl border border-gray-300 z-50 p-3 animate-fade-in">
                   <div className="flex justify-between items-center border-b pb-2 mb-2">
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700">Notification Center</h4>
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700">Notification Center ({userRole.toUpperCase()})</h4>
                     <button onClick={markAllNotifsRead} className="text-[10px] text-blue-600 font-bold hover:underline">Mark all read</button>
                   </div>
                   <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
-                    {notifications.map(n => (
-                      <div key={n.id} className={`p-2 rounded text-xs border ${n.read ? 'bg-gray-50 border-gray-100 text-gray-500' : 'bg-red-50 border-red-200 text-red-900 font-bold'}`}>
-                        <div className="flex justify-between">
+                    {roleNotifications.map(n => (
+                      <div key={n.id} className={`p-2 rounded text-xs border ${n.read ? 'bg-gray-50 border-gray-100 text-gray-500' : 'bg-blue-50/80 border-blue-200 text-gray-900 font-bold'}`}>
+                        <div className="flex justify-between items-start gap-1">
                           <span>{n.text}</span>
-                          <span className="text-[9px] text-gray-400">{n.time}</span>
+                          <span className="text-[9px] text-gray-400 shrink-0">{n.time}</span>
                         </div>
                       </div>
                     ))}
+                    {roleNotifications.length === 0 && (
+                      <p className="text-xs text-gray-400 italic text-center py-2">No notifications for {userRole}.</p>
+                    )}
                   </div>
                 </div>
               )}
@@ -1271,7 +1421,7 @@ export default function App() {
             )}
 
             {userRole === 'admin' && (
-              <button onClick={handleOpenCreateView} className="bg-[#A9B1A6] text-white px-4 py-2 rounded text-xs font-bold shadow-sm hover:bg-gray-600 transition">
+              <button onClick={handleOpenCreateView} className="bg-[#5B7049] text-white px-4 py-2 rounded text-xs font-bold shadow-sm hover:bg-[#465638] transition">
                 + New Task
               </button>
             )}
@@ -1362,122 +1512,184 @@ export default function App() {
           </div>
         )}
 
-        {/* LIST VIEW (ADMIN GROUPED / ASSIGNEE FLAT) */}
+        {/* LIST VIEW (ADMIN GROUPED WEEKLY / EMPLOYEE FLAT DAILY) */}
         {currentView === 'list' && (
           <div className="flex-col flex gap-6 overflow-y-auto pr-2">
             
             {userRole === 'admin' ? (
-              // ADMIN GROUPED COMPANY VIEW (Render active filtered companies)
-              companies.filter(c => activeCompanyFilters.includes(c)).map(company => {
-                const compActive = visibleTasks.filter(t => t.company === company && isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)));
-                const compCompleted = visibleTasks.filter(t => t.company === company && isTaskCompletedOnDay(t, formatDateKey(currentDate)));
-                const compBacklog = backlogTasks.filter(t => t.company === company);
+              // ADMIN GROUPED COMPANY VIEW (Mon-Sun Weekly View)
+              (() => {
+                const start = new Date(currentDate);
+                const day = start.getDay();
+                const diff = start.getDate() - day + (day === 0 ? -6 : 1);
+                start.setDate(diff);
+                
+                const end = new Date(start);
+                end.setDate(end.getDate() + 6);
+                
+                const weekDates = [];
+                for(let i=0; i<7; i++) {
+                  const d = new Date(start);
+                  d.setDate(d.getDate() + i);
+                  weekDates.push({ dateStr: formatDateKey(d), dayOfWeekStr: daysOfWeek[d.getDay()] });
+                }
 
                 return (
-                  <div key={company} className="flex flex-col gap-4 mb-4">
-                    <div className="flex items-center gap-2 mb-1 border-b border-gray-300 pb-2">
-                      <span className="w-3 h-3 rounded-sm bg-[#333333]"></span>
-                      <h2 className="text-lg font-serif font-bold text-gray-800 tracking-wide">{company}</h2>
+                  <>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                      <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500">Weekly Overview</h2>
                     </div>
-                    
-                    {compBacklog.length > 0 && (
-                      <div className="bg-amber-50 border border-amber-300 rounded-lg p-3">
-                        <div className="flex justify-between items-center mb-2">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-amber-900 flex items-center gap-2">
-                            📥 Unassigned Backlog ({compBacklog.length})
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {compBacklog.map(task => (
-                            <div 
-                              key={task.id}
-                              draggable={userRole === 'admin'}
-                              onDragStart={(e) => handleDragStart(e, task.id, task.date)}
-                              onDragEnd={handleDragEnd}
-                              onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                              className="bg-white px-3 py-1.5 rounded border border-amber-200 text-xs font-bold text-gray-800 cursor-grab active:cursor-grabbing hover:bg-amber-100 transition shadow-2xs flex items-center gap-2">
-                              <span>{task.title}</span>
-                              <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">Unassigned</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
 
-                    <div className="flex flex-col gap-3">
-                      {compActive.map(task => {
-                        const style = getPriorityStyle(task.priority);
-                        return (
-                          <div 
-                            key={task.id}
-                            onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                            className={`bg-white p-4 rounded border-l-4 ${task.isOverdue ? 'border-red-600 bg-red-50/50 ring-1 ring-red-400' : style.border} shadow-sm flex justify-between items-center cursor-pointer hover:bg-gray-50 transition`}>
-                            <div className="w-1/2 flex items-center gap-4">
-                              <span className="font-mono text-sm font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200">{task.timeLabel}</span>
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <h3 className="font-bold text-lg">{task.title}</h3>
-                                  {task.isOverdue && <span className="text-[10px] bg-red-600 text-white font-bold px-1.5 py-0.5 rounded animate-pulse">OVERDUE</span>}
-                                  {task.recurrenceType === 'completion' && <span className="text-[10px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded">🔄 Interval</span>}
-                                </div>
-                                <p className="text-sm text-gray-500 truncate">{task.desc}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              <span className={`text-xs font-semibold px-3 py-1 rounded-full ${style.badge}`}>{task.priority}</span>
-                              <div className="flex -space-x-2">
-                                {(task.assignees || []).map((a, idx) => {
-                                  const m = getMemberConfig(a);
-                                  return (
-                                    <div key={idx} style={{ backgroundColor: m.color }} className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-xs text-white shadow-sm font-bold">
-                                      {m.initials}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
+                    {companies.filter(c => activeCompanyFilters.includes(c)).map(company => {
+                      
+                      let compWeekTasks = [];
+                      let compWeekCompleted = [];
+
+                      visibleTasks.forEach(t => {
+                        if(t.company === company) {
+                          weekDates.forEach(wd => {
+                            if (isTaskActiveOnDay(t, wd.dayOfWeekStr, wd.dateStr)) {
+                              compWeekTasks.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
+                            }
+                            if (isTaskCompletedOnDay(t, wd.dateStr)) {
+                              compWeekCompleted.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
+                            }
+                          });
+                        }
+                      });
+
+                      const priorityScore = { High: 1, Medium: 2, Low: 3, Routine: 4 };
+                      compWeekTasks.sort((a, b) => {
+                        if (a.instanceDate !== b.instanceDate) return a.instanceDate.localeCompare(b.instanceDate);
+                        return (priorityScore[a.priority] || 5) - (priorityScore[b.priority] || 5);
+                      });
+
+                      compWeekCompleted.sort((a, b) => a.instanceDate.localeCompare(b.instanceDate));
+                      const compBacklog = backlogTasks.filter(t => t.company === company);
+
+                      return (
+                        <div key={company} className="flex flex-col gap-4 mb-6">
+                          <div className="flex items-center gap-2 mb-1 border-b border-gray-300 pb-2">
+                            <span className="w-3 h-3 rounded-sm bg-[#333333]"></span>
+                            <h2 className="text-lg font-serif font-bold text-gray-800 tracking-wide">{company}</h2>
                           </div>
-                        );
-                      })}
-                      
-                      {/* PERMANENT VISIBILITY EMPTY STATE */}
-                      {compActive.length === 0 && compBacklog.length === 0 && compCompleted.length === 0 && (
-                        <div className="bg-white p-6 rounded text-center border border-dashed border-gray-300">
-                          <p className="text-sm text-gray-500 font-bold">No tasks scheduled for {company} today.</p>
-                        </div>
-                      )}
-                      
-                      {compActive.length === 0 && (compBacklog.length > 0 || compCompleted.length > 0) && (
-                        <p className="text-xs text-gray-400 italic py-1">No active queue.</p>
-                      )}
-                    </div>
-
-                    {compCompleted.length > 0 && (
-                      <div className="pt-2 border-t border-gray-200">
-                        <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-2">Completed Today</h3>
-                        <div className="flex flex-col gap-2">
-                          {compCompleted.map(task => (
-                            <div 
-                              key={task.id} 
-                              onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                              className="bg-gray-200/60 p-3 rounded flex justify-between items-center cursor-pointer hover:bg-gray-200 transition">
-                              <div>
-                                <span className="line-through text-sm font-bold text-gray-600 block">{task.title}</span>
-                                <span className="text-xs text-gray-500">Assignees: {(task.assignees || []).join(', ')}</span>
+                          
+                          {compBacklog.length > 0 && (
+                            <div className="bg-amber-50 border border-amber-300 rounded-lg p-3">
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-900 flex items-center gap-2">
+                                  📥 Unassigned Backlog ({compBacklog.length})
+                                </span>
                               </div>
-                              <span className="text-xs font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-300">
-                                ✓ Completed
-                              </span>
+                              <div className="flex flex-wrap gap-2">
+                                {compBacklog.map(task => (
+                                  <div 
+                                    key={task.id}
+                                    draggable={userRole === 'admin'}
+                                    onDragStart={(e) => handleDragStart(e, task.id, task.date)}
+                                    onDragEnd={handleDragEnd}
+                                    onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
+                                    className="bg-white px-3 py-1.5 rounded border border-amber-200 text-xs font-bold text-gray-800 cursor-grab active:cursor-grabbing hover:bg-amber-100 transition shadow-2xs flex items-center gap-2">
+                                    <span>{task.title}</span>
+                                    <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">Unassigned</span>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          ))}
+                          )}
+
+                          <div className="flex flex-col gap-3">
+                            {compWeekTasks.map(task => {
+                              const style = getPriorityStyle(task.priority);
+                              return (
+                                <div 
+                                  key={`${task.id}-${task.instanceDate}`}
+                                  onClick={() => handleOpenModal(task, task.instanceDate)}
+                                  className={`bg-white p-3 rounded border-l-4 ${task.isOverdue ? 'border-red-600 bg-red-50/50 ring-1 ring-red-400' : style.border} shadow-sm flex justify-between items-center cursor-pointer hover:bg-gray-50 transition`}>
+                                  
+                                  <div className="flex items-center gap-4 w-2/3">
+                                    <div className="flex flex-col items-center justify-center bg-gray-50 rounded px-2.5 py-1 min-w-[50px] border border-gray-200 shrink-0">
+                                      <span className="text-[9px] font-bold text-gray-500 uppercase">{task.instanceDay}</span>
+                                      <span className="text-sm font-bold text-gray-800">{task.instanceDate.split('-')[2]}</span>
+                                    </div>
+                                    
+                                    <span className="font-mono text-xs font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200 shrink-0">{task.timeLabel}</span>
+                                    
+                                    <div className="truncate pr-2">
+                                      <div className="flex items-center gap-2">
+                                        <h3 className="font-bold text-sm truncate">{task.title}</h3>
+                                        {task.isOverdue && <span className="text-[9px] bg-red-600 text-white font-bold px-1.5 py-0.5 rounded animate-pulse shrink-0">OVERDUE</span>}
+                                        {task.recurrenceType === 'completion' && <span className="text-[9px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded shrink-0">🔄</span>}
+                                      </div>
+                                      <p className="text-[11px] text-gray-500 truncate">{task.desc}</p>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-3 shrink-0">
+                                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${style.badge}`}>{task.priority}</span>
+                                    <div className="flex -space-x-1.5">
+                                      {(task.assignees || []).map((a, idx) => {
+                                        const m = getMemberConfig(a);
+                                        return (
+                                          <div key={idx} style={{ backgroundColor: m.color }} className="w-6 h-6 rounded-full border border-white flex items-center justify-center text-[9px] text-white shadow-sm font-bold">
+                                            {m.initials}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+
+                                </div>
+                              );
+                            })}
+                            
+                            {compWeekTasks.length === 0 && compBacklog.length === 0 && compWeekCompleted.length === 0 && (
+                              <div className="bg-white p-6 rounded text-center border border-dashed border-gray-300">
+                                <p className="text-sm text-gray-500 font-bold">No tasks scheduled for {company} this week.</p>
+                              </div>
+                            )}
+                            
+                            {compWeekTasks.length === 0 && (compBacklog.length > 0 || compWeekCompleted.length > 0) && (
+                              <p className="text-xs text-gray-400 italic py-1">No active queue this week.</p>
+                            )}
+                          </div>
+
+                          {compWeekCompleted.length > 0 && (
+                            <div className="pt-2 border-t border-gray-200">
+                              <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-2">Completed This Week</h3>
+                              <div className="flex flex-col gap-2">
+                                {compWeekCompleted.map(task => (
+                                  <div 
+                                    key={`${task.id}-comp-${task.instanceDate}`}
+                                    onClick={() => handleOpenModal(task, task.instanceDate)}
+                                    className="bg-gray-200/60 p-2.5 rounded flex justify-between items-center cursor-pointer hover:bg-gray-200 transition">
+                                    <div className="flex items-center gap-3">
+                                      <div className="flex flex-col items-center justify-center bg-gray-300/50 rounded px-2 py-0.5 min-w-[40px] shrink-0">
+                                        <span className="text-[8px] font-bold text-gray-500 uppercase">{task.instanceDay}</span>
+                                        <span className="text-xs font-bold text-gray-600">{task.instanceDate.split('-')[2]}</span>
+                                      </div>
+                                      <div>
+                                        <span className="line-through text-xs font-bold text-gray-600 block">{task.title}</span>
+                                        <span className="text-[10px] text-gray-500">Assigned to: {(task.assignees || []).join(', ')}</span>
+                                      </div>
+                                    </div>
+                                    <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full border border-green-300">
+                                      ✓ Completed
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    )}
-                  </div>
+                      );
+                    })}
+                  </>
                 );
-              })
+              })()
             ) : (
-              // ASSIGNEE FLAT LIST VIEW
+              // EMPLOYEE FLAT LIST VIEW (Single Day)
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <span className="w-2 h-2 rounded-full bg-red-500"></span>
@@ -1544,7 +1756,7 @@ export default function App() {
                               <span className="line-through text-sm font-bold text-gray-600 block">{task.title}</span>
                               <span className="text-[9px] bg-gray-300 text-gray-600 px-1 py-0.5 rounded">{task.company}</span>
                             </div>
-                            <span className="text-xs text-gray-500">Assignees: {(task.assignees || []).join(', ')}</span>
+                            <span className="text-xs text-gray-500">Assigned to: {(task.assignees || []).join(', ')}</span>
                           </div>
                           <span className="text-xs font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-300">
                             ✓ Completed
@@ -1562,7 +1774,6 @@ export default function App() {
         {/* DAY VIEW WITH ELASTIC TIME GRID & HOVER GHOST PREVIEW */}
         {currentView === 'day' && (
           <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm min-w-[600px]">
-            {/* Column Headers */}
             <div className="flex border-b border-gray-300 bg-gray-100">
               <div className="w-20 py-3 text-center text-xs font-bold text-gray-500 border-r border-gray-300">Time</div>
               <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
@@ -1577,9 +1788,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Dynamic Elastic Container */}
             <div className="flex-1 relative overflow-y-auto flex" style={{ maxHeight: '580px' }}>
-              {/* Time Label Sidebar */}
               <div className="w-20 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
                 {dynamicTimeSlots.map(hour => (
                   <div key={hour} className="h-20 border-b border-gray-200 p-2 text-xs font-mono font-bold text-gray-400 text-right pr-3">
@@ -1588,7 +1797,6 @@ export default function App() {
                 ))}
               </div>
 
-              {/* Interactive Member Columns */}
               <div className="flex-1 grid relative" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))`, height: `${dynamicTimeSlots.length * 80}px` }}>
                 {visibleMembers.map(member => {
                   const dayDateStr = formatDateKey(currentDate);
@@ -1597,7 +1805,6 @@ export default function App() {
 
                   return (
                     <div key={member.id} className="border-r border-gray-200 last:border-r-0 relative h-full">
-                      {/* 15-Minute Sub-Slot Drop Grid */}
                       {dynamicTimeSlots.map(hour => (
                         <div key={hour} className="h-20 border-b border-gray-200 flex flex-col">
                           {minuteSubSlots.map(subOffset => (
@@ -1612,7 +1819,6 @@ export default function App() {
                         </div>
                       ))}
 
-                      {/* REAL-TIME HOVER GHOST PREVIEW CARD (HCP-STYLE) */}
                       {draggedTaskObj && hoverSlot && hoverSlot.memberName === member.name && hoverSlot.dateStr === dayDateStr && (
                         <div 
                           style={{
@@ -1634,7 +1840,6 @@ export default function App() {
                         </div>
                       )}
 
-                      {/* SIDE-BY-SIDE RENDERED TASKS */}
                       {memberColTasks.map(task => {
                         const layout = layouts[task.id] || { left: '0%', width: '100%', startPx: 0, heightPx: 80, isFlex: false };
                         const isFlex = layout.isFlex;
@@ -1655,7 +1860,6 @@ export default function App() {
                             }}
                             className={`absolute text-white rounded-md p-2 shadow-md border-l-4 ${task.isOverdue ? 'border-red-500 ring-2 ring-red-400' : 'border-black/20'} ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden ${isFlex ? 'opacity-95' : ''}`}>
                             
-                            {/* TOP RESIZE HANDLE */}
                             {!isFlex && userRole === 'admin' && (
                               <div 
                                 className="absolute top-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-t-md"
@@ -1682,7 +1886,6 @@ export default function App() {
                               <span>{task.recurrenceType === 'completion' ? '🔄' : task.recurrenceType === 'fixed' ? '↻' : ''}</span>
                             </div>
 
-                            {/* BOTTOM RESIZE HANDLE */}
                             {!isFlex && userRole === 'admin' && (
                               <div 
                                 className="absolute bottom-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-b-md"
@@ -1700,10 +1903,9 @@ export default function App() {
           </div>
         )}
 
-        {/* WEEK VIEW WITH SIDE-BY-SIDE OVERLAPPING TASKS & HOVER GHOST PREVIEW */}
+        {/* WEEK VIEW WITH ELASTIC TIME GRID & HOVER GHOST PREVIEW */}
         {currentView === 'week' && (
           <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm min-w-[800px]">
-            {/* Week Header */}
             <div className="flex border-b border-gray-300 bg-gray-100 font-bold text-xs text-gray-700">
               <div className="w-16 py-2 text-center border-r border-gray-300">Time</div>
               <div className="flex-1 grid grid-cols-7">
@@ -1723,9 +1925,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Dynamic Elastic Container */}
             <div className="flex-1 relative overflow-y-auto flex" style={{ maxHeight: '550px' }}>
-              {/* Time Label Sidebar */}
               <div className="w-16 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
                 {dynamicTimeSlots.map(hour => (
                   <div key={hour} className="h-20 border-b border-gray-200 p-1 text-[10px] font-mono font-bold text-gray-400 text-right pr-2">
@@ -1734,7 +1934,6 @@ export default function App() {
                 ))}
               </div>
 
-              {/* 7 Day Columns */}
               <div className="flex-1 grid grid-cols-7 relative" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
                 {daysOfWeek.map((dayName, idx) => {
                   const weekStart = getWeekStart(currentDate);
@@ -1747,7 +1946,6 @@ export default function App() {
 
                   return (
                     <div key={dayName} className="border-r border-gray-200 last:border-r-0 relative h-full">
-                      {/* 15-Minute Sub-Slot Drop Grid */}
                       {dynamicTimeSlots.map(hour => (
                         <div key={hour} className="h-20 border-b border-gray-200 flex flex-col">
                           {minuteSubSlots.map(subOffset => (
@@ -1762,7 +1960,6 @@ export default function App() {
                         </div>
                       ))}
 
-                      {/* REAL-TIME HOVER GHOST PREVIEW CARD (WEEK VIEW) */}
                       {draggedTaskObj && hoverSlot && hoverSlot.dateStr === dateStr && (
                         <div 
                           style={{
@@ -1781,7 +1978,6 @@ export default function App() {
                         </div>
                       )}
 
-                      {/* SIDE-BY-SIDE RENDERED TASKS FOR WEEK VIEW */}
                       {dayColTasks.map(task => {
                         const layout = layouts[task.id] || { left: '0%', width: '100%', startPx: 0, heightPx: 80, isFlex: false };
                         const member = getMemberConfig(task.assignees && task.assignees[0]);
@@ -1803,7 +1999,6 @@ export default function App() {
                             }}
                             className={`absolute text-white rounded p-1.5 shadow ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 transition z-10 flex flex-col justify-between overflow-hidden ${task.isOverdue ? 'ring-2 ring-red-500' : ''} ${isFlex ? 'opacity-95' : ''}`}>
                             
-                            {/* TOP RESIZE HANDLE */}
                             {!isFlex && userRole === 'admin' && (
                               <div 
                                 className="absolute top-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-t"
@@ -1824,7 +2019,6 @@ export default function App() {
                             </div>
                             <span className="text-[8px] bg-black/20 px-1 rounded truncate w-max mt-auto">{(task.assignees || []).join(', ')}</span>
 
-                            {/* BOTTOM RESIZE HANDLE */}
                             {!isFlex && userRole === 'admin' && (
                               <div 
                                 className="absolute bottom-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-b"
@@ -1936,7 +2130,7 @@ export default function App() {
 
                 <div className="flex gap-4">
                   <div className="w-1/2">
-                    <label className="block text-sm font-bold text-gray-700 mb-1">Assignees</label>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Assigned to</label>
                     <select value="" onChange={(e) => { if (e.target.value) handleAddAssignee(e.target.value); }} className="w-full px-4 py-2 rounded border border-gray-300 bg-white mb-2 text-sm focus:outline-none">
                       <option value="">{teamMembers.filter(m => !selectedAssignees.includes(m.name)).length > 0 ? 'Select team member...' : 'All members assigned'}</option>
                       {teamMembers.filter(m => !selectedAssignees.includes(m.name)).map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
@@ -1978,6 +2172,7 @@ export default function App() {
                   <div className="w-1/2">
                     <label className="block text-sm font-bold text-gray-700 mb-1">Company</label>
                     <select value={taskCompany} onChange={(e) => setTaskCompany(e.target.value)} className="w-full px-4 py-2 rounded border border-gray-300 bg-white text-sm">
+                      <option value="" disabled>Select a Company...</option>
                       {companies.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
@@ -2033,7 +2228,7 @@ export default function App() {
                   {recurrenceType === 'completion' && (
                     <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
                       <span className="text-sm text-gray-600">Re-deploy task</span>
-                      <input type="number" value={cadenceDays} onChange={(e) => setCadenceDays(Number(e.target.value))} className="border border-gray-300 rounded px-2 py-1 text-sm w-16 text-center font-bold" />
+                      <input type="number" value={cadenceDays} onChange={(e) => setCadenceDays(Number(e.target.value))} className="w-12 p-1 border rounded text-center font-bold" />
                       <span className="text-sm text-gray-600">days after completion</span>
                     </div>
                   )}
@@ -2042,18 +2237,18 @@ export default function App() {
                 <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
                   <div className="flex justify-between items-center mb-2">
                     <h4 className="font-bold text-sm">Multi-Step Task Chaining Engine</h4>
-                    <button type="button" onClick={handleAddChainedStep} className="text-xs font-bold bg-[#A9B1A6] text-white px-2.5 py-1 rounded hover:bg-gray-600 transition">+ Add Step</button>
+                    <button type="button" onClick={handleAddChainedStep} className="text-[10px] font-bold bg-[#A9B1A6] text-white px-2.5 py-1 rounded hover:bg-[#5B7049] transition">+ Add Step</button>
                   </div>
-                  <p className="text-xs text-gray-500 mb-3">Build an automated pipeline of follow-up tasks triggered upon completion.</p>
+                  <p className="text-xs text-gray-500 mb-3">Build an automated pipeline of sub tasks triggered upon completion.</p>
 
                   {chainedSteps.length === 0 ? (
-                    <p className="text-xs text-gray-400 italic">No follow-up steps configured.</p>
+                    <p className="text-xs text-gray-400 italic">No sub tasks configured.</p>
                   ) : (
                     <div className="flex flex-col gap-3">
                       {chainedSteps.map((step, idx) => (
                         <div key={idx} className="bg-gray-50 p-3 rounded border border-gray-200 text-xs flex flex-col gap-2.5 relative">
                           <div className="flex justify-between items-center font-bold text-gray-700">
-                            <span>Step {idx + 1} Follow-up Task</span>
+                            <span>Step {idx + 1} Sub Task</span>
                             <button type="button" onClick={() => handleRemoveChainedStep(idx)} className="text-red-600 font-bold hover:underline">Remove</button>
                           </div>
                           
@@ -2070,7 +2265,7 @@ export default function App() {
                             </div>
 
                             <div className="w-1/2">
-                              <label className="block font-bold text-[10px] text-gray-500 mb-0.5">Assignee</label>
+                              <label className="block font-bold text-[10px] text-gray-500 mb-0.5">Assigned to</label>
                               <select value={step.assignee} onChange={(e) => handleUpdateChainedStep(idx, 'assignee', e.target.value)} className="w-full p-1 border rounded bg-white text-xs">
                                 <option value="Same as Parent">Same as Parent</option>
                                 {teamMembers.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
@@ -2093,7 +2288,7 @@ export default function App() {
                       <input type="checkbox" checked={requiresComment} onChange={(e) => setRequiresComment(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require execution notes/comment to complete
                     </label>
                     <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer border-t pt-2 mt-1 border-gray-100">
-                      <input type="checkbox" checked={allowAssigneeDeadlineChange} onChange={(e) => setAllowAssigneeDeadlineChange(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Allow assignee to adjust deadline date
+                      <input type="checkbox" checked={allowAssigneeDeadlineChange} onChange={(e) => setAllowAssigneeDeadlineChange(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Allow Employee to Adjust Deadline Date
                     </label>
                   </div>
                 </div>
@@ -2105,7 +2300,13 @@ export default function App() {
                       <input type="checkbox" checked={notifyOnComplete} onChange={(e) => setNotifyOnComplete(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Notify me when task is completed
                     </label>
                     <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                      <input type="checkbox" checked={notifyOnComment} onChange={(e) => setNotifyOnComment(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Notify me on new task comments
+                      <input type="checkbox" checked={notifyOnComment} onChange={(e) => setNotifyOnComment(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Notify me if new comment/files have been added
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                      <input type="checkbox" checked={notifyOnDeadlineChange} onChange={(e) => setNotifyOnDeadlineChange(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Notify me when employee changes deadline
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                      <input type="checkbox" checked={notifyOnTaskCreated} onChange={(e) => setNotifyOnTaskCreated(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Notify me when new task has been added
                     </label>
                   </div>
                 </div>
@@ -2121,12 +2322,12 @@ export default function App() {
 
         {/* TASK INSPECTOR & FULL EDITING MODAL */}
         {selectedTask && !completionPrompt && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-[#F4F3ED] max-w-2xl w-full rounded-lg shadow-xl p-6 border border-gray-300 flex flex-col gap-4 animate-fade-in max-h-[90vh] overflow-y-auto">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50" onMouseDown={() => setSelectedTask(null)}>
+            <div className="bg-[#F4F3ED] max-w-2xl w-full rounded-lg shadow-xl p-6 border border-gray-300 flex flex-col gap-4 animate-fade-in max-h-[90vh] overflow-y-auto" onMouseDown={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-start border-b border-gray-300 pb-3">
                 <div>
                   <span className="text-xs font-bold text-[#A9B1A6] uppercase tracking-wider">
-                    {isCurrentInstanceCompleted ? 'Completed Occurrence Review' : (userRole === 'admin' ? (isEditing ? 'Admin Full Task Editor' : 'Admin Inspector Mode') : 'Assignee Execution View')}
+                    {isCurrentInstanceCompleted ? 'Completed Occurrence Review' : (userRole === 'admin' ? (isEditing ? 'Admin Full Task Editor' : 'Admin Inspector Mode') : 'Employee Execution View')}
                   </span>
                   <div className="flex items-center gap-2">
                     <h2 className="text-2xl font-serif font-bold">{selectedTask.title}</h2>
@@ -2142,7 +2343,7 @@ export default function App() {
                   <p className="text-sm text-gray-600 bg-white p-3 rounded border border-gray-200">{selectedTask.desc}</p>
 
                   <div className="flex justify-between text-xs text-gray-500 bg-gray-100 p-2 rounded">
-                    <span>Assignees: <strong>{selectedTask.assignees && selectedTask.assignees.length > 0 ? selectedTask.assignees.join(', ') : 'Unassigned (Backlog)'}</strong></span>
+                    <span>Assigned to: <strong>{selectedTask.assignees && selectedTask.assignees.length > 0 ? selectedTask.assignees.join(', ') : 'Unassigned (Backlog)'}</strong></span>
                     <span>Occurrence Date: <strong>{selectedInstanceDate}</strong></span>
                   </div>
 
@@ -2161,6 +2362,20 @@ export default function App() {
                             const updated = { ...selectedTask, date: newDate, isOverdue: newOverdue, overdueNotified: newOverdue };
                             setSelectedTask(updated);
                             setTasks(tasks.map(t => t.id === selectedTask.id ? updated : t));
+
+                            if (userRole === 'employee' && selectedTask?.notifyOnDeadlineChange !== false) {
+                              setNotifications(prev => [
+                                {
+                                  id: Date.now() + Math.random(),
+                                  text: `📅 Employee Rescheduled: "${selectedTask.title}" deadline changed to ${newDate}`,
+                                  type: 'deadline',
+                                  recipientRole: 'admin',
+                                  read: false,
+                                  time: 'Just now'
+                                },
+                                ...prev
+                              ]);
+                            }
                           }} 
                           className="p-1.5 text-xs border rounded bg-white font-bold text-gray-800 focus:outline-none cursor-pointer"
                         />
@@ -2172,6 +2387,29 @@ export default function App() {
                   <div className="bg-white p-3 rounded border border-gray-200">
                     <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500 mb-2">Task Activity & Comments</h4>
                     
+                    {/* SUB-TASK PARENT LINK / TIMELINE BREADCRUMB */}
+                    {selectedTask.parentTaskId && (
+                      <div className="bg-blue-50/60 p-2 mb-3 rounded border border-blue-100 flex items-center justify-between text-[11px]">
+                        <span className="text-blue-800">
+                          ↳ Sub-task of: <strong className="font-bold">{selectedTask.parentTaskTitle}</strong>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const parentTask = tasks.find(t => t.id === selectedTask.parentTaskId);
+                            if (parentTask) {
+                              handleOpenModal(parentTask, selectedTask.parentInstanceDate);
+                            } else {
+                              alert('Original task could not be found.');
+                            }
+                          }}
+                          className="font-bold text-blue-700 hover:underline"
+                        >
+                          View Previous Task
+                        </button>
+                      </div>
+                    )}
+
                     {selectedTask.comments && selectedTask.comments.length > 0 ? (
                       <div className="flex flex-col gap-1 max-h-28 overflow-y-auto pr-1 mb-3">
                         {selectedTask.comments.map((c, i) => (
@@ -2205,7 +2443,26 @@ export default function App() {
                       {selectedTask.requiresPhoto && (
                         <div className="bg-white p-3 rounded border border-amber-300 flex justify-between items-center">
                           <span className="text-xs font-semibold text-amber-800">📷 {photoUploaded ? 'Photo Attached!' : 'Photo Required'}</span>
-                          <button onClick={() => setPhotoUploaded(!photoUploaded)} className="text-xs font-bold px-3 py-1 rounded bg-amber-100 text-amber-800">
+                          <button 
+                            onClick={() => {
+                              const nextState = !photoUploaded;
+                              setPhotoUploaded(nextState);
+                              
+                              if (nextState && userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
+                                setNotifications(prev => [
+                                  {
+                                    id: Date.now() + Math.random(),
+                                    text: `📷 Photo Uploaded for "${selectedTask.title}" by Adrian R.`,
+                                    type: 'photo',
+                                    recipientRole: 'admin',
+                                    read: false,
+                                    time: 'Just now'
+                                  },
+                                  ...prev
+                                ]);
+                              }
+                            }} 
+                            className="text-xs font-bold px-3 py-1 rounded bg-amber-100 text-amber-800">
                             {photoUploaded ? '✓ Attached' : 'Upload Photo'}
                           </button>
                         </div>
@@ -2241,6 +2498,7 @@ export default function App() {
                       <div className="w-1/2">
                         <label className="block font-bold mb-1 text-gray-700">Company</label>
                         <select value={taskCompany} onChange={(e) => setTaskCompany(e.target.value)} className="w-full p-2 border rounded bg-white">
+                          <option value="" disabled>Select a Company...</option>
                           {companies.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                       </div>
@@ -2280,7 +2538,7 @@ export default function App() {
                     </div>
 
                     <div>
-                      <label className="block font-bold mb-1 text-gray-700">Assignees</label>
+                      <label className="block font-bold mb-1 text-gray-700">Assigned to</label>
                       <select value="" onChange={(e) => { if (e.target.value) handleAddAssignee(e.target.value); }} className="w-full p-1.5 border rounded bg-white mb-1">
                         <option value="">Add assignee...</option>
                         {teamMembers.filter(m => !selectedAssignees.includes(m.name)).map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
@@ -2335,7 +2593,7 @@ export default function App() {
                     {chainedSteps.map((step, idx) => (
                       <div key={idx} className="bg-gray-50 p-2 rounded border border-gray-200 mb-2 flex flex-col gap-1.5">
                         <div className="flex justify-between font-bold text-gray-600">
-                          <span>Step {idx + 1} Follow-up</span>
+                          <span>Step {idx + 1} Sub Task</span>
                           <button type="button" onClick={() => handleRemoveChainedStep(idx)} className="text-red-600">Remove</button>
                         </div>
                         <input type="text" value={step.title} onChange={(e) => handleUpdateChainedStep(idx, 'title', e.target.value)} placeholder="Step Title" className="p-1 border rounded bg-white" />
@@ -2355,9 +2613,27 @@ export default function App() {
                       <input type="checkbox" checked={requiresComment} onChange={(e) => setRequiresComment(e.target.checked)} className="accent-[#A9B1A6]" /> Require Comment
                     </label>
                     <label className="flex items-center gap-1.5 font-bold cursor-pointer border-t pt-1.5 mt-1 border-gray-100">
-                      <input type="checkbox" checked={allowAssigneeDeadlineChange} onChange={(e) => setAllowAssigneeDeadlineChange(e.target.checked)} className="accent-[#A9B1A6]" /> Allow Assignee to Adjust Deadline Date
+                      <input type="checkbox" checked={allowAssigneeDeadlineChange} onChange={(e) => setAllowAssigneeDeadlineChange(e.target.checked)} className="accent-[#A9B1A6]" /> Allow Employee to Adjust Deadline Date
                     </label>
                   </div>
+
+                  {/* ADMIN NOTIFICATION RULES PANEL IN FULL EDIT MODAL */}
+                  <div className="bg-[#A9B1A6]/10 p-3 rounded border border-[#A9B1A6]/30 flex flex-col gap-1.5">
+                    <h4 className="font-bold text-xs text-gray-800">Admin Notification Rules</h4>
+                    <label className="flex items-center gap-1.5 font-bold cursor-pointer">
+                      <input type="checkbox" checked={notifyOnComplete} onChange={(e) => setNotifyOnComplete(e.target.checked)} className="accent-[#A9B1A6]" /> Notify me when task is completed
+                    </label>
+                    <label className="flex items-center gap-1.5 font-bold cursor-pointer">
+                      <input type="checkbox" checked={notifyOnComment} onChange={(e) => setNotifyOnComment(e.target.checked)} className="accent-[#A9B1A6]" /> Notify me if new comment/files have been added
+                    </label>
+                    <label className="flex items-center gap-1.5 font-bold cursor-pointer">
+                      <input type="checkbox" checked={notifyOnDeadlineChange} onChange={(e) => setNotifyOnDeadlineChange(e.target.checked)} className="accent-[#A9B1A6]" /> Notify me when employee changes deadline
+                    </label>
+                    <label className="flex items-center gap-1.5 font-bold cursor-pointer">
+                      <input type="checkbox" checked={notifyOnTaskCreated} onChange={(e) => setNotifyOnTaskCreated(e.target.checked)} className="accent-[#A9B1A6]" /> Notify me when new task has been added
+                    </label>
+                  </div>
+
                 </div>
               )}
 
@@ -2395,10 +2671,10 @@ export default function App() {
           </div>
         )}
 
-        {/* AD-HOC FOLLOW-UP COMPLETION PROMPT MODAL */}
+        {/* SUB-TASK COMPLETION PROMPT MODAL */}
         {completionPrompt && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-            <div className="bg-white max-w-md w-full rounded-lg shadow-2xl p-6 border border-gray-300 flex flex-col gap-4 animate-fade-in">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]" onMouseDown={() => setCompletionPrompt(null)}>
+            <div className="bg-white max-w-md w-full rounded-lg shadow-2xl p-6 border border-gray-300 flex flex-col gap-4 animate-fade-in" onMouseDown={(e) => e.stopPropagation()}>
               <div className="border-b pb-2">
                 <span className="text-xs font-bold text-[#A9B1A6] uppercase tracking-wider">Complete Task Confirmation</span>
                 <h3 className="text-xl font-serif font-bold text-gray-900 mt-0.5">{selectedTask?.title}</h3>
@@ -2407,7 +2683,7 @@ export default function App() {
               {!completionPrompt.showForm ? (
                 <>
                   <p className="text-sm text-gray-700 leading-relaxed">
-                    Is this task fully resolved, or do you need to branch a new follow-up task to address unexpected issues (e.g., ordering parts, rescheduling vendor)?
+                    Is this task fully resolved, or do you need to branch a new sub task to address unexpected issues (e.g., ordering parts, rescheduling vendor)?
                   </p>
                   
                   <div className="flex flex-col gap-2 mt-2">
@@ -2420,13 +2696,13 @@ export default function App() {
                     <button 
                       onClick={() => setCompletionPrompt({ ...completionPrompt, showForm: true })}
                       className="bg-[#333333] text-white py-2.5 px-4 rounded text-sm font-bold hover:bg-black transition text-center">
-                      + Create Follow-up Task
+                      + Create Sub Task
                     </button>
                   </div>
                 </>
               ) : (
                 <div className="flex flex-col gap-3">
-                  <h4 className="font-bold text-sm text-gray-800">Follow-up Task Details</h4>
+                  <h4 className="font-bold text-sm text-gray-800">Sub Task Details</h4>
                   
                   <div>
                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Title</label>
@@ -2434,6 +2710,7 @@ export default function App() {
                       type="text" 
                       value={completionPrompt.title} 
                       onChange={(e) => setCompletionPrompt({ ...completionPrompt, title: e.target.value })} 
+                      placeholder="Enter a title for the new sub task..."
                       className="w-full p-2 text-sm border rounded bg-gray-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#A9B1A6]" />
                   </div>
 
@@ -2443,13 +2720,13 @@ export default function App() {
                       rows={2}
                       value={completionPrompt.desc} 
                       onChange={(e) => setCompletionPrompt({ ...completionPrompt, desc: e.target.value })} 
-                      placeholder="Why is this follow-up needed?"
+                      placeholder="Why is this sub task needed?"
                       className="w-full p-2 text-sm border rounded bg-gray-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#A9B1A6]"></textarea>
                   </div>
 
                   <div className="flex gap-3">
                     <div className="w-1/2">
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Assign To</label>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Assigned To</label>
                       <select 
                         value={completionPrompt.assignee} 
                         onChange={(e) => setCompletionPrompt({ ...completionPrompt, assignee: e.target.value })} 
@@ -2460,22 +2737,19 @@ export default function App() {
 
                     <div className="w-1/2">
                       <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Schedule For</label>
-                      <div className="flex items-center gap-1 bg-white border rounded p-1">
-                        <input 
-                          type="number" 
-                          value={completionPrompt.offsetDays} 
-                          onChange={(e) => setCompletionPrompt({ ...completionPrompt, offsetDays: Number(e.target.value) })} 
-                          className="w-12 p-1 text-center font-bold text-sm focus:outline-none" />
-                        <span className="text-xs text-gray-600">days from now</span>
-                      </div>
+                      <input 
+                        type="date" 
+                        value={completionPrompt.targetDate} 
+                        onChange={(e) => setCompletionPrompt({ ...completionPrompt, targetDate: e.target.value })} 
+                        className="w-full p-1.5 text-sm border rounded bg-white focus:outline-none" />
                     </div>
                   </div>
 
                   <div className="flex gap-2 mt-2 pt-3 border-t">
                     <button 
-                      onClick={() => executeCompletion(false)}
+                      onClick={() => setCompletionPrompt(null)}
                       className="w-1/3 bg-gray-100 text-gray-600 font-bold py-2 rounded text-xs hover:bg-gray-200 transition">
-                      Skip Follow-up
+                      Cancel
                     </button>
                     <button 
                       onClick={() => executeCompletion(true)}
@@ -2485,20 +2759,14 @@ export default function App() {
                   </div>
                 </div>
               )}
-
-              {!completionPrompt.showForm && (
-                <div className="pt-2 border-t flex justify-end">
-                  <button onClick={() => setCompletionPrompt(null)} className="text-xs text-gray-400 font-bold hover:text-gray-700">Cancel</button>
-                </div>
-              )}
             </div>
           </div>
         )}
 
         {/* RECURRING TASK RESCHEDULE SCOPE PROMPT MODAL */}
         {reschedulePrompt && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-white max-w-md w-full rounded-lg shadow-2xl p-6 border border-gray-300 flex flex-col gap-4 animate-fade-in">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onMouseDown={() => setReschedulePrompt(null)}>
+            <div className="bg-white max-w-md w-full rounded-lg shadow-2xl p-6 border border-gray-300 flex flex-col gap-4 animate-fade-in" onMouseDown={(e) => e.stopPropagation()}>
               <div className="border-b pb-2">
                 <span className="text-xs font-bold text-amber-600 uppercase tracking-wider">Recurring Task Reschedule</span>
                 <h3 className="text-xl font-serif font-bold text-gray-900 mt-0.5">{reschedulePrompt.task.title}</h3>
@@ -2534,8 +2802,8 @@ export default function App() {
 
         {/* SETTINGS & GOVERNANCE MODAL */}
         {isSettingsOpen && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-end p-4 z-50">
-            <div className="bg-[#F4F3ED] max-w-md w-full h-full rounded-l-lg shadow-2xl p-6 border-l border-gray-300 flex flex-col gap-4 animate-fade-in overflow-y-auto">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-end p-4 z-50" onMouseDown={() => setIsSettingsOpen(false)}>
+            <div className="bg-[#F4F3ED] max-w-md w-full h-full rounded-l-lg shadow-2xl p-6 border-l border-gray-300 flex flex-col gap-4 animate-fade-in overflow-y-auto" onMouseDown={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-center border-b border-gray-300 pb-3">
                 <div>
                   <span className="text-xs font-bold text-[#A9B1A6] uppercase tracking-wider">System Governance</span>
@@ -2627,7 +2895,7 @@ export default function App() {
                       onChange={(e) => setMemberRole(e.target.value)} 
                       className="w-full p-2 text-xs border border-gray-300 rounded bg-white">
                       <option value="admin">Admin (Master)</option>
-                      <option value="assignee">Assignee (Worker)</option>
+                      <option value="employee">Employee (Worker)</option>
                     </select>
                   </div>
 
