@@ -1,5 +1,80 @@
 // @ts-nocheck
 import { useState, useEffect, useRef } from 'react';
+import { supabase } from './supabaseClient';
+
+// --- SUPABASE DATABASE MAPPERS (camelCase <-> snake_case) ---
+const mapToDb = (t) => ({
+  id: String(t.id),
+  title: t.title || '',
+  description: t.desc || '',
+  company: t.company || '',
+  assignees: t.assignees || [],
+  date: t.date || null,
+  date_scheduled: t.date || null,
+  start_time: t.startTime || null,
+  end_time: t.endTime || null,
+  start_hour: t.startHour ?? null,
+  duration: t.duration ?? null,
+  time_label: t.timeLabel || 'All-Day',
+  priority: t.priority || 'Medium',
+  type: t.type || 'flexible',
+  status: t.status || 'pending',
+  requires_photo: t.requiresPhoto ?? false,
+  requires_comment: t.requiresComment ?? false,
+  allow_deadline_change: t.allowAssigneeDeadlineChange ?? false,
+  recurrence_type: t.recurrenceType || 'once',
+  active_days: t.activeDays || [],
+  cadence_days: t.cadenceDays ?? 14,
+  notify_on_complete: t.notifyOnComplete ?? true,
+  notify_on_comment: t.notifyOnComment ?? true,
+  notify_on_deadline_change: t.notifyOnDeadlineChange ?? true,
+  notify_on_task_created: t.notifyOnTaskCreated ?? true,
+  parent_task_id: t.parentTaskId ? String(t.parentTaskId) : null,
+  parent_task_title: t.parentTaskTitle || null,
+  parent_instance_date: t.parentInstanceDate || null,
+  comments: t.comments || [],
+  chained_steps: t.chainedSteps || [],
+  completed_dates: t.completedDates || [],
+  exception_dates: t.exceptionDates || [],
+  is_overdue: t.isOverdue ?? false,
+  overdue_notified: t.overdueNotified ?? false
+});
+
+const mapFromDb = (r) => ({
+  id: String(r.id),
+  title: r.title || '',
+  desc: r.description || '',
+  company: r.company || '',
+  assignees: r.assignees || [],
+  date: r.date || r.date_scheduled || '',
+  startTime: r.start_time,
+  endTime: r.end_time,
+  startHour: r.start_hour ? Number(r.start_hour) : null,
+  duration: r.duration ? Number(r.duration) : null,
+  timeLabel: r.time_label || 'All-Day',
+  priority: r.priority || 'Medium',
+  type: r.type || 'flexible',
+  status: r.status || 'pending',
+  requiresPhoto: r.requires_photo ?? false,
+  requiresComment: r.requires_comment ?? false,
+  allowAssigneeDeadlineChange: r.allow_deadline_change ?? false,
+  recurrenceType: r.recurrence_type || 'once',
+  activeDays: r.active_days || [],
+  cadenceDays: r.cadence_days ?? 14,
+  notifyOnComplete: r.notify_on_complete ?? true,
+  notifyOnComment: r.notify_on_comment ?? true,
+  notifyOnDeadlineChange: r.notify_on_deadline_change ?? true,
+  notifyOnTaskCreated: r.notify_on_task_created ?? true,
+  parentTaskId: r.parent_task_id,
+  parentTaskTitle: r.parent_task_title,
+  parentInstanceDate: r.parent_instance_date,
+  comments: r.comments || [],
+  chainedSteps: r.chained_steps || [],
+  completedDates: r.completed_dates || [],
+  exceptionDates: r.exception_dates || [],
+  isOverdue: r.is_overdue ?? false,
+  overdueNotified: r.overdue_notified ?? false
+});
 
 export default function App() {
   const [currentView, setCurrentView] = useState('list');
@@ -10,11 +85,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
 
   const [isNotifOpen, setIsNotifOpen] = useState(false);
-  const [notifications, setNotifications] = useState([
-    { id: 1, text: '⚠️ OVERDUE: "Client Follow-up" (Alex M.) was not completed by 2026-09-02', type: 'overdue', recipientRole: 'admin', read: false, time: '10m ago' },
-    { id: 2, text: '✓ Task Completed: "Wash Laundry & Linens" by Marc S.', type: 'completion', recipientRole: 'admin', read: false, time: '1h ago' },
-    { id: 3, text: '📋 New Task Assigned: "Grab the Mail" (Sparkulous)', type: 'created', recipientRole: 'employee', read: false, time: '2h ago' }
-  ]);
+  const [notifications, setNotifications] = useState([]);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingMemberId, setEditingMemberId] = useState(null);
@@ -52,7 +123,7 @@ export default function App() {
   const [startTime, setStartTime] = useState('13:00');
   const [endTime, setEndTime] = useState('14:00');
 
-  const [recurrenceType, setRecurrenceType] = useState('fixed');
+  const [recurrenceType, setRecurrenceType] = useState('once');
   const [activeDays, setActiveDays] = useState(['Fri']);
   const [generationTime, setGenerationTime] = useState('13:00');
   const [cadenceDays, setCadenceDays] = useState(14);
@@ -62,7 +133,6 @@ export default function App() {
   const [requiresComment, setRequiresComment] = useState(false);
   const [allowAssigneeDeadlineChange, setAllowAssigneeDeadlineChange] = useState(false);
 
-  // ALL NOTIFICATION RULES ON BY DEFAULT
   const [notifyOnComplete, setNotifyOnComplete] = useState(true); 
   const [notifyOnComment, setNotifyOnComment] = useState(true);   
   const [notifyOnDeadlineChange, setNotifyOnDeadlineChange] = useState(true); 
@@ -82,6 +152,23 @@ export default function App() {
 
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const minuteSubSlots = [0, 0.25, 0.5, 0.75];
+
+  // LIVE DATABASE FETCHING
+  const [tasks, setTasks] = useState([]);
+  const [isDbLoading, setIsDbLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchCloudData = async () => {
+      const { data, error } = await supabase.from('tasks').select('*');
+      if (error) {
+        console.error('Error fetching tasks from cloud:', error);
+      } else if (data) {
+        setTasks(data.map(mapFromDb));
+      }
+      setIsDbLoading(false);
+    };
+    fetchCloudData();
+  }, []);
 
   const formatDateKey = (d) => {
     if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
@@ -264,131 +351,6 @@ export default function App() {
     return layouts;
   };
 
-  const [tasks, setTasks] = useState([
-    {
-      id: 1,
-      title: 'Grab the Mail',
-      desc: 'Pick up daily mail package from the main office box.',
-      company: 'Sparkulous',
-      assignees: ['Adrian R.'],
-      date: formatDateKey(new Date()),
-      startTime: '13:00',
-      endTime: '14:00',
-      startHour: 13,
-      duration: 1,
-      timeLabel: '01:00 PM - 02:00 PM',
-      priority: 'Routine',
-      requiresPhoto: false,
-      requiresComment: false,
-      allowAssigneeDeadlineChange: false,
-      recurrenceType: 'fixed',
-      activeDays: ['Fri'],
-      cadenceDays: 14,
-      completedDates: [],
-      exceptionDates: [],
-      chainedSteps: [],
-      type: 'timed',
-      status: 'pending',
-      notifyOnComplete: true,
-      notifyOnComment: true,
-      notifyOnDeadlineChange: true,
-      notifyOnTaskCreated: true,
-      comments: []
-    },
-    {
-      id: 2,
-      title: 'Client Follow-up',
-      desc: 'Q3 strategy alignment and operations review.',
-      company: 'Casovera',
-      assignees: ['Alex M.'],
-      date: '2026-09-02',
-      startTime: '09:00',
-      endTime: '11:00',
-      startHour: 9,
-      duration: 2,
-      timeLabel: '09:00 AM - 11:00 AM',
-      priority: 'High',
-      requiresPhoto: false,
-      requiresComment: true,
-      allowAssigneeDeadlineChange: true,
-      recurrenceType: 'once',
-      activeDays: [],
-      cadenceDays: 14,
-      completedDates: [],
-      exceptionDates: [],
-      chainedSteps: [],
-      type: 'timed',
-      status: 'pending',
-      isOverdue: true,
-      overdueNotified: true,
-      notifyOnComplete: true,
-      notifyOnComment: true,
-      notifyOnDeadlineChange: true,
-      notifyOnTaskCreated: true,
-      comments: ['Admin created task.']
-    },
-    {
-      id: 3,
-      title: 'Service Espresso Machine',
-      desc: 'Run deep descaling cycle and replace water filter.',
-      company: 'TMFLO',
-      assignees: ['Marc S.'],
-      date: formatDateKey(new Date()),
-      startTime: '10:00',
-      endTime: '11:30',
-      startHour: 10,
-      duration: 1.5,
-      timeLabel: '10:00 AM - 11:30 AM',
-      priority: 'Medium',
-      requiresPhoto: true,
-      requiresComment: true,
-      allowAssigneeDeadlineChange: false,
-      recurrenceType: 'completion',
-      activeDays: [],
-      cadenceDays: 14,
-      completedDates: [],
-      exceptionDates: [],
-      chainedSteps: [],
-      type: 'timed',
-      status: 'pending',
-      notifyOnComplete: true,
-      notifyOnComment: true,
-      notifyOnDeadlineChange: true,
-      notifyOnTaskCreated: true,
-      comments: []
-    },
-    {
-      id: 4,
-      title: 'Draft Maintenance Protocol',
-      desc: 'Needs specific procedure writeup before assigning team member.',
-      company: 'Leprino Personal',
-      assignees: [],
-      date: formatDateKey(new Date()),
-      startTime: null,
-      endTime: null,
-      startHour: null,
-      duration: null,
-      timeLabel: 'Unscheduled',
-      priority: 'Low',
-      requiresPhoto: false,
-      requiresComment: false,
-      allowAssigneeDeadlineChange: false,
-      recurrenceType: 'once',
-      activeDays: [],
-      cadenceDays: 14,
-      completedDates: [],
-      exceptionDates: [],
-      chainedSteps: [],
-      type: 'flexible',
-      status: 'pending',
-      notifyOnComplete: true,
-      notifyOnComment: true,
-      notifyOnDeadlineChange: true,
-      notifyOnTaskCreated: true,
-      comments: []
-    }
-  ]);
-
   const handleResizeStart = (e, task, edge) => {
     e.stopPropagation();
     e.preventDefault(); 
@@ -451,20 +413,15 @@ export default function App() {
       }));
     };
 
-    const handleUp = () => {
+    const handleUp = async () => {
       if (resizeStateRef.current) {
         const state = resizeStateRef.current;
         const resizedTask = tasks.find(t => t.id === state.id);
         if (resizedTask) {
+          await supabase.from('tasks').update(mapToDb(resizedTask)).eq('id', resizedTask.id);
+
           setNotifications(prev => [
-            {
-              id: Date.now() + Math.random(),
-              text: `⏱️ Time Slot Adjusted: "${resizedTask.title}" duration modified`,
-              type: 'update',
-              recipientRole: 'employee',
-              read: false,
-              time: 'Just now'
-            },
+            { id: Date.now() + Math.random(), text: `⏱️ Time Slot Adjusted: "${resizedTask.title}" duration modified`, type: 'update', recipientRole: 'employee', read: false, time: 'Just now' },
             ...prev
           ]);
         }
@@ -498,7 +455,6 @@ export default function App() {
             { id: Date.now() + Math.random(), text: notifMsg, type: 'overdue', recipientRole: 'admin', read: false, time: 'Just now' },
             ...prev
           ]);
-
           return { ...task, isOverdue: true, overdueNotified: true };
         } else if (!isPastDue && task.isOverdue) {
           changed = true;
@@ -506,6 +462,14 @@ export default function App() {
         }
         return task;
       });
+
+      if (changed) {
+        updated.forEach(t => {
+          if (t.isOverdue || t.overdueNotified) {
+            supabase.from('tasks').update({ is_overdue: t.isOverdue, overdue_notified: t.overdueNotified }).eq('id', t.id);
+          }
+        });
+      }
 
       return changed ? updated : prevTasks;
     });
@@ -539,20 +503,14 @@ export default function App() {
     e.dataTransfer.dropEffect = 'move';
 
     setHoverSlot(prev => {
-      if (
-        prev &&
-        prev.dateStr === dateStr &&
-        prev.targetHour === targetHour &&
-        prev.memberName === memberName
-      ) {
-        return prev;
-      }
+      if (prev && prev.dateStr === dateStr && prev.targetHour === targetHour && prev.memberName === memberName) return prev;
       return { dateStr, targetHour, memberName };
     });
   };
 
-  const applyTaskMove = (taskId, targetDate, targetHour, targetMemberName, updateSeries = false, sourceDateFromPrompt = null) => {
+  const applyTaskMove = async (taskId, targetDate, targetHour, targetMemberName, updateSeries = false, sourceDateFromPrompt = null) => {
     const todayStr = formatDateKey(new Date());
+    let dbPayloads = [];
 
     setTasks(prevTasks => {
       const targetTask = prevTasks.find(t => t.id === taskId);
@@ -576,21 +534,14 @@ export default function App() {
       const effectiveSourceDate = sourceDateFromPrompt || targetTask.date;
 
       setNotifications(prev => [
-        {
-          id: Date.now() + Math.random(),
-          text: `📅 Schedule Shifted: "${targetTask.title}" moved to ${targetDate}`,
-          type: 'update',
-          recipientRole: 'employee',
-          read: false,
-          time: 'Just now'
-        },
+        { id: Date.now() + Math.random(), text: `📅 Schedule Shifted: "${targetTask.title}" moved to ${targetDate}`, type: 'update', recipientRole: 'employee', read: false, time: 'Just now' },
         ...prev
       ]);
 
       if (targetTask.recurrenceType !== 'once' && !updateSeries) {
         const standaloneTask = {
           ...targetTask,
-          id: Date.now(),
+          id: Date.now().toString(),
           date: targetDate,
           assignees: targetMemberName ? [targetMemberName] : (targetTask.assignees || []),
           startHour: startDec,
@@ -608,10 +559,11 @@ export default function App() {
         return prevTasks.map(t => {
           if (t.id === taskId) {
             const currentExceptions = t.exceptionDates || [];
-            const updatedExceptions = effectiveSourceDate && !currentExceptions.includes(effectiveSourceDate)
-              ? [...currentExceptions, effectiveSourceDate]
-              : currentExceptions;
-            return { ...t, exceptionDates: updatedExceptions };
+            const updatedExceptions = effectiveSourceDate && !currentExceptions.includes(effectiveSourceDate) ? [...currentExceptions, effectiveSourceDate] : currentExceptions;
+            const updatedMaster = { ...t, exceptionDates: updatedExceptions };
+            dbPayloads.push({ action: 'update', payload: updatedMaster });
+            dbPayloads.push({ action: 'insert', payload: standaloneTask });
+            return updatedMaster;
           }
           return t;
         }).concat(standaloneTask);
@@ -624,7 +576,7 @@ export default function App() {
 
         const newMasterTask = {
           ...targetTask,
-          id: Date.now(),
+          id: Date.now().toString(),
           date: targetDate,
           seriesStartDate: targetDate, 
           activeDays: [targetDayName],
@@ -642,10 +594,10 @@ export default function App() {
 
         return prevTasks.map(t => {
           if (t.id === taskId) {
-            return { 
-              ...t, 
-              endDate: effectiveSourceDate ? addDaysToDateStr(effectiveSourceDate, -1) : addDaysToDateStr(targetDate, -1) 
-            };
+            const cappedMaster = { ...t, endDate: effectiveSourceDate ? addDaysToDateStr(effectiveSourceDate, -1) : addDaysToDateStr(targetDate, -1) };
+            dbPayloads.push({ action: 'update', payload: cappedMaster });
+            dbPayloads.push({ action: 'insert', payload: newMasterTask });
+            return cappedMaster;
           }
           return t;
         }).concat(newMasterTask);
@@ -654,7 +606,7 @@ export default function App() {
       return prevTasks.map(t => {
         if (t.id === taskId) {
           const newIsOverdue = targetDate < todayStr && t.status !== 'completed';
-          return {
+          const updatedStandard = {
             ...t,
             date: targetDate,
             assignees: targetMemberName ? [targetMemberName] : (t.assignees || []),
@@ -667,10 +619,18 @@ export default function App() {
             isOverdue: newIsOverdue,
             overdueNotified: newIsOverdue
           };
+          dbPayloads.push({ action: 'update', payload: updatedStandard });
+          return updatedStandard;
         }
         return t;
       });
     });
+
+    for (const job of dbPayloads) {
+      const dbData = mapToDb(job.payload);
+      if (job.action === 'update') await supabase.from('tasks').update(dbData).eq('id', job.payload.id);
+      if (job.action === 'insert') await supabase.from('tasks').insert(dbData);
+    }
 
     setReschedulePrompt(null);
     setDraggedTaskId(null);
@@ -690,7 +650,7 @@ export default function App() {
         taskId = payload.taskId;
         sourceDate = payload.sourceDate;
       } catch (err) {
-        taskId = Number(data);
+        taskId = data;
       }
     }
     
@@ -742,15 +702,7 @@ export default function App() {
     if (editingMemberId) {
       setTeamMembers(teamMembers.map(m => {
         if (m.id === editingMemberId) {
-          return {
-            ...m,
-            name: memberName,
-            initials,
-            email: memberEmail,
-            password: memberPassword,
-            role: memberRole,
-            color: memberColor
-          };
+          return { ...m, name: memberName, initials, email: memberEmail, password: memberPassword, role: memberRole, color: memberColor };
         }
         return m;
       }));
@@ -803,15 +755,7 @@ export default function App() {
   };
 
   const handleAddChainedStep = () => {
-    setChainedSteps([...chainedSteps, {
-      title: '',
-      desc: '',
-      relativeDays: 1,
-      assignee: 'Same as Parent',
-      priority: 'Medium',
-      requiresPhoto: false,
-      requiresComment: false
-    }]);
+    setChainedSteps([...chainedSteps, { title: '', desc: '', relativeDays: 1, assignee: 'Same as Parent', priority: 'Medium', requiresPhoto: false, requiresComment: false }]);
   };
 
   const handleUpdateChainedStep = (index, field, value) => {
@@ -847,13 +791,7 @@ export default function App() {
   const getMemberConfig = (name) => {
     const found = teamMembers.find(m => m.name === name);
     if (found) {
-      return {
-        name: found.name,
-        initials: found.initials,
-        color: found.color,
-        badgeBg: found.color + '20',
-        badgeText: found.color
-      };
+      return { name: found.name, initials: found.initials, color: found.color, badgeBg: found.color + '20', badgeText: found.color };
     }
     return { name: name || 'Unassigned', initials: '??', color: '#6B7280', badgeBg: '#F3F4F6', badgeText: '#374151' };
   };
@@ -866,7 +804,7 @@ export default function App() {
     setSelectedAssignees(selectedAssignees.filter(a => a !== name));
   };
 
-  const handleDeployTask = () => {
+  const handleDeployTask = async () => {
     if (!taskTitle.trim()) return alert('Please provide a task title.');
     if (!taskCompany) return alert('Please select a company for this task.');
 
@@ -875,7 +813,7 @@ export default function App() {
     const dur = Math.max(0.5, endDec - startDec);
 
     const newTask = {
-      id: Date.now(),
+      id: Date.now().toString(),
       title: taskTitle,
       desc: taskDesc,
       company: taskCompany,
@@ -905,18 +843,16 @@ export default function App() {
       comments: []
     };
 
-    setTasks([newTask, ...tasks]);
+    setTasks([newTask, ...tasks]); // Optimistic local state update
 
-    // NOTIFICATION TRIGGER: EMPLOYEE TASK CREATED
+    const { error } = await supabase.from('tasks').insert(mapToDb(newTask));
+    if (error) {
+      console.error('Supabase Insert Error:', error);
+      alert(`Cloud sync error: ${error.message}`);
+    }
+
     setNotifications(prev => [
-      {
-        id: Date.now() + Math.random(),
-        text: `📋 New Task Assigned: "${taskTitle}" (${taskCompany})`,
-        type: 'created',
-        recipientRole: 'employee',
-        read: false,
-        time: 'Just now'
-      },
+      { id: Date.now() + Math.random(), text: `📋 New Task Assigned: "${taskTitle}" (${taskCompany})`, type: 'created', recipientRole: 'employee', read: false, time: 'Just now' },
       ...prev
     ]);
 
@@ -955,7 +891,7 @@ export default function App() {
     setChainedSteps(task.chainedSteps || []);
   };
 
-  const handleSaveChanges = () => {
+  const handleSaveChanges = async () => {
     if (!taskTitle.trim()) return alert('Title cannot be empty.');
     if (!taskCompany) return alert('Please select a company for this task.');
 
@@ -996,15 +932,14 @@ export default function App() {
 
     setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t));
 
+    const { error } = await supabase.from('tasks').update(mapToDb(updatedTask)).eq('id', updatedTask.id);
+    if (error) {
+      console.error('Supabase Update Error:', error);
+      alert(`Cloud sync error: ${error.message}`);
+    }
+
     setNotifications(prev => [
-      {
-        id: Date.now() + Math.random(),
-        text: `✏️ Task Updated: "${taskTitle}" (Details/Deadline modified by Admin)`,
-        type: 'update',
-        recipientRole: 'employee',
-        read: false,
-        time: 'Just now'
-      },
+      { id: Date.now() + Math.random(), text: `✏️ Task Updated: "${taskTitle}" (Details/Deadline modified by Admin)`, type: 'update', recipientRole: 'employee', read: false, time: 'Just now' },
       ...prev
     ]);
 
@@ -1012,30 +947,28 @@ export default function App() {
     setIsEditing(false);
   };
 
-  const handleDeleteTask = (id) => {
+  const handleDeleteTask = async (id) => {
     setTasks(tasks.filter(t => t.id !== id));
+    const { error } = await supabase.from('tasks').delete().eq('id', id);
+    if (error) console.error('Supabase Delete Error:', error);
     setSelectedTask(null);
   };
 
-  const handlePostOpenComment = (id) => {
+  const handlePostOpenComment = async (id) => {
     if (!openCommentInput.trim()) return;
     const commentText = `${userRole === 'admin' ? 'Admin' : 'Employee'} (${selectedInstanceDate}): ${openCommentInput}`;
     
     setTasks(tasks.map(t => t.id === id ? { ...t, comments: [...(t.comments || []), commentText] } : t));
     setSelectedTask(prev => ({ ...prev, comments: [...(prev.comments || []), commentText] }));
     
+    const target = tasks.find(t => t.id === id);
+    if (target) {
+      const updatedComments = [...(target.comments || []), commentText];
+      await supabase.from('tasks').update({ comments: updatedComments }).eq('id', id);
+    }
+
     if (userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
-      setNotifications(prev => [
-        {
-          id: Date.now() + Math.random(),
-          text: `💬 New Note on "${selectedTask.title}" by Employee`,
-          type: 'comment',
-          recipientRole: 'admin',
-          read: false,
-          time: 'Just now'
-        },
-        ...prev
-      ]);
+      setNotifications(prev => [{ id: Date.now() + Math.random(), text: `💬 New Note on "${selectedTask.title}" by Employee`, type: 'comment', recipientRole: 'admin', read: false, time: 'Just now' }, ...prev]);
     }
 
     setExecutionComment('');
@@ -1056,7 +989,7 @@ export default function App() {
     });
   };
 
-  const executeCompletion = (withFollowUp) => {
+  const executeCompletion = async (withFollowUp) => {
     const noteText = openCommentInput.trim() 
       ? `${userRole === 'admin' ? 'Admin' : 'Employee'} (${selectedInstanceDate}): ${openCommentInput}`
       : null;
@@ -1081,23 +1014,15 @@ export default function App() {
     });
 
     if (selectedTask?.notifyOnComplete !== false) {
-      setNotifications(prev => [
-        {
-          id: Date.now() + Math.random(),
-          text: `✓ Task Completed: "${selectedTask.title}" by ${userRole === 'admin' ? 'Admin' : 'Employee'}`,
-          type: 'completion',
-          recipientRole: 'admin',
-          read: false,
-          time: 'Just now'
-        },
-        ...prev
-      ]);
+      setNotifications(prev => [{ id: Date.now() + Math.random(), text: `✓ Task Completed: "${selectedTask.title}" by ${userRole === 'admin' ? 'Admin' : 'Employee'}`, type: 'completion', recipientRole: 'admin', read: false, time: 'Just now' }, ...prev]);
     }
+
+    const payloadQueue = [];
 
     if (withFollowUp && completionPrompt) {
       const targetDate = completionPrompt.targetDate || formatDateKey(new Date());
       const newAdHocTask = {
-        id: Date.now() + 5,
+        id: Date.now().toString(),
         title: completionPrompt.title,
         desc: completionPrompt.desc || `Ad-hoc sub task from: "${selectedTask.title}"`,
         company: selectedTask.company,
@@ -1132,20 +1057,11 @@ export default function App() {
       };
 
       if (selectedTask?.notifyOnTaskCreated !== false) {
-        setNotifications(prev => [
-          {
-            id: Date.now() + Math.random(),
-            text: `➕ New Sub Task Spawned: "${completionPrompt.title}" for ${targetDate}`,
-            type: 'subtask',
-            recipientRole: 'admin',
-            read: false,
-            time: 'Just now'
-          },
-          ...prev
-        ]);
+        setNotifications(prev => [{ id: Date.now() + Math.random(), text: `➕ New Sub Task Spawned: "${completionPrompt.title}" for ${targetDate}`, type: 'subtask', recipientRole: 'admin', read: false, time: 'Just now' }, ...prev]);
       }
 
       updatedTasks = [newAdHocTask, ...updatedTasks];
+      payloadQueue.push({ action: 'insert', data: newAdHocTask });
       alert(`Sub task "${completionPrompt.title}" deployed to backlog/schedule for ${targetDate}.`);
     }
 
@@ -1153,7 +1069,7 @@ export default function App() {
       const nextDueDate = addDaysToDateStr(selectedInstanceDate, selectedTask.cadenceDays || 14);
       const nextInstanceTask = {
         ...selectedTask,
-        id: Date.now() + 2,
+        id: Date.now().toString(),
         date: nextDueDate,
         completedDates: [],
         exceptionDates: [],
@@ -1162,6 +1078,7 @@ export default function App() {
         comments: [`Auto-deployed ${selectedTask.cadenceDays || 14} days after completion on ${selectedInstanceDate}`]
       };
       updatedTasks = [nextInstanceTask, ...updatedTasks];
+      payloadQueue.push({ action: 'insert', data: nextInstanceTask });
     }
 
     if (selectedTask.chainedSteps && selectedTask.chainedSteps.length > 0) {
@@ -1170,7 +1087,7 @@ export default function App() {
       const stepAssignees = nextStep.assignee === 'Same as Parent' ? selectedTask.assignees : [nextStep.assignee];
 
       const chainedTask = {
-        id: Date.now() + 1,
+        id: Date.now().toString(),
         title: nextStep.title || 'Follow-up Task',
         desc: nextStep.desc || `Chained step from completed task: "${selectedTask.title}"`,
         company: selectedTask.company,
@@ -1204,29 +1121,53 @@ export default function App() {
         comments: [`Auto-deployed via Pre-Configured Workflow from "${selectedTask.title}"`]
       };
       updatedTasks = [chainedTask, ...updatedTasks];
+      payloadQueue.push({ action: 'insert', data: chainedTask });
     }
 
     setTasks(updatedTasks);
+    
+    const masterTarget = updatedTasks.find(t => t.id === selectedTask.id);
+    if (masterTarget) {
+      await supabase.from('tasks').update(mapToDb(masterTarget)).eq('id', masterTarget.id);
+    }
+
+    for (let p of payloadQueue) {
+      await supabase.from('tasks').insert(mapToDb(p.data));
+    }
+
     setCompletionPrompt(null);
     setSelectedTask(null);
   };
 
-  const handleAppendNote = (id) => {
+  const handleAppendNote = async (id) => {
     if (!additionalNote.trim()) return;
     const noteText = `${userRole === 'admin' ? 'Admin Note' : 'Employee Note'}: ${additionalNote}`;
     setTasks(tasks.map(t => t.id === id ? { ...t, comments: [...(t.comments || []), noteText] } : t));
+    
+    const target = tasks.find(t => t.id === id);
+    if (target) {
+      const updatedComments = [...(target.comments || []), noteText];
+      await supabase.from('tasks').update({ comments: updatedComments }).eq('id', id);
+    }
+
     setAdditionalNote('');
     setSelectedTask(prev => ({ ...prev, comments: [...(prev.comments || []), noteText] }));
   };
 
-  const handleReopenTask = (id) => {
-    setTasks(tasks.map(t => {
+  const handleReopenTask = async (id) => {
+    const updated = tasks.map(t => {
       if (t.id === id) {
         if (t.recurrenceType === 'once') return { ...t, status: 'pending' };
         return { ...t, completedDates: (t.completedDates || []).filter(d => d !== selectedInstanceDate) };
       }
       return t;
-    }));
+    });
+
+    setTasks(updated);
+    const target = updated.find(t => t.id === id);
+    if (target) {
+      await supabase.from('tasks').update(mapToDb(target)).eq('id', id);
+    }
     setSelectedTask(null);
   };
 
@@ -1319,6 +1260,8 @@ export default function App() {
   if (gridEndHour > 23) gridEndHour = 23;
 
   const dynamicTimeSlots = Array.from({ length: gridEndHour - gridStartHour + 1 }, (_, i) => gridStartHour + i);
+
+  if (isDbLoading) return <div className="min-h-screen bg-[#A9B1A6] flex items-center justify-center font-bold text-white tracking-widest uppercase">Initializing Cloud Architecture...</div>;
 
   return (
     <div className="min-h-screen bg-[#A9B1A6] p-4 sm:p-8 font-sans text-[#333333]">
@@ -1432,7 +1375,6 @@ export default function App() {
         {userRole === 'admin' && currentView !== 'create' && (
           <div className="bg-white p-3 rounded-lg border border-gray-200 mb-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-2xs">
             <div className="flex flex-wrap items-center gap-4">
-              {/* COMPANY FILTERS */}
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Companies:</span>
                 <div className="flex flex-wrap gap-1">
@@ -1452,7 +1394,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* TEAM FILTERS */}
               <div className="flex items-center gap-2 border-l border-gray-200 pl-4">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Team:</span>
                 <div className="flex flex-wrap gap-1">
@@ -1485,7 +1426,7 @@ export default function App() {
           </div>
         )}
 
-        {/* UNASSIGNED BACKLOG TRAY (HIDDEN IN LIST VIEW FOR ADMIN) */}
+        {/* UNASSIGNED BACKLOG TRAY */}
         {userRole === 'admin' && backlogTasks.length > 0 && currentView !== 'create' && currentView !== 'list' && (
           <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-4">
             <div className="flex justify-between items-center mb-2">
@@ -1512,20 +1453,16 @@ export default function App() {
           </div>
         )}
 
-        {/* LIST VIEW (ADMIN GROUPED WEEKLY / EMPLOYEE FLAT DAILY) */}
+        {/* LIST VIEW */}
         {currentView === 'list' && (
           <div className="flex-col flex gap-6 overflow-y-auto pr-2">
             
             {userRole === 'admin' ? (
-              // ADMIN GROUPED COMPANY VIEW (Mon-Sun Weekly View)
               (() => {
                 const start = new Date(currentDate);
                 const day = start.getDay();
                 const diff = start.getDate() - day + (day === 0 ? -6 : 1);
                 start.setDate(diff);
-                
-                const end = new Date(start);
-                end.setDate(end.getDate() + 6);
                 
                 const weekDates = [];
                 for(let i=0; i<7; i++) {
@@ -1689,7 +1626,6 @@ export default function App() {
                 );
               })()
             ) : (
-              // EMPLOYEE FLAT LIST VIEW (Single Day)
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <span className="w-2 h-2 rounded-full bg-red-500"></span>
@@ -1771,7 +1707,7 @@ export default function App() {
           </div>
         )}
 
-        {/* DAY VIEW WITH ELASTIC TIME GRID & HOVER GHOST PREVIEW */}
+        {/* DAY VIEW */}
         {currentView === 'day' && (
           <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm min-w-[600px]">
             <div className="flex border-b border-gray-300 bg-gray-100">
@@ -1903,7 +1839,7 @@ export default function App() {
           </div>
         )}
 
-        {/* WEEK VIEW WITH ELASTIC TIME GRID & HOVER GHOST PREVIEW */}
+        {/* WEEK VIEW */}
         {currentView === 'week' && (
           <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm min-w-[800px]">
             <div className="flex border-b border-gray-300 bg-gray-100 font-bold text-xs text-gray-700">
@@ -2347,7 +2283,6 @@ export default function App() {
                     <span>Occurrence Date: <strong>{selectedInstanceDate}</strong></span>
                   </div>
 
-                  {/* ASSIGNEE DEADLINE CHANGE CONTROL */}
                   {selectedTask.allowAssigneeDeadlineChange && !isCurrentInstanceCompleted && (
                     <div className="bg-blue-50 p-3 rounded border border-blue-200 flex flex-col gap-2">
                       <span className="text-xs font-bold text-blue-900">📅 Admin Permission Granted: Adjust Deadline</span>
@@ -2355,13 +2290,15 @@ export default function App() {
                         <input 
                           type="date" 
                           value={selectedTask.date} 
-                          onChange={(e) => {
+                          onChange={async (e) => {
                             const newDate = e.target.value;
                             const todayStr = formatDateKey(new Date());
                             const newOverdue = newDate < todayStr;
                             const updated = { ...selectedTask, date: newDate, isOverdue: newOverdue, overdueNotified: newOverdue };
                             setSelectedTask(updated);
                             setTasks(tasks.map(t => t.id === selectedTask.id ? updated : t));
+
+                            await supabase.from('tasks').update(mapToDb(updated)).eq('id', selectedTask.id);
 
                             if (userRole === 'employee' && selectedTask?.notifyOnDeadlineChange !== false) {
                               setNotifications(prev => [
@@ -2387,7 +2324,6 @@ export default function App() {
                   <div className="bg-white p-3 rounded border border-gray-200">
                     <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500 mb-2">Task Activity & Comments</h4>
                     
-                    {/* SUB-TASK PARENT LINK / TIMELINE BREADCRUMB */}
                     {selectedTask.parentTaskId && (
                       <div className="bg-blue-50/60 p-2 mb-3 rounded border border-blue-100 flex items-center justify-between text-[11px]">
                         <span className="text-blue-800">
@@ -2486,7 +2422,6 @@ export default function App() {
                   )}
                 </>
               ) : (
-                /* FULL FEATURE EDITING SCREEN */
                 <div className="flex flex-col gap-4 text-xs">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -2617,7 +2552,6 @@ export default function App() {
                     </label>
                   </div>
 
-                  {/* ADMIN NOTIFICATION RULES PANEL IN FULL EDIT MODAL */}
                   <div className="bg-[#A9B1A6]/10 p-3 rounded border border-[#A9B1A6]/30 flex flex-col gap-1.5">
                     <h4 className="font-bold text-xs text-gray-800">Admin Notification Rules</h4>
                     <label className="flex items-center gap-1.5 font-bold cursor-pointer">
@@ -2812,7 +2746,6 @@ export default function App() {
                 <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
               </div>
 
-              {/* ACTIVE TEAM MEMBERS SECTION */}
               <div className="bg-white p-3 rounded-lg border border-gray-200">
                 <div className="flex justify-between items-center mb-2">
                   <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500">Active Team Members</h4>
@@ -2843,7 +2776,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* MEMBER EDITING FORM */}
               <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3">
                 <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">
                   {editingMemberId ? 'Edit Team Member Profile' : 'Create New Team Member'}
@@ -2935,7 +2867,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* COMPANY MANAGEMENT SECTION */}
               <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3 mt-2">
                 <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Company Management</h4>
                 <div className="flex gap-2">
