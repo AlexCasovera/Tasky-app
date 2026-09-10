@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { useState, useEffect, useRef } from 'react';
-import { supabase } from './supabaseClient';
+import { supabase } from './supabaseClient'
+import Auth from './Auth'
 
 // --- SUPABASE DATABASE MAPPERS (camelCase <-> snake_case) ---
 const mapToDb = (t) => ({
@@ -77,6 +78,21 @@ const mapFromDb = (r) => ({
 });
 
 export default function App() {
+  const [session, setSession] = useState<any>(null)
+
+useEffect(() => {
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    setSession(session)
+  })
+
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((_event, session) => {
+    setSession(session)
+  })
+
+  return () => subscription.unsubscribe()
+}, [])
   const [currentView, setCurrentView] = useState('list');
   const [previousView, setPreviousView] = useState('list');
   const [userRole, setUserRole] = useState('admin');
@@ -1262,7 +1278,9 @@ export default function App() {
   const dynamicTimeSlots = Array.from({ length: gridEndHour - gridStartHour + 1 }, (_, i) => gridStartHour + i);
 
   if (isDbLoading) return <div className="min-h-screen bg-[#A9B1A6] flex items-center justify-center font-bold text-white tracking-widest uppercase">Initializing Cloud Architecture...</div>;
-
+if (!session) {
+  return <Auth />
+}
   return (
     <div className="min-h-screen bg-[#A9B1A6] p-4 sm:p-8 font-sans text-[#333333]">
       <div className="max-w-[95%] mx-auto bg-[#F4F3ED] p-6 rounded-lg shadow-sm min-h-[850px] flex flex-col relative">
