@@ -1663,14 +1663,12 @@ export default function App() {
               )}
             </div>
 
-            {userRole === 'admin' && (
-              <button 
-                onClick={() => { resetMemberForm(); setIsSettingsOpen(true); }}
-                className="bg-white p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition font-bold text-sm"
-                title="Settings & User Management">
-                ⚙️
-              </button>
-            )}
+            <button 
+              onClick={() => { resetMemberForm(); setIsSettingsOpen(true); }}
+              className="bg-white p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition font-bold text-sm"
+              title="Settings & Preferences">
+              ⚙️
+            </button>
 
             {userRole === 'admin' && (
               <button onClick={handleOpenCreateView} className="bg-[#5B7049] text-white px-4 py-2 rounded text-xs font-bold shadow-sm hover:bg-[#465638] transition">
@@ -3092,13 +3090,17 @@ export default function App() {
             <div className="bg-[#F4F3ED] max-w-md w-full h-full rounded-l-lg shadow-2xl p-6 border-l border-gray-300 flex flex-col gap-4 animate-fade-in overflow-y-auto" onMouseDown={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-center border-b border-gray-300 pb-3">
                 <div>
-                  <span className="text-xs font-bold text-[#A9B1A6] uppercase tracking-wider">System Governance</span>
-                  <h2 className="text-2xl font-serif font-bold text-gray-900">Settings & Team</h2>
+                  <span className="text-xs font-bold text-[#A9B1A6] uppercase tracking-wider">
+                    {userRole === 'admin' ? 'System Governance' : 'My Preferences'}
+                  </span>
+                  <h2 className="text-2xl font-serif font-bold text-gray-900">
+                    {userRole === 'admin' ? 'Settings & Team' : 'App Settings'}
+                  </h2>
                 </div>
                 <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
               </div>
 
-              {/* PUSH NOTIFICATION SETTINGS CARD */}
+              {/* PUSH NOTIFICATION SETTINGS CARD (Visible to Everyone) */}
               <div className="bg-white p-4 rounded-lg border border-amber-300 flex justify-between items-center shadow-2xs">
                 <div>
                   <h4 className="font-bold text-xs uppercase tracking-wider text-amber-900">Device Push Alerts</h4>
@@ -3111,168 +3113,173 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="bg-white p-3 rounded-lg border border-gray-200">
-                <div className="flex justify-between items-center mb-2">
-                  <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500">Active Team Members</h4>
-                  <button 
-                    onClick={resetMemberForm} 
-                    className="text-xs font-bold bg-[#A9B1A6] text-white px-2 py-0.5 rounded hover:bg-gray-600 transition">
-                    + Add New
-                  </button>
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  {teamMembers.map(member => (
-                    <div key={member.id} className="flex justify-between items-center p-2 rounded bg-gray-50 border border-gray-200">
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full" style={{ backgroundColor: member.color }}></span>
-                        <div>
-                          <span className="font-bold text-xs text-gray-800 block">{member.name} ({member.role.toUpperCase()})</span>
-                          <span className="text-[10px] text-gray-500">{member.email}</span>
-                        </div>
-                      </div>
+              {/* ADMIN ONLY CONTROLS */}
+              {userRole === 'admin' && (
+                <>
+                  <div className="bg-white p-3 rounded-lg border border-gray-200">
+                    <div className="flex justify-between items-center mb-2">
+                      <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500">Active Team Members</h4>
                       <button 
-                        onClick={() => handleOpenEditMember(member)} 
-                        className="text-xs font-bold text-blue-700 hover:underline">
-                        Edit
+                        onClick={resetMemberForm} 
+                        className="text-xs font-bold bg-[#A9B1A6] text-white px-2 py-0.5 rounded hover:bg-gray-600 transition">
+                        + Add New
                       </button>
                     </div>
-                  ))}
-                </div>
-              </div>
 
-              <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3">
-                <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">
-                  {editingMemberId ? 'Edit Team Member Profile' : 'Create New Team Member'}
-                </h4>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Full Name</label>
-                  <input 
-                    type="text" 
-                    value={memberName} 
-                    onChange={(e) => setMemberName(e.target.value)} 
-                    placeholder="e.g. Jordan Smith" 
-                    className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none" />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Email Address</label>
-                  <input 
-                    type="email" 
-                    value={memberEmail} 
-                    onChange={(e) => setMemberEmail(e.target.value)} 
-                    placeholder="jordan@company.com" 
-                    className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none" />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Password</label>
-                  <div className="relative flex items-center">
-                    <input 
-                      type={showPassword ? 'text' : 'password'} 
-                      value={memberPassword} 
-                      onChange={(e) => setMemberPassword(e.target.value)} 
-                      placeholder="••••••••" 
-                      className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none pr-12" />
-                    <button 
-                      type="button" 
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2 text-[10px] font-bold text-gray-500 hover:text-gray-800">
-                      {showPassword ? 'HIDE' : 'SHOW'}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex gap-3">
-                  <div className="w-1/2">
-                    <label className="block text-xs font-bold text-gray-700 mb-1">Role / Access</label>
-                    <select 
-                      value={memberRole} 
-                      onChange={(e) => setMemberRole(e.target.value)} 
-                      className="w-full p-2 text-xs border border-gray-300 rounded bg-white">
-                      <option value="admin">Admin (Master)</option>
-                      <option value="employee">Employee (Worker)</option>
-                    </select>
-                  </div>
-
-                  <div className="w-1/2">
-                    <label className="block text-xs font-bold text-gray-700 mb-1">Assigned Color</label>
-                    <div className="flex items-center gap-2">
-                      <input 
-                        type="color" 
-                        value={memberColor} 
-                        onChange={(e) => setMemberColor(e.target.value)} 
-                        className="w-8 h-8 rounded border border-gray-300 cursor-pointer p-0 bg-white" />
-                      <span className="text-xs font-mono font-bold text-gray-600">{memberColor}</span>
+                    <div className="flex flex-col gap-2">
+                      {teamMembers.map(member => (
+                        <div key={member.id} className="flex justify-between items-center p-2 rounded bg-gray-50 border border-gray-200">
+                          <div className="flex items-center gap-2">
+                            <span className="w-3 h-3 rounded-full" style={{ backgroundColor: member.color }}></span>
+                            <div>
+                              <span className="font-bold text-xs text-gray-800 block">{member.name} ({member.role.toUpperCase()})</span>
+                              <span className="text-[10px] text-gray-500">{member.email}</span>
+                            </div>
+                          </div>
+                          <button 
+                            onClick={() => handleOpenEditMember(member)} 
+                            className="text-xs font-bold text-blue-700 hover:underline">
+                            Edit
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                </div>
 
-                <div className="flex justify-between items-center pt-2 mt-1 border-t border-gray-200">
-                  {editingMemberId && (
-                    <button 
-                      onClick={() => handleDeleteMember(editingMemberId, memberName)}
-                      className="text-xs text-red-600 font-bold hover:underline">
-                      Delete Profile
-                    </button>
-                  )}
-                  <div className="flex gap-2 ml-auto">
-                    <button 
-                      onClick={resetMemberForm}
-                      className="px-3 py-1.5 rounded text-xs font-bold text-gray-500 hover:bg-gray-100">
-                      Cancel
-                    </button>
-                    <button 
-                      onClick={handleSaveMember}
-                      className="bg-[#333333] text-white px-4 py-1.5 rounded text-xs font-bold hover:bg-black transition">
-                      {editingMemberId ? 'Update Profile' : 'Add Member'}
-                    </button>
+                  <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3">
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">
+                      {editingMemberId ? 'Edit Team Member Profile' : 'Create New Team Member'}
+                    </h4>
+
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">Full Name</label>
+                      <input 
+                        type="text" 
+                        value={memberName} 
+                        onChange={(e) => setMemberName(e.target.value)} 
+                        placeholder="e.g. Jordan Smith" 
+                        className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none" />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">Email Address</label>
+                      <input 
+                        type="email" 
+                        value={memberEmail} 
+                        onChange={(e) => setMemberEmail(e.target.value)} 
+                        placeholder="jordan@company.com" 
+                        className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none" />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">Password</label>
+                      <div className="relative flex items-center">
+                        <input 
+                          type={showPassword ? 'text' : 'password'} 
+                          value={memberPassword} 
+                          onChange={(e) => setMemberPassword(e.target.value)} 
+                          placeholder="••••••••" 
+                          className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none pr-12" />
+                        <button 
+                          type="button" 
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-2 text-[10px] font-bold text-gray-500 hover:text-gray-800">
+                          {showPassword ? 'HIDE' : 'SHOW'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <div className="w-1/2">
+                        <label className="block text-xs font-bold text-gray-700 mb-1">Role / Access</label>
+                        <select 
+                          value={memberRole} 
+                          onChange={(e) => setMemberRole(e.target.value)} 
+                          className="w-full p-2 text-xs border border-gray-300 rounded bg-white">
+                          <option value="admin">Admin (Master)</option>
+                          <option value="employee">Employee (Worker)</option>
+                        </select>
+                      </div>
+
+                      <div className="w-1/2">
+                        <label className="block text-xs font-bold text-gray-700 mb-1">Assigned Color</label>
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="color" 
+                            value={memberColor} 
+                            onChange={(e) => setMemberColor(e.target.value)} 
+                            className="w-8 h-8 rounded border border-gray-300 cursor-pointer p-0 bg-white" />
+                          <span className="text-xs font-mono font-bold text-gray-600">{memberColor}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-2 mt-1 border-t border-gray-200">
+                      {editingMemberId && (
+                        <button 
+                          onClick={() => handleDeleteMember(editingMemberId, memberName)}
+                          className="text-xs text-red-600 font-bold hover:underline">
+                          Delete Profile
+                        </button>
+                      )}
+                      <div className="flex gap-2 ml-auto">
+                        <button 
+                          onClick={resetMemberForm}
+                          className="px-3 py-1.5 rounded text-xs font-bold text-gray-500 hover:bg-gray-100">
+                          Cancel
+                        </button>
+                        <button 
+                          onClick={handleSaveMember}
+                          className="bg-[#333333] text-white px-4 py-1.5 rounded text-xs font-bold hover:bg-black transition">
+                          {editingMemberId ? 'Update Profile' : 'Add Member'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
 
-              <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3 mt-2">
-                <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Company Management</h4>
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    value={newCompanyInput}
-                    onChange={(e) => setNewCompanyInput(e.target.value)}
-                    placeholder="New Company Name"
-                    className="flex-1 p-2 text-xs border border-gray-300 rounded focus:outline-none"
-                  />
-                  <button 
-                    onClick={() => {
-                      if(newCompanyInput.trim() && !companies.includes(newCompanyInput.trim())) {
-                        const added = newCompanyInput.trim();
-                        setCompanies([...companies, added]);
-                        setActiveCompanyFilters([...activeCompanyFilters, added]);
-                        setNewCompanyInput('');
-                      }
-                    }}
-                    className="bg-[#333333] text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-black transition">
-                    Add
-                  </button>
-                </div>
-                <div className="flex flex-col gap-1 mt-2">
-                  {companies.map(comp => (
-                    <div key={comp} className="flex justify-between items-center bg-gray-50 p-2 rounded border border-gray-100 text-xs">
-                      <span className="font-bold text-gray-700">{comp}</span>
+                  <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3 mt-2">
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Company Management</h4>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        value={newCompanyInput}
+                        onChange={(e) => setNewCompanyInput(e.target.value)}
+                        placeholder="New Company Name"
+                        className="flex-1 p-2 text-xs border border-gray-300 rounded focus:outline-none"
+                      />
                       <button 
                         onClick={() => {
-                          if(companies.length > 1) {
-                            setCompanies(companies.filter(c => c !== comp));
-                            setActiveCompanyFilters(activeCompanyFilters.filter(c => c !== comp));
-                          } else {
-                            alert('You must have at least one company in the system.');
+                          if(newCompanyInput.trim() && !companies.includes(newCompanyInput.trim())) {
+                            const added = newCompanyInput.trim();
+                            setCompanies([...companies, added]);
+                            setActiveCompanyFilters([...activeCompanyFilters, added]);
+                            setNewCompanyInput('');
                           }
                         }}
-                        className="text-red-500 font-bold hover:underline">Remove</button>
+                        className="bg-[#333333] text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-black transition">
+                        Add
+                      </button>
                     </div>
-                  ))}
-                </div>
-              </div>
+                    <div className="flex flex-col gap-1 mt-2">
+                      {companies.map(comp => (
+                        <div key={comp} className="flex justify-between items-center bg-gray-50 p-2 rounded border border-gray-100 text-xs">
+                          <span className="font-bold text-gray-700">{comp}</span>
+                          <button 
+                            onClick={() => {
+                              if(companies.length > 1) {
+                                setCompanies(companies.filter(c => c !== comp));
+                                setActiveCompanyFilters(activeCompanyFilters.filter(c => c !== comp));
+                              } else {
+                                alert('You must have at least one company in the system.');
+                              }
+                            }}
+                            className="text-red-500 font-bold hover:underline">Remove</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
 
             </div>
           </div>
