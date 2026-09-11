@@ -3,10 +3,16 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { targetType, targetValue, title, message } = req.body;
+  const apiKey = process.env.ONESIGNAL_REST_KEY;
 
+  if (!apiKey) {
+    return res.status(500).json({ 
+      error: 'ONESIGNAL_REST_KEY environment variable is not loaded on Vercel. Please redeploy in Vercel dashboard.' 
+    });
+  }
+
+  const { targetType, targetValue, title, message } = req.body;
   const ONESIGNAL_APP_ID = "20d3b6ba-25ad-4cc0-8001-2170d5c692ca";
-  const ONESIGNAL_REST_KEY = process.env.ONESIGNAL_REST_KEY;
 
   let filters = [];
   if (targetType === 'role') {
@@ -20,7 +26,7 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Key ${ONESIGNAL_REST_KEY}`
+        'Authorization': `Key ${apiKey.trim()}`
       },
       body: JSON.stringify({
         app_id: ONESIGNAL_APP_ID,
