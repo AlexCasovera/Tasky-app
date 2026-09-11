@@ -2,8 +2,8 @@ name: Supabase Keep-Alive Ping
 
 on:
   schedule:
-    - cron: '0 12 */3 * *' # Runs every 3 days at 12:00 UTC
-  workflow_dispatch: # Allows manual testing
+    - cron: '0 12 */3 * *'
+  workflow_dispatch:
 
 jobs:
   ping-database:
