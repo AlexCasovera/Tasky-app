@@ -1168,9 +1168,24 @@ export default function App() {
   };
 
   const handleDeleteTask = async (id) => {
+    const taskToDelete = tasks.find(t => t.id === id);
     setTasks(tasks.filter(t => t.id !== id));
+    
     const { error } = await supabase.from('tasks').delete().eq('id', id);
     if (error) console.error('Supabase Delete Error:', error);
+
+    // TRIGGER 8: Send Cancellation Push Notification to Assignees on Delete
+    if (taskToDelete && taskToDelete.assignees) {
+      taskToDelete.assignees.forEach(assigneeName => {
+        sendNativePush({
+          targetType: 'userName',
+          targetValue: assigneeName,
+          title: '🗑️ Task Cancelled',
+          message: `"${taskToDelete.title}" was removed from your queue.`
+        });
+      });
+    }
+
     setSelectedTask(null);
   };
 
@@ -1612,14 +1627,6 @@ export default function App() {
               <button onClick={() => setCurrentView('week')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'week' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Week</button>
               <button onClick={() => setCurrentView('month')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'month' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Month</button>
             </div>
-
-            {/* DIRECT NATIVE PUSH PROMPT BUTTON */}
-            <button 
-              onClick={() => enableNativePush(currentUserName || 'Alex M.')}
-              className="bg-amber-100 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-amber-200 transition flex items-center gap-1 shrink-0 shadow-2xs"
-              title="Enable Lock-Screen Push Alerts">
-              📲 Enable Push Alerts
-            </button>
 
             <div className="relative">
               <button 
@@ -3089,6 +3096,19 @@ export default function App() {
                   <h2 className="text-2xl font-serif font-bold text-gray-900">Settings & Team</h2>
                 </div>
                 <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
+              </div>
+
+              {/* PUSH NOTIFICATION SETTINGS CARD */}
+              <div className="bg-white p-4 rounded-lg border border-amber-300 flex justify-between items-center shadow-2xs">
+                <div>
+                  <h4 className="font-bold text-xs uppercase tracking-wider text-amber-900">Device Push Alerts</h4>
+                  <p className="text-[11px] text-gray-500 mt-0.5">Enable native lock-screen notifications for this browser/device.</p>
+                </div>
+                <button 
+                  onClick={() => enableNativePush(currentUserName || 'Alex M.')}
+                  className="bg-amber-100 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-amber-200 transition shrink-0 shadow-2xs">
+                  📲 Enable Push Alerts
+                </button>
               </div>
 
               <div className="bg-white p-3 rounded-lg border border-gray-200">
