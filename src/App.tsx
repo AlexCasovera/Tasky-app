@@ -247,6 +247,47 @@ export default function App() {
 
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const notifyChannel = useRef(null);
+
+  // LIVE NETWORK BROADCASTING FOR BELL ICON
+  useEffect(() => {
+    notifyChannel.current = supabase.channel('app-notifications')
+      .on('broadcast', { event: 'admin-alert' }, (payload) => {
+        if (userRole === 'admin') {
+          setNotifications(prev => [payload.payload, ...prev]);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(notifyChannel.current);
+    }
+  }, [userRole]);
+
+  // MASTER ADMIN ALERT TRIGGER
+  const triggerAdminAlert = (bellText, type, pushTitle, pushMessage) => {
+    // 1. Send Lock-Screen Push
+    sendNativePush({
+      targetType: 'role',
+      targetValue: 'admin',
+      title: pushTitle,
+      message: pushMessage
+    });
+
+    // 2. Broadcast Live Bell Notification over network
+    notifyChannel.current?.send({
+      type: 'broadcast',
+      event: 'admin-alert',
+      payload: { 
+        id: Date.now() + Math.random(), 
+        text: bellText, 
+        type, 
+        recipientRole: 'admin', 
+        read: false, 
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+      }
+    });
+  };
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingMemberId, setEditingMemberId] = useState(null);
@@ -331,13 +372,10 @@ export default function App() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'tasks' },
         (payload) => {
-          console.log('⚡ Realtime event received:', payload);
           fetchCloudData();
         }
       )
-      .subscribe((status) => {
-        console.log('📡 Realtime Subscription Status:', status);
-      });
+      .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
@@ -594,11 +632,6 @@ export default function App() {
         if (resizedTask) {
           await supabase.from('tasks').update(mapToDb(resizedTask)).eq('id', resizedTask.id);
 
-          setNotifications(prev => [
-            { id: Date.now() + Math.random(), text: `⏱️ Time Slot Adjusted: "${resizedTask.title}" duration modified`, type: 'update', recipientRole: 'employee', read: false, time: 'Just now' },
-            ...prev
-          ]);
-
           (resizedTask.assignees || []).forEach(assigneeName => {
             sendNativePush({
               targetType: 'userName',
@@ -621,6 +654,7 @@ export default function App() {
     };
   }, [tasks]);
 
+  // OVERDUE CHECKER: Evaluated locally on the Admin's device when loaded
   useEffect(() => {
     const todayStr = formatDateKey(new Date());
 
@@ -632,19 +666,15 @@ export default function App() {
         if (isPastDue && !task.overdueNotified) {
           changed = true;
           const assigneeLabel = task.assignees && task.assignees.length > 0 ? task.assignees.join(', ') : 'Unassigned';
-          const notifMsg = `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was not completed by ${task.date}`;
-
-          setNotifications(prev => [
-            { id: Date.now() + Math.random(), text: notifMsg, type: 'overdue', recipientRole: 'admin', read: false, time: 'Just now' },
-            ...prev
-          ]);
-
-          sendNativePush({
-            targetType: 'role',
-            targetValue: 'admin',
-            title: '⚠️ Task Overdue Alert',
-            message: `"${task.title}" (${assigneeLabel}) was not completed by ${task.date}`
-          });
+          
+          if (userRole === 'admin') {
+            triggerAdminAlert(
+              `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was not completed by ${task.date}`,
+              'overdue',
+              '⚠️ Task Overdue Alert',
+              `"${task.title}" (${assigneeLabel}) was not completed by ${task.date}`
+            );
+          }
 
           return { ...task, isOverdue: true, overdueNotified: true };
         } else if (!isPastDue && task.isOverdue) {
@@ -664,7 +694,7 @@ export default function App() {
 
       return changed ? updated : prevTasks;
     });
-  }, []);
+  }, [userRole]);
 
   const handleDragStart = (e, taskId, sourceDate = null) => {
     if (userRole !== 'admin') return;
@@ -723,11 +753,6 @@ export default function App() {
       }
 
       const effectiveSourceDate = sourceDateFromPrompt || targetTask.date;
-
-      setNotifications(prev => [
-        { id: Date.now() + Math.random(), text: `📅 Schedule Shifted: "${targetTask.title}" moved to ${targetDate}`, type: 'update', recipientRole: 'employee', read: false, time: 'Just now' },
-        ...prev
-      ]);
 
       const notifyUsers = targetMemberName ? [targetMemberName] : (targetTask.assignees || []);
       notifyUsers.forEach(assigneeName => {
@@ -1053,11 +1078,6 @@ export default function App() {
       alert(`Cloud sync error: ${error.message}`);
     }
 
-    setNotifications(prev => [
-      { id: Date.now() + Math.random(), text: `📋 New Task Assigned: "${taskTitle}" (${taskCompany})`, type: 'created', recipientRole: 'employee', read: false, time: 'Just now' },
-      ...prev
-    ]);
-
     selectedAssignees.forEach(assigneeName => {
       sendNativePush({
         targetType: 'userName',
@@ -1149,11 +1169,6 @@ export default function App() {
       alert(`Cloud sync error: ${error.message}`);
     }
 
-    setNotifications(prev => [
-      { id: Date.now() + Math.random(), text: `✏️ Task Updated: "${taskTitle}" (Details/Deadline modified by Admin)`, type: 'update', recipientRole: 'employee', read: false, time: 'Just now' },
-      ...prev
-    ]);
-
     selectedAssignees.forEach(assigneeName => {
       sendNativePush({
         targetType: 'userName',
@@ -1204,15 +1219,14 @@ export default function App() {
       await supabase.from('tasks').update({ comments: updatedComments }).eq('id', id);
     }
 
+    // TRIGGER RULE 1: Comment Added
     if (userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
-      setNotifications(prev => [{ id: Date.now() + Math.random(), text: `💬 New Note on "${selectedTask.title}" by ${currentUserName}`, type: 'comment', recipientRole: 'admin', read: false, time: 'Just now' }, ...prev]);
-
-      sendNativePush({
-        targetType: 'role',
-        targetValue: 'admin',
-        title: '💬 New Execution Note',
-        message: `${currentUserName} commented on "${selectedTask.title}"`
-      });
+      triggerAdminAlert(
+        `💬 New Note on "${selectedTask.title}" by ${currentUserName}`,
+        'comment',
+        '💬 New Execution Note',
+        `${currentUserName} commented on "${selectedTask.title}"`
+      );
     }
 
     setExecutionComment('');
@@ -1261,15 +1275,14 @@ export default function App() {
       return t;
     });
 
+    // TRIGGER RULE 4: Task Completed
     if (selectedTask?.notifyOnComplete !== false) {
-      setNotifications(prev => [{ id: Date.now() + Math.random(), text: `✓ Task Completed: "${selectedTask.title}" by ${currentUserName}`, type: 'completion', recipientRole: 'admin', read: false, time: 'Just now' }, ...prev]);
-
-      sendNativePush({
-        targetType: 'role',
-        targetValue: 'admin',
-        title: '✓ Task Completed',
-        message: `"${selectedTask.title}" marked complete by ${currentUserName}`
-      });
+      triggerAdminAlert(
+        `✓ Task Completed: "${selectedTask.title}" by ${currentUserName}`,
+        'completion',
+        '✓ Task Completed',
+        `"${selectedTask.title}" marked complete by ${currentUserName}`
+      );
     }
 
     const payloadQueue = [];
@@ -1311,15 +1324,14 @@ export default function App() {
         comments: [`Auto-deployed via Sub Task prompt upon completion of "${selectedTask.title}"`]
       };
 
+      // TRIGGER RULE 3: New Sub Task Added
       if (selectedTask?.notifyOnTaskCreated !== false) {
-        setNotifications(prev => [{ id: Date.now() + Math.random(), text: `➕ New Sub Task Spawned: "${completionPrompt.title}" for ${targetDate}`, type: 'subtask', recipientRole: 'admin', read: false, time: 'Just now' }, ...prev]);
-
-        sendNativePush({
-          targetType: 'role',
-          targetValue: 'admin',
-          title: '➕ Sub Task Spawned',
-          message: `${currentUserName} created follow-up sub task: "${completionPrompt.title}"`
-        });
+        triggerAdminAlert(
+          `➕ New Sub Task Spawned: "${completionPrompt.title}"`,
+          'subtask',
+          '➕ Sub Task Spawned',
+          `${currentUserName} created follow-up task: "${completionPrompt.title}"`
+        );
       }
 
       updatedTasks = [newAdHocTask, ...updatedTasks];
@@ -2607,25 +2619,14 @@ export default function App() {
 
                             await supabase.from('tasks').update(mapToDb(updated)).eq('id', selectedTask.id);
 
+                            // TRIGGER RULE 2: Deadline Changed
                             if (userRole === 'employee' && selectedTask?.notifyOnDeadlineChange !== false) {
-                              setNotifications(prev => [
-                                {
-                                  id: Date.now() + Math.random(),
-                                  text: `📅 Employee Rescheduled: "${selectedTask.title}" deadline changed to ${newDate}`,
-                                  type: 'deadline',
-                                  recipientRole: 'admin',
-                                  read: false,
-                                  time: 'Just now'
-                                },
-                                ...prev
-                              ]);
-
-                              sendNativePush({
-                                targetType: 'role',
-                                targetValue: 'admin',
-                                title: '📅 Employee Changed Deadline',
-                                message: `${currentUserName} moved deadline for "${selectedTask.title}" to ${newDate}`
-                              });
+                              triggerAdminAlert(
+                                `📅 Employee Rescheduled: "${selectedTask.title}" deadline changed to ${newDate}`,
+                                'deadline',
+                                '📅 Employee Changed Deadline',
+                                `${currentUserName} moved deadline for "${selectedTask.title}" to ${newDate}`
+                              );
                             }
                           }} 
                           className="p-1.5 text-xs border rounded bg-white font-bold text-gray-800 focus:outline-none cursor-pointer"
@@ -2733,22 +2734,14 @@ export default function App() {
 
                             await supabase.from('tasks').update(mapToDb(updatedTask)).eq('id', selectedTask.id);
 
+                            // TRIGGER RULE 1.5: File Uploaded
                             if (userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
-                              setNotifications(prev => [{ 
-                                id: Date.now() + Math.random(), 
-                                text: `📎 File Uploaded for "${selectedTask.title}" by ${currentUserName}`, 
-                                type: 'photo', 
-                                recipientRole: 'admin', 
-                                read: false, 
-                                time: 'Just now' 
-                              }, ...prev]);
-
-                              sendNativePush({
-                                targetType: 'role',
-                                targetValue: 'admin',
-                                title: '📎 Proof File Uploaded',
-                                message: `${currentUserName} attached ${file.name} to "${selectedTask.title}"`
-                              });
+                              triggerAdminAlert(
+                                `📎 File Uploaded for "${selectedTask.title}" by ${currentUserName}`,
+                                'photo',
+                                '📎 Proof File Uploaded',
+                                `${currentUserName} attached ${file.name} to "${selectedTask.title}"`
+                              );
                             }
                           }}
                         />
