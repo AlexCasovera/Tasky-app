@@ -3,6 +3,41 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient'
 import Auth from './Auth'
 
+// --- ONESIGNAL CONFIGURATION ---
+const ONESIGNAL_APP_ID = "20d3b6ba-25ad-4cc0-8001-2170d5c692ca";
+const ONESIGNAL_REST_KEY = "os_v2_app_edj3norfvvgmbaabefynlruszldrhzv5sy3u3cvyaavzdjz6m7fbo6vkfxrhl6akedv4dkl3kpidosjb5wvwkqxrafg6gnagbu7qaza";
+
+// HELPER: Send Lock-Screen Native Push Notification via OneSignal REST API
+const sendNativePush = async ({ targetType, targetValue, title, message }) => {
+  if (!ONESIGNAL_APP_ID || ONESIGNAL_APP_ID.includes("YOUR_")) return;
+
+  let filters = [];
+  if (targetType === 'role') {
+    filters = [{ field: 'tag', key: 'userRole', relation: '=', value: targetValue }];
+  } else if (targetType === 'userName') {
+    filters = [{ field: 'tag', key: 'userName', relation: '=', value: targetValue }];
+  }
+
+  try {
+    await fetch('https://onesignal.com/api/v1/notifications', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Basic ${ONESIGNAL_REST_KEY}`
+      },
+      body: JSON.stringify({
+        app_id: ONESIGNAL_APP_ID,
+        filters,
+        headings: { en: title },
+        contents: { en: message },
+        url: window.location.origin
+      })
+    });
+  } catch (err) {
+    console.error('Push Notification Error:', err);
+  }
+};
+
 // --- SUPABASE DATABASE MAPPERS (camelCase <-> snake_case) ---
 const mapToDb = (t) => ({
   id: String(t.id),
@@ -100,6 +135,33 @@ export default function App() {
   const [currentProfile, setCurrentProfile] = useState<any>(null);
   const [teamMembers, setTeamMembers] = useState([]);
   const [activeEmployeeFilters, setActiveEmployeeFilters] = useState([]);
+
+  // INITIALIZE ONESIGNAL SDK & TAG DEVICE FOR PUSH NOTIFICATIONS
+  useEffect(() => {
+    if (!session || ONESIGNAL_APP_ID.includes("YOUR_")) return;
+
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    window.OneSignalDeferred.push(async function(OneSignal) {
+      await OneSignal.init({
+        appId: ONESIGNAL_APP_ID,
+        safari_web_id: "web.onesignal.auto",
+        notifyButton: { enable: false }
+      });
+
+      if (currentProfile) {
+        OneSignal.User.addTag("userRole", userRole);
+        OneSignal.User.addTag("userName", currentProfile.name);
+      }
+    });
+
+    if (!document.getElementById("onesignal-sdk")) {
+      const script = document.createElement("script");
+      script.id = "onesignal-sdk";
+      script.src = "https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js";
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+  }, [session, currentProfile, userRole]);
 
   // FETCH LIVE TEAM MEMBERS AND CURRENT USER PROFILE FROM DATABASE
   useEffect(() => {
@@ -508,6 +570,16 @@ export default function App() {
             { id: Date.now() + Math.random(), text: `⏱️ Time Slot Adjusted: "${resizedTask.title}" duration modified`, type: 'update', recipientRole: 'employee', read: false, time: 'Just now' },
             ...prev
           ]);
+
+          // TRIGGER 2: Employee Notification when task is modified
+          (resizedTask.assignees || []).forEach(assigneeName => {
+            sendNativePush({
+              targetType: 'userName',
+              targetValue: assigneeName,
+              title: '⏱️ Schedule Modified',
+              message: `Task duration modified for "${resizedTask.title}"`
+            });
+          });
         }
         resizeStateRef.current = null;
         setResizingTaskId(null);
@@ -522,6 +594,7 @@ export default function App() {
     };
   }, [tasks]);
 
+  // OVERDUE CHECKER WITH ADMIN NATIVE PUSH TRIGGER
   useEffect(() => {
     const todayStr = formatDateKey(new Date());
 
@@ -539,6 +612,15 @@ export default function App() {
             { id: Date.now() + Math.random(), text: notifMsg, type: 'overdue', recipientRole: 'admin', read: false, time: 'Just now' },
             ...prev
           ]);
+
+          // TRIGGER 7: Admin Push when task is overdue
+          sendNativePush({
+            targetType: 'role',
+            targetValue: 'admin',
+            title: '⚠️ Task Overdue Alert',
+            message: `"${task.title}" (${assigneeLabel}) was not completed by ${task.date}`
+          });
+
           return { ...task, isOverdue: true, overdueNotified: true };
         } else if (!isPastDue && task.isOverdue) {
           changed = true;
@@ -621,6 +703,17 @@ export default function App() {
         { id: Date.now() + Math.random(), text: `📅 Schedule Shifted: "${targetTask.title}" moved to ${targetDate}`, type: 'update', recipientRole: 'employee', read: false, time: 'Just now' },
         ...prev
       ]);
+
+      // TRIGGER 2: Employee Push when task schedule is moved
+      const notifyUsers = targetMemberName ? [targetMemberName] : (targetTask.assignees || []);
+      notifyUsers.forEach(assigneeName => {
+        sendNativePush({
+          targetType: 'userName',
+          targetValue: assigneeName,
+          title: '📅 Schedule Updated',
+          message: `"${targetTask.title}" has been moved to ${targetDate}`
+        });
+      });
 
       if (targetTask.recurrenceType !== 'once' && !updateSeries) {
         const standaloneTask = {
@@ -941,6 +1034,16 @@ export default function App() {
       ...prev
     ]);
 
+    // TRIGGER 1: Employee Push Notification on Task Creation
+    selectedAssignees.forEach(assigneeName => {
+      sendNativePush({
+        targetType: 'userName',
+        targetValue: assigneeName,
+        title: '📋 New Task Assigned',
+        message: `You have been assigned: "${taskTitle}" (${taskCompany})`
+      });
+    });
+
     resetForm();
     setCurrentView(previousView);
   };
@@ -1028,6 +1131,16 @@ export default function App() {
       ...prev
     ]);
 
+    // TRIGGER 2: Employee Push Notification when Admin modifies any task property
+    selectedAssignees.forEach(assigneeName => {
+      sendNativePush({
+        targetType: 'userName',
+        targetValue: assigneeName,
+        title: '✏️ Task Updated by Admin',
+        message: `Details updated for "${taskTitle}"`
+      });
+    });
+
     setSelectedTask(updatedTask);
     setIsEditing(false);
   };
@@ -1056,6 +1169,14 @@ export default function App() {
 
     if (userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
       setNotifications(prev => [{ id: Date.now() + Math.random(), text: `💬 New Note on "${selectedTask.title}" by ${currentUserName}`, type: 'comment', recipientRole: 'admin', read: false, time: 'Just now' }, ...prev]);
+
+      // TRIGGER 3: Admin Push Notification when employee posts comment
+      sendNativePush({
+        targetType: 'role',
+        targetValue: 'admin',
+        title: '💬 New Execution Note',
+        message: `${currentUserName} commented on "${selectedTask.title}"`
+      });
     }
 
     setExecutionComment('');
@@ -1106,6 +1227,14 @@ export default function App() {
 
     if (selectedTask?.notifyOnComplete !== false) {
       setNotifications(prev => [{ id: Date.now() + Math.random(), text: `✓ Task Completed: "${selectedTask.title}" by ${currentUserName}`, type: 'completion', recipientRole: 'admin', read: false, time: 'Just now' }, ...prev]);
+
+      // TRIGGER 6: Admin Push Notification on Task Completion
+      sendNativePush({
+        targetType: 'role',
+        targetValue: 'admin',
+        title: '✓ Task Completed',
+        message: `"${selectedTask.title}" marked complete by ${currentUserName}`
+      });
     }
 
     const payloadQueue = [];
@@ -1149,6 +1278,14 @@ export default function App() {
 
       if (selectedTask?.notifyOnTaskCreated !== false) {
         setNotifications(prev => [{ id: Date.now() + Math.random(), text: `➕ New Sub Task Spawned: "${completionPrompt.title}" for ${targetDate}`, type: 'subtask', recipientRole: 'admin', read: false, time: 'Just now' }, ...prev]);
+
+        // TRIGGER 5: Admin Push Notification when employee spawns new task
+        sendNativePush({
+          targetType: 'role',
+          targetValue: 'admin',
+          title: '➕ Sub Task Spawned',
+          message: `${currentUserName} created follow-up sub task: "${completionPrompt.title}"`
+        });
       }
 
       updatedTasks = [newAdHocTask, ...updatedTasks];
@@ -1628,7 +1765,7 @@ export default function App() {
                               compWeekTasks.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
                             }
                             if (isTaskCompletedOnDay(t, wd.dateStr)) {
-                              compWeekCompleted.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
+                              compWeekCompleted.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dateStr });
                             }
                           });
                         }
@@ -2450,6 +2587,14 @@ export default function App() {
                                 },
                                 ...prev
                               ]);
+
+                              // TRIGGER 4: Admin Push Notification when Employee adjusts deadline
+                              sendNativePush({
+                                targetType: 'role',
+                                targetValue: 'admin',
+                                title: '📅 Employee Changed Deadline',
+                                message: `${currentUserName} moved deadline for "${selectedTask.title}" to ${newDate}`
+                              });
                             }
                           }} 
                           className="p-1.5 text-xs border rounded bg-white font-bold text-gray-800 focus:outline-none cursor-pointer"
@@ -2569,6 +2714,14 @@ export default function App() {
                                 read: false, 
                                 time: 'Just now' 
                               }, ...prev]);
+
+                              // TRIGGER 3: Admin Push Notification when File is Uploaded
+                              sendNativePush({
+                                targetType: 'role',
+                                targetValue: 'admin',
+                                title: '📎 Proof File Uploaded',
+                                message: `${currentUserName} attached ${file.name} to "${selectedTask.title}"`
+                              });
                             }
                           }}
                         />
