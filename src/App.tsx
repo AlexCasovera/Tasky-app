@@ -3,6 +3,54 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 import Auth from './Auth';
 
+// --- IMAGE COMPRESSION ENGINE ---
+const compressImage = (file: File, maxWidth: number, maxHeight: number, quality: number): Promise<File> => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() }));
+            } else {
+              resolve(file); // fallback to original if compression fails
+            }
+          },
+          'image/jpeg',
+          quality
+        );
+      };
+      img.onerror = () => resolve(file);
+    };
+    reader.onerror = () => resolve(file);
+  });
+};
+
 // --- NATIVE VAPID PUSH CONFIGURATION ---
 const VAPID_PUBLIC_KEY = "BEdpaFVtcj6F-vvykhLdOaDDzUUmcnVB0knI0VjfJjqLLAStEKll692mf1M3xUAo_KS8djPg-YCIya9GOtHB3cA";
 
@@ -2736,10 +2784,15 @@ export default function App() {
                           accept="*/*" 
                           className="hidden" 
                           onChange={async (e) => {
-                            const file = e.target.files?.[0];
+                            let file = e.target.files?.[0];
                             if (!file) return;
 
-                            const fileExt = file.name.split('.').pop();
+                            // Apply compression if it's an image
+                            if (file.type.startsWith('image/')) {
+                              file = await compressImage(file, 1280, 1280, 0.7);
+                            }
+
+                            const fileExt = file.name.split('.').pop() || 'jpg';
                             const fileName = `${selectedTask.id}-${Date.now()}.${fileExt}`;
 
                             const { error: uploadErr } = await supabase.storage
@@ -3123,7 +3176,7 @@ export default function App() {
                 <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
               </div>
 
-              {/* PUSH NOTIFICATION SETTINGS CARD */}
+              {/* PUSH NOTIFICATION SETTINGS CARD (Visible to Everyone) */}
               <div className="bg-white p-4 rounded-lg border border-amber-300 flex justify-between items-center shadow-2xs">
                 <div>
                   <h4 className="font-bold text-xs uppercase tracking-wider text-amber-900">Device Push Alerts</h4>
