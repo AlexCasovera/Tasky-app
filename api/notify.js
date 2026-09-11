@@ -1,45 +1,33 @@
+import webpush from 'web-push';
+
+webpush.setVapidDetails(
+  'mailto:admin@tasky.app',
+  process.env.VAPID_PUBLIC_KEY,
+  process.env.VAPID_PRIVATE_KEY
+);
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const apiKey = process.env.ONESIGNAL_REST_KEY;
+  const { subscription, title, message } = req.body;
 
-  if (!apiKey) {
-    return res.status(500).json({ 
-      error: 'ONESIGNAL_REST_KEY environment variable is not loaded on Vercel. Please redeploy in Vercel dashboard.' 
-    });
+  if (!subscription) {
+    return res.status(400).json({ error: 'Missing push subscription object' });
   }
 
-  const { targetType, targetValue, title, message } = req.body;
-  const ONESIGNAL_APP_ID = "20d3b6ba-25ad-4cc0-8001-2170d5c692ca";
-
-  let filters = [];
-  if (targetType === 'role') {
-    filters = [{ field: 'tag', key: 'userRole', relation: '=', value: targetValue }];
-  } else if (targetType === 'userName') {
-    filters = [{ field: 'tag', key: 'userName', relation: '=', value: targetValue }];
-  }
+  const payload = JSON.stringify({
+    title: title || 'Task Update',
+    body: message || 'You have a new task notification',
+    icon: '/icons.svg'
+  });
 
   try {
-    const response = await fetch('https://onesignal.com/api/v1/notifications', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Key ${apiKey.trim()}`
-      },
-      body: JSON.stringify({
-        app_id: ONESIGNAL_APP_ID,
-        filters,
-        headings: { en: title },
-        contents: { en: message },
-        url: req.headers.origin || 'https://tasky-app-5gkh-alpha.vercel.app'
-      })
-    });
-
-    const data = await response.json();
-    return res.status(response.status).json(data);
+    await webpush.sendNotification(subscription, payload);
+    return res.status(200).json({ success: true });
   } catch (error) {
+    console.error('Web Push Error:', error);
     return res.status(500).json({ error: error.message });
   }
 }
