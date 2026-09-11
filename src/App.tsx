@@ -80,23 +80,79 @@ const mapFromDb = (r) => ({
 export default function App() {
   const [session, setSession] = useState<any>(null)
 
-useEffect(() => {
-  supabase.auth.getSession().then(({ data: { session } }) => {
-    setSession(session)
-  })
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+    })
 
-  const {
-    data: { subscription },
-  } = supabase.auth.onAuthStateChange((_event, session) => {
-    setSession(session)
-  })
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+    })
 
-  return () => subscription.unsubscribe()
-}, [])
+    return () => subscription.unsubscribe()
+  }, [])
+
   const [currentView, setCurrentView] = useState('list');
   const [previousView, setPreviousView] = useState('list');
-  const [userRole, setUserRole] = useState('admin');
-  
+  const [userRole, setUserRole] = useState('employee');
+  const [currentProfile, setCurrentProfile] = useState<any>(null);
+  const [teamMembers, setTeamMembers] = useState([]);
+  const [activeEmployeeFilters, setActiveEmployeeFilters] = useState([]);
+
+  // FETCH LIVE TEAM MEMBERS AND CURRENT USER PROFILE FROM DATABASE
+  useEffect(() => {
+    async function loadProfiles() {
+      // 1. Fetch all team member profiles
+      const { data: allProfiles, error: teamErr } = await supabase
+        .from('profiles')
+        .select('*');
+
+      if (allProfiles && !teamErr) {
+        const mappedMembers = allProfiles.map(p => ({
+          id: p.id,
+          name: p.name || p.email.split('@')[0],
+          initials: p.initials || p.email.substring(0, 2).toUpperCase(),
+          email: p.email,
+          role: p.role || 'employee',
+          color: p.color || '#2A9D8F'
+        }));
+        setTeamMembers(mappedMembers);
+        setActiveEmployeeFilters(mappedMembers.map(m => m.name));
+      }
+
+      // 2. Fetch active logged-in user's profile
+      if (session?.user?.id) {
+        const { data: myProfile, error: profileErr } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+
+        if (myProfile && !profileErr) {
+          setUserRole(myProfile.role || 'employee');
+          setCurrentProfile({
+            id: myProfile.id,
+            name: myProfile.name || myProfile.email.split('@')[0],
+            initials: myProfile.initials || myProfile.email.substring(0, 2).toUpperCase(),
+            email: myProfile.email,
+            role: myProfile.role || 'employee',
+            color: myProfile.color || '#2A9D8F'
+          });
+        }
+      }
+    }
+
+    if (session) {
+      loadProfiles();
+    }
+  }, [session]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+  };
+
   const [currentDate, setCurrentDate] = useState(new Date());
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -110,12 +166,6 @@ useEffect(() => {
   const [activeCompanyFilters, setActiveCompanyFilters] = useState(['Sparkulous', 'Casovera', 'TMFLO', 'Leprino Personal']);
   const [newCompanyInput, setNewCompanyInput] = useState('');
 
-  const [teamMembers, setTeamMembers] = useState([
-    { id: '1', name: 'Alex M.', initials: 'AM', email: 'alex@company.com', password: 'password123', role: 'admin', color: '#E63946' },
-    { id: '2', name: 'Adrian R.', initials: 'AR', email: 'adrian@company.com', password: 'password123', role: 'employee', color: '#7209B7' },
-    { id: '3', name: 'Marc S.', initials: 'MS', email: 'marc@company.com', password: 'password123', role: 'employee', color: '#0077B6' }
-  ]);
-
   const [memberName, setMemberName] = useState('');
   const [memberEmail, setMemberEmail] = useState('');
   const [memberPassword, setMemberPassword] = useState('');
@@ -126,8 +176,6 @@ useEffect(() => {
   const [selectedTask, setSelectedTask] = useState(null);
   const [selectedInstanceDate, setSelectedInstanceDate] = useState('');
   const [isEditing, setIsEditing] = useState(false);
-
-  const [activeEmployeeFilters, setActiveEmployeeFilters] = useState(['Alex M.', 'Adrian R.', 'Marc S.']);
 
   const [taskTitle, setTaskTitle] = useState('');
   const [taskDesc, setTaskDesc] = useState('');
@@ -710,37 +758,39 @@ useEffect(() => {
     setMemberColor(member.color || '#2A9D8F');
   };
 
-  const handleSaveMember = () => {
+  const handleSaveMember = async () => {
     if (!memberName.trim()) return alert('Please enter a name.');
 
     const initials = memberName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
 
     if (editingMemberId) {
-      setTeamMembers(teamMembers.map(m => {
-        if (m.id === editingMemberId) {
-          return { ...m, name: memberName, initials, email: memberEmail, password: memberPassword, role: memberRole, color: memberColor };
-        }
-        return m;
-      }));
-    } else {
-      const newMember = {
-        id: Date.now().toString(),
+      await supabase.from('profiles').update({
         name: memberName,
         initials,
-        email: memberEmail,
-        password: memberPassword,
         role: memberRole,
         color: memberColor
-      };
-      setTeamMembers([...teamMembers, newMember]);
-      setActiveEmployeeFilters([...activeEmployeeFilters, memberName]);
+      }).eq('id', editingMemberId);
+    }
+
+    // Refresh profiles
+    const { data: updatedProfiles } = await supabase.from('profiles').select('*');
+    if (updatedProfiles) {
+      setTeamMembers(updatedProfiles.map(p => ({
+        id: p.id,
+        name: p.name || p.email.split('@')[0],
+        initials: p.initials || p.email.substring(0, 2).toUpperCase(),
+        email: p.email,
+        role: p.role || 'employee',
+        color: p.color || '#2A9D8F'
+      })));
     }
 
     resetMemberForm();
   };
 
-  const handleDeleteMember = (id, name) => {
+  const handleDeleteMember = async (id, name) => {
     if (teamMembers.length <= 1) return alert('At least one team member must remain.');
+    await supabase.from('profiles').delete().eq('id', id);
     setTeamMembers(teamMembers.filter(m => m.id !== id));
     setActiveEmployeeFilters(activeEmployeeFilters.filter(n => n !== name));
     resetMemberForm();
@@ -859,7 +909,7 @@ useEffect(() => {
       comments: []
     };
 
-    setTasks([newTask, ...tasks]); // Optimistic local state update
+    setTasks([newTask, ...tasks]);
 
     const { error } = await supabase.from('tasks').insert(mapToDb(newTask));
     if (error) {
@@ -970,9 +1020,11 @@ useEffect(() => {
     setSelectedTask(null);
   };
 
+  const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
+
   const handlePostOpenComment = async (id) => {
     if (!openCommentInput.trim()) return;
-    const commentText = `${userRole === 'admin' ? 'Admin' : 'Employee'} (${selectedInstanceDate}): ${openCommentInput}`;
+    const commentText = `${userRole === 'admin' ? 'Admin' : currentUserName} (${selectedInstanceDate}): ${openCommentInput}`;
     
     setTasks(tasks.map(t => t.id === id ? { ...t, comments: [...(t.comments || []), commentText] } : t));
     setSelectedTask(prev => ({ ...prev, comments: [...(prev.comments || []), commentText] }));
@@ -984,7 +1036,7 @@ useEffect(() => {
     }
 
     if (userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
-      setNotifications(prev => [{ id: Date.now() + Math.random(), text: `💬 New Note on "${selectedTask.title}" by Employee`, type: 'comment', recipientRole: 'admin', read: false, time: 'Just now' }, ...prev]);
+      setNotifications(prev => [{ id: Date.now() + Math.random(), text: `💬 New Note on "${selectedTask.title}" by ${currentUserName}`, type: 'comment', recipientRole: 'admin', read: false, time: 'Just now' }, ...prev]);
     }
 
     setExecutionComment('');
@@ -1000,14 +1052,14 @@ useEffect(() => {
       showForm: false,
       title: '', 
       desc: '',
-      assignee: selectedTask.assignees[0] || teamMembers[0].name,
+      assignee: selectedTask.assignees[0] || (teamMembers[0]?.name || currentUserName),
       targetDate: formatDateKey(new Date()) 
     });
   };
 
   const executeCompletion = async (withFollowUp) => {
     const noteText = openCommentInput.trim() 
-      ? `${userRole === 'admin' ? 'Admin' : 'Employee'} (${selectedInstanceDate}): ${openCommentInput}`
+      ? `${userRole === 'admin' ? 'Admin' : currentUserName} (${selectedInstanceDate}): ${openCommentInput}`
       : null;
 
     if (withFollowUp && completionPrompt) {
@@ -1030,7 +1082,7 @@ useEffect(() => {
     });
 
     if (selectedTask?.notifyOnComplete !== false) {
-      setNotifications(prev => [{ id: Date.now() + Math.random(), text: `✓ Task Completed: "${selectedTask.title}" by ${userRole === 'admin' ? 'Admin' : 'Employee'}`, type: 'completion', recipientRole: 'admin', read: false, time: 'Just now' }, ...prev]);
+      setNotifications(prev => [{ id: Date.now() + Math.random(), text: `✓ Task Completed: "${selectedTask.title}" by ${currentUserName}`, type: 'completion', recipientRole: 'admin', read: false, time: 'Just now' }, ...prev]);
     }
 
     const payloadQueue = [];
@@ -1157,7 +1209,7 @@ useEffect(() => {
 
   const handleAppendNote = async (id) => {
     if (!additionalNote.trim()) return;
-    const noteText = `${userRole === 'admin' ? 'Admin Note' : 'Employee Note'}: ${additionalNote}`;
+    const noteText = `${userRole === 'admin' ? 'Admin Note' : currentUserName + ' Note'}: ${additionalNote}`;
     setTasks(tasks.map(t => t.id === id ? { ...t, comments: [...(t.comments || []), noteText] } : t));
     
     const target = tasks.find(t => t.id === id);
@@ -1207,14 +1259,14 @@ useEffect(() => {
 
   const visibleMembers = userRole === 'admin' 
     ? teamMembers.filter(m => activeEmployeeFilters.includes(m.name))
-    : teamMembers.filter(m => m.name === 'Adrian R.');
+    : teamMembers.filter(m => m.name === currentUserName);
 
   const visibleTasks = tasks.filter(t => {
     if (!t || !t.assignees) return false;
 
     const isAssigneeMatch = userRole === 'admin' 
       ? (t.assignees.length === 0 || t.assignees.some(a => activeEmployeeFilters.includes(a)))
-      : t.assignees.includes('Adrian R.');
+      : t.assignees.includes(currentUserName);
 
     const isCompanyMatch = activeCompanyFilters.includes(t.company);
 
@@ -1277,31 +1329,27 @@ useEffect(() => {
 
   const dynamicTimeSlots = Array.from({ length: gridEndHour - gridStartHour + 1 }, (_, i) => gridStartHour + i);
 
+  if (!session) {
+    return <Auth />
+  }
+
   if (isDbLoading) return <div className="min-h-screen bg-[#A9B1A6] flex items-center justify-center font-bold text-white tracking-widest uppercase">Initializing Cloud Architecture...</div>;
-if (!session) {
-  return <Auth />
-}
+
   return (
     <div className="min-h-screen bg-[#A9B1A6] p-4 sm:p-8 font-sans text-[#333333]">
       <div className="max-w-[95%] mx-auto bg-[#F4F3ED] p-6 rounded-lg shadow-sm min-h-[850px] flex flex-col relative">
         
-        {/* ROLE SIMULATION HEADER */}
+        {/* REAL USER SESSION HEADER */}
         <div className="bg-[#333333] text-white px-4 py-2 rounded-md mb-4 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs shadow-md">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-gray-400 uppercase tracking-wider">Simulate Role:</span>
-            <button 
-              onClick={() => setUserRole('admin')}
-              className={`px-3 py-1 rounded font-bold transition ${userRole === 'admin' ? 'bg-[#A9B1A6] text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>
-              Admin View
-            </button>
-            <button 
-              onClick={() => setUserRole('employee')}
-              className={`px-3 py-1 rounded font-bold transition ${userRole === 'employee' ? 'bg-[#A9B1A6] text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>
-              Employee View (Adrian R.)
-            </button>
+            <span className="font-bold text-gray-400 uppercase tracking-wider">User:</span>
+            <span className="text-white font-semibold">{currentProfile?.name || session?.user?.email}</span>
+            <span className="text-gray-500">|</span>
+            <span className="font-bold text-gray-400 uppercase tracking-wider">Role:</span>
+            <span className="text-amber-400 font-bold uppercase">{userRole}</span>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
             <input 
               type="text" 
               value={searchQuery}
@@ -1311,6 +1359,12 @@ if (!session) {
             {searchQuery && (
               <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-white font-bold">✕</button>
             )}
+            <button 
+              onClick={handleLogout} 
+              className="px-3 py-1 font-bold text-white transition bg-red-600 rounded hover:bg-red-700 shrink-0"
+            >
+              Logout
+            </button>
           </div>
         </div>
 
@@ -2406,7 +2460,7 @@ if (!session) {
                                 setNotifications(prev => [
                                   {
                                     id: Date.now() + Math.random(),
-                                    text: `📷 Photo Uploaded for "${selectedTask.title}" by Adrian R.`,
+                                    text: `📷 Photo Uploaded for "${selectedTask.title}" by ${currentUserName}`,
                                     type: 'photo',
                                     recipientRole: 'admin',
                                     read: false,
