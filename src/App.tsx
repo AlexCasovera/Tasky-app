@@ -266,7 +266,6 @@ export default function App() {
 
   // MASTER ADMIN ALERT TRIGGER
   const triggerAdminAlert = (bellText, type, pushTitle, pushMessage) => {
-    // 1. Send Lock-Screen Push
     sendNativePush({
       targetType: 'role',
       targetValue: 'admin',
@@ -274,7 +273,6 @@ export default function App() {
       message: pushMessage
     });
 
-    // 2. Broadcast Live Bell Notification over network
     notifyChannel.current?.send({
       type: 'broadcast',
       event: 'admin-alert',
@@ -292,9 +290,11 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingMemberId, setEditingMemberId] = useState(null);
 
-  const [companies, setCompanies] = useState(['Sparkulous', 'Casovera', 'TMFLO', 'Leprino Personal']);
-  const [activeCompanyFilters, setActiveCompanyFilters] = useState(['Sparkulous', 'Casovera', 'TMFLO', 'Leprino Personal']);
+  const [companies, setCompanies] = useState(['Sparkulous', 'Casovera', 'TMLFO', 'Leprino Personal']);
+  const [activeCompanyFilters, setActiveCompanyFilters] = useState(['Sparkulous', 'Casovera', 'TMLFO', 'Leprino Personal']);
   const [newCompanyInput, setNewCompanyInput] = useState('');
+  const [editingCompany, setEditingCompany] = useState<string | null>(null);
+  const [editingCompanyInput, setEditingCompanyInput] = useState('');
 
   const [memberName, setMemberName] = useState('');
   const [memberEmail, setMemberEmail] = useState('');
@@ -371,7 +371,7 @@ export default function App() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'tasks' },
-        (payload) => {
+        () => {
           fetchCloudData();
         }
       )
@@ -654,7 +654,7 @@ export default function App() {
     };
   }, [tasks]);
 
-  // OVERDUE CHECKER: Evaluated locally on the Admin's device when loaded
+  // OVERDUE CHECKER
   useEffect(() => {
     const todayStr = formatDateKey(new Date());
 
@@ -932,6 +932,24 @@ export default function App() {
         role: memberRole,
         color: memberColor
       }).eq('id', editingMemberId);
+    } else {
+      if (!memberEmail.trim()) return alert('Please enter an email address.');
+
+      const newId = crypto.randomUUID();
+      const { error } = await supabase.from('profiles').insert({
+        id: newId,
+        name: memberName,
+        initials,
+        email: memberEmail,
+        role: memberRole,
+        color: memberColor
+      });
+
+      if (error) {
+        console.error('Error creating profile:', error);
+        alert(`Error creating team member: ${error.message}`);
+        return;
+      }
     }
 
     const { data: updatedProfiles } = await supabase.from('profiles').select('*');
@@ -955,6 +973,24 @@ export default function App() {
     setTeamMembers(teamMembers.filter(m => m.id !== id));
     setActiveEmployeeFilters(activeEmployeeFilters.filter(n => n !== name));
     resetMemberForm();
+  };
+
+  const handleRenameCompany = async (oldName: string, newName: string) => {
+    if (!newName.trim() || oldName === newName) {
+      setEditingCompany(null);
+      return;
+    }
+
+    const trimmed = newName.trim();
+
+    setCompanies(prev => prev.map(c => c === oldName ? trimmed : c));
+    setActiveCompanyFilters(prev => prev.map(c => c === oldName ? trimmed : c));
+
+    setTasks(prev => prev.map(t => t.company === oldName ? { ...t, company: trimmed } : t));
+    await supabase.from('tasks').update({ company: trimmed }).eq('company', oldName);
+
+    setEditingCompany(null);
+    setEditingCompanyInput('');
   };
 
   const resetForm = () => {
@@ -1189,7 +1225,6 @@ export default function App() {
     const { error } = await supabase.from('tasks').delete().eq('id', id);
     if (error) console.error('Supabase Delete Error:', error);
 
-    // TRIGGER 8: Send Cancellation Push Notification to Assignees on Delete
     if (taskToDelete && taskToDelete.assignees) {
       taskToDelete.assignees.forEach(assigneeName => {
         sendNativePush({
@@ -1219,7 +1254,6 @@ export default function App() {
       await supabase.from('tasks').update({ comments: updatedComments }).eq('id', id);
     }
 
-    // TRIGGER RULE 1: Comment Added
     if (userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
       triggerAdminAlert(
         `💬 New Note on "${selectedTask.title}" by ${currentUserName}`,
@@ -1275,7 +1309,6 @@ export default function App() {
       return t;
     });
 
-    // TRIGGER RULE 4: Task Completed
     if (selectedTask?.notifyOnComplete !== false) {
       triggerAdminAlert(
         `✓ Task Completed: "${selectedTask.title}" by ${currentUserName}`,
@@ -1324,7 +1357,6 @@ export default function App() {
         comments: [`Auto-deployed via Sub Task prompt upon completion of "${selectedTask.title}"`]
       };
 
-      // TRIGGER RULE 3: New Sub Task Added
       if (selectedTask?.notifyOnTaskCreated !== false) {
         triggerAdminAlert(
           `➕ New Sub Task Spawned: "${completionPrompt.title}"`,
@@ -2619,7 +2651,6 @@ export default function App() {
 
                             await supabase.from('tasks').update(mapToDb(updated)).eq('id', selectedTask.id);
 
-                            // TRIGGER RULE 2: Deadline Changed
                             if (userRole === 'employee' && selectedTask?.notifyOnDeadlineChange !== false) {
                               triggerAdminAlert(
                                 `📅 Employee Rescheduled: "${selectedTask.title}" deadline changed to ${newDate}`,
@@ -2734,7 +2765,6 @@ export default function App() {
 
                             await supabase.from('tasks').update(mapToDb(updatedTask)).eq('id', selectedTask.id);
 
-                            // TRIGGER RULE 1.5: File Uploaded
                             if (userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
                               triggerAdminAlert(
                                 `📎 File Uploaded for "${selectedTask.title}" by ${currentUserName}`,
@@ -3093,7 +3123,7 @@ export default function App() {
                 <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
               </div>
 
-              {/* PUSH NOTIFICATION SETTINGS CARD (Visible to Everyone) */}
+              {/* PUSH NOTIFICATION SETTINGS CARD */}
               <div className="bg-white p-4 rounded-lg border border-amber-300 flex justify-between items-center shadow-2xs">
                 <div>
                   <h4 className="font-bold text-xs uppercase tracking-wider text-amber-900">Device Push Alerts</h4>
@@ -3256,17 +3286,44 @@ export default function App() {
                     <div className="flex flex-col gap-1 mt-2">
                       {companies.map(comp => (
                         <div key={comp} className="flex justify-between items-center bg-gray-50 p-2 rounded border border-gray-100 text-xs">
-                          <span className="font-bold text-gray-700">{comp}</span>
-                          <button 
-                            onClick={() => {
-                              if(companies.length > 1) {
-                                setCompanies(companies.filter(c => c !== comp));
-                                setActiveCompanyFilters(activeCompanyFilters.filter(c => c !== comp));
-                              } else {
-                                alert('You must have at least one company in the system.');
-                              }
-                            }}
-                            className="text-red-500 font-bold hover:underline">Remove</button>
+                          {editingCompany === comp ? (
+                            <div className="flex items-center gap-2 w-full">
+                              <input 
+                                type="text" 
+                                value={editingCompanyInput} 
+                                onChange={(e) => setEditingCompanyInput(e.target.value)}
+                                className="flex-1 p-1 text-xs border border-gray-300 rounded focus:outline-none bg-white font-bold"
+                              />
+                              <button 
+                                onClick={() => handleRenameCompany(comp, editingCompanyInput)}
+                                className="text-green-700 font-bold hover:underline">Save</button>
+                              <button 
+                                onClick={() => setEditingCompany(null)}
+                                className="text-gray-500 font-bold hover:underline">Cancel</button>
+                            </div>
+                          ) : (
+                            <>
+                              <span className="font-bold text-gray-700">{comp}</span>
+                              <div className="flex items-center gap-3">
+                                <button 
+                                  onClick={() => {
+                                    setEditingCompany(comp);
+                                    setEditingCompanyInput(comp);
+                                  }}
+                                  className="text-blue-600 font-bold hover:underline">Edit</button>
+                                <button 
+                                  onClick={() => {
+                                    if(companies.length > 1) {
+                                      setCompanies(companies.filter(c => c !== comp));
+                                      setActiveCompanyFilters(activeCompanyFilters.filter(c => c !== comp));
+                                    } else {
+                                      alert('You must have at least one company in the system.');
+                                    }
+                                  }}
+                                  className="text-red-500 font-bold hover:underline">Remove</button>
+                              </div>
+                            </>
+                          )}
                         </div>
                       ))}
                     </div>
