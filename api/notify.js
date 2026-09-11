@@ -6,7 +6,8 @@ export default async function handler(req, res) {
   const { targetType, targetValue, title, message } = req.body;
 
   const ONESIGNAL_APP_ID = "20d3b6ba-25ad-4cc0-8001-2170d5c692ca";
-  const ONESIGNAL_REST_KEY = "os_v2_app_edj3norfvvgmbaabefynlruszldrhzv5sy3u3cvyaavzdjz6m7fbo6vkfxrhl6akedv4dkl3kpidosjb5wvwkqxrafg6gnagbu7qaza";
+  // Paste your newly generated App API Key below:
+  const ONESIGNAL_REST_KEY = "os_v2_app_edj3norfvvgmbaabefynlruszivsfymuy62u5zfaad5ojn5l5njpo7ntsxsuygkddgizilg3xbnvditmz6qockxtkrh6232vwkxdmja";
 
   let filters = [];
   if (targetType === 'role') {
@@ -16,7 +17,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await fetch('https://onesignal.com/api/v1/notifications', {
+    const response = await fetch('https://api.onesignal.com/notifications', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
