@@ -136,21 +136,29 @@ export default function App() {
   const [teamMembers, setTeamMembers] = useState([]);
   const [activeEmployeeFilters, setActiveEmployeeFilters] = useState([]);
 
-  // INITIALIZE ONESIGNAL SDK & TAG DEVICE FOR PUSH NOTIFICATIONS
+  // INITIALIZE ONESIGNAL SDK & FORCE PROMPT INVOCATION
   useEffect(() => {
-    if (!session || ONESIGNAL_APP_ID.includes("YOUR_")) return;
+    if (!session || !ONESIGNAL_APP_ID || ONESIGNAL_APP_ID.includes("YOUR_")) return;
 
     window.OneSignalDeferred = window.OneSignalDeferred || [];
     window.OneSignalDeferred.push(async function(OneSignal) {
       await OneSignal.init({
         appId: ONESIGNAL_APP_ID,
         safari_web_id: "web.onesignal.auto",
-        notifyButton: { enable: false }
+        notifyButton: { enable: false },
+        allowLocalhostAsSecureOrigin: true
       });
 
       if (currentProfile) {
         OneSignal.User.addTag("userRole", userRole);
         OneSignal.User.addTag("userName", currentProfile.name);
+      }
+
+      // Explicitly trigger the Slidedown permission prompt
+      try {
+        await OneSignal.Slidedown.promptPush({ force: true });
+      } catch (err) {
+        console.log("OneSignal Auto Prompt Note:", err);
       }
     });
 
@@ -1594,6 +1602,26 @@ export default function App() {
               <button onClick={() => setCurrentView('month')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'month' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Month</button>
             </div>
 
+            {/* DIRECT USER-GESTURE PUSH PROMPT BUTTON */}
+            <button 
+              onClick={async () => {
+                if (window.OneSignalDeferred) {
+                  window.OneSignalDeferred.push(async (OneSignal) => {
+                    try {
+                      await OneSignal.Notifications.requestPermission();
+                    } catch (err) {
+                      await OneSignal.Slidedown.promptPush({ force: true });
+                    }
+                  });
+                } else {
+                  alert("Notification SDK is still loading. Please try again in a few seconds.");
+                }
+              }}
+              className="bg-amber-100 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-amber-200 transition flex items-center gap-1 shrink-0 shadow-2xs"
+              title="Enable Lock-Screen Push Alerts">
+              📲 Enable Push Alerts
+            </button>
+
             <div className="relative">
               <button 
                 onClick={() => setIsNotifOpen(!isNotifOpen)}
@@ -2348,8 +2376,8 @@ export default function App() {
                     </select>
                     <div className="flex flex-wrap gap-2">
                       {selectedAssignees.map(name => (
-                        <span key={name} className="bg-gray-200 text-xs px-2 py-1 rounded flex items-center gap-1 shadow-sm font-bold">
-                          {name} <button onClick={() => handleRemoveAssignee(name)} className="text-red-600 ml-1">✕</button>
+                        <span key={name} className="bg-[#A9B1A6]/20 text-[#333333] text-xs px-2.5 py-1 rounded-md flex items-center gap-1.5 font-bold border border-[#A9B1A6]/30">
+                          {name} <button onClick={() => handleRemoveAssignee(name)} className="text-red-600 hover:text-red-800 ml-1">✕</button>
                         </span>
                       ))}
                     </div>
