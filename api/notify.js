@@ -6,7 +6,7 @@ export default async function handler(req, res) {
   const { targetType, targetValue, title, message } = req.body;
 
   const ONESIGNAL_APP_ID = "20d3b6ba-25ad-4cc0-8001-2170d5c692ca";
-  const ONESIGNAL_REST_KEY = "os_v2_app_edj3norfvvgmbaabefynlruszivsfymuy62u5zfaad5ojn5l5njpo7ntsxsuygkddgizilg3xbnvditmz6qockxtkrh6232vwkxdmja";
+  const ONESIGNAL_REST_KEY = process.env.ONESIGNAL_REST_KEY;
 
   let filters = [];
   if (targetType === 'role') {
