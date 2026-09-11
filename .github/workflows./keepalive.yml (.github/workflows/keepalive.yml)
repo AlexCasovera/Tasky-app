@@ -1,0 +1,16 @@
+name: Supabase Keep-Alive Ping
+
+on:
+  schedule:
+    - cron: '0 12 */3 * *' # Runs every 3 days at 12:00 UTC
+  workflow_dispatch: # Allows manual testing
+
+jobs:
+  ping-database:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase Profiles Table
+        run: |
+          curl -X GET "${{ secrets.SUPABASE_URL }}/rest/v1/profiles?select=id&limit=1" \
+          -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+          -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
