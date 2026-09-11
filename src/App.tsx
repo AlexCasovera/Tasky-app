@@ -1062,7 +1062,11 @@ export default function App() {
   };
 
   const handleInitiateCompletion = () => {
-    if (selectedTask.requiresPhoto && !photoUploaded) return alert('Photo upload required to complete this task.');
+    const hasAttachments = selectedTask.comments && selectedTask.comments.some(c => c.includes('📎 Proof Attached'));
+    
+    if (selectedTask.requiresPhoto && !photoUploaded && !hasAttachments) {
+      return alert('Mandatory proof attachment required before completing this task.');
+    }
     if (selectedTask.requiresComment && !openCommentInput.trim() && (!selectedTask.comments || selectedTask.comments.length === 0)) {
       return alert('Execution notes required to complete this task.');
     }
@@ -1256,6 +1260,49 @@ export default function App() {
       await supabase.from('tasks').update(mapToDb(target)).eq('id', id);
     }
     setSelectedTask(null);
+  };
+
+  const renderComment = (commentText, index) => {
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const hasUrl = urlRegex.test(commentText);
+
+    if (!hasUrl) {
+      return (
+        <div key={index} className="text-xs text-gray-700 bg-gray-50 p-1.5 rounded border border-gray-100">
+          {commentText}
+        </div>
+      );
+    }
+
+    const match = commentText.match(/(https?:\/\/[^\s]+)/);
+    const url = match ? match[0] : '';
+    const textBeforeUrl = commentText.split(url)[0];
+    const isImage = /\.(jpg|jpeg|png|webp|gif)($|\?)/i.test(url);
+
+    return (
+      <div key={index} className="text-xs text-gray-700 bg-gray-50 p-2 rounded border border-gray-200 flex flex-col gap-1.5">
+        <div className="flex items-center justify-between flex-wrap gap-1">
+          <span className="font-semibold">{textBeforeUrl}</span>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-bold text-blue-600 hover:underline flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 shrink-0"
+          >
+            🔗 Open / Download File
+          </a>
+        </div>
+        {isImage && (
+          <a href={url} target="_blank" rel="noopener noreferrer" className="block mt-1">
+            <img
+              src={url}
+              alt="Proof of Work Attachment"
+              className="max-h-40 rounded border border-gray-300 object-cover hover:opacity-90 transition shadow-xs"
+            />
+          </a>
+        )}
+      </div>
+    );
   };
 
   const markAllNotifsRead = () => {
@@ -2309,7 +2356,7 @@ export default function App() {
                   <h4 className="font-bold text-sm mb-2">Proof of Work & Permissions</h4>
                   <div className="flex flex-col gap-2">
                     <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                      <input type="checkbox" checked={requiresPhoto} onChange={(e) => setRequiresPhoto(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require photo upload to complete
+                      <input type="checkbox" checked={requiresPhoto} onChange={(e) => setRequiresPhoto(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require proof of work upload (Mandatory to complete)
                     </label>
                     <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                       <input type="checkbox" checked={requiresComment} onChange={(e) => setRequiresComment(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require execution notes/comment to complete
@@ -2438,10 +2485,8 @@ export default function App() {
                     )}
 
                     {selectedTask.comments && selectedTask.comments.length > 0 ? (
-                      <div className="flex flex-col gap-1 max-h-28 overflow-y-auto pr-1 mb-3">
-                        {selectedTask.comments.map((c, i) => (
-                          <div key={i} className="text-xs text-gray-700 bg-gray-50 p-1.5 rounded border border-gray-100">{c}</div>
-                        ))}
+                      <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1 mb-3">
+                        {selectedTask.comments.map((c, i) => renderComment(c, i))}
                       </div>
                     ) : (
                       <p className="text-xs text-gray-400 italic mb-2">No comments posted yet.</p>
@@ -2465,35 +2510,69 @@ export default function App() {
                     )}
                   </div>
 
+                  {/* UNIVERSAL ATTACHMENTS & PROOF OF WORK */}
                   {!isCurrentInstanceCompleted && (
-                    <div className="flex flex-col gap-3 my-1">
-                      {selectedTask.requiresPhoto && (
-                        <div className="bg-white p-3 rounded border border-amber-300 flex justify-between items-center">
-                          <span className="text-xs font-semibold text-amber-800">📷 {photoUploaded ? 'Photo Attached!' : 'Photo Required'}</span>
-                          <button 
-                            onClick={() => {
-                              const nextState = !photoUploaded;
-                              setPhotoUploaded(nextState);
-                              
-                              if (nextState && userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
-                                setNotifications(prev => [
-                                  {
-                                    id: Date.now() + Math.random(),
-                                    text: `📷 Photo Uploaded for "${selectedTask.title}" by ${currentUserName}`,
-                                    type: 'photo',
-                                    recipientRole: 'admin',
-                                    read: false,
-                                    time: 'Just now'
-                                  },
-                                  ...prev
-                                ]);
-                              }
-                            }} 
-                            className="text-xs font-bold px-3 py-1 rounded bg-amber-100 text-amber-800">
-                            {photoUploaded ? '✓ Attached' : 'Upload Photo'}
-                          </button>
-                        </div>
-                      )}
+                    <div className="bg-white p-3 rounded border border-amber-300 flex justify-between items-center my-1">
+                      <div className="flex flex-col">
+                        <span className="text-xs font-semibold text-amber-800 flex items-center gap-1">
+                          📎 Attachments & Proof of Work
+                          {selectedTask.requiresPhoto && <span className="text-red-600 font-bold ml-1">(Required)</span>}
+                        </span>
+                        <span className="text-[10px] text-gray-500">Upload images, PDFs, spreadsheets, or documents</span>
+                      </div>
+                      
+                      <label className="text-xs font-bold px-3 py-1 rounded bg-amber-100 text-amber-800 hover:bg-amber-200 cursor-pointer transition">
+                        + Attach File
+                        <input 
+                          type="file" 
+                          accept="*/*" 
+                          className="hidden" 
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+
+                            const fileExt = file.name.split('.').pop();
+                            const fileName = `${selectedTask.id}-${Date.now()}.${fileExt}`;
+
+                            // 1. Upload to Supabase Storage bucket
+                            const { error: uploadErr } = await supabase.storage
+                              .from('task-proofs')
+                              .upload(fileName, file);
+
+                            if (uploadErr) {
+                              alert(`Upload failed: ${uploadErr.message}`);
+                              return;
+                            }
+
+                            // 2. Retrieve public URL
+                            const { data: { publicUrl } } = supabase.storage
+                              .from('task-proofs')
+                              .getPublicUrl(fileName);
+
+                            // 3. Post file URL into task activity comments
+                            const fileNote = `📎 Proof Attached (${file.name}): ${publicUrl}`;
+                            const updatedComments = [...(selectedTask.comments || []), fileNote];
+                            const updatedTask = { ...selectedTask, comments: updatedComments };
+
+                            setSelectedTask(updatedTask);
+                            setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t));
+                            setPhotoUploaded(true);
+
+                            await supabase.from('tasks').update(mapToDb(updatedTask)).eq('id', selectedTask.id);
+
+                            if (userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
+                              setNotifications(prev => [{ 
+                                id: Date.now() + Math.random(), 
+                                text: `📎 File Uploaded for "${selectedTask.title}" by ${currentUserName}`, 
+                                type: 'photo', 
+                                recipientRole: 'admin', 
+                                read: false, 
+                                time: 'Just now' 
+                              }, ...prev]);
+                            }
+                          }}
+                        />
+                      </label>
                     </div>
                   )}
 
@@ -2633,7 +2712,7 @@ export default function App() {
 
                   <div className="bg-white p-3 rounded border border-gray-200 flex flex-col gap-1.5">
                     <label className="flex items-center gap-1.5 font-bold cursor-pointer">
-                      <input type="checkbox" checked={requiresPhoto} onChange={(e) => setRequiresPhoto(e.target.checked)} className="accent-[#A9B1A6]" /> Require Photo
+                      <input type="checkbox" checked={requiresPhoto} onChange={(e) => setRequiresPhoto(e.target.checked)} className="accent-[#A9B1A6]" /> Require proof of work upload (Mandatory to complete)
                     </label>
                     <label className="flex items-center gap-1.5 font-bold cursor-pointer">
                       <input type="checkbox" checked={requiresComment} onChange={(e) => setRequiresComment(e.target.checked)} className="accent-[#A9B1A6]" /> Require Comment
