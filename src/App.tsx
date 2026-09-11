@@ -104,7 +104,6 @@ export default function App() {
   // FETCH LIVE TEAM MEMBERS AND CURRENT USER PROFILE FROM DATABASE
   useEffect(() => {
     async function loadProfiles() {
-      // 1. Fetch all team member profiles
       const { data: allProfiles, error: teamErr } = await supabase
         .from('profiles')
         .select('*');
@@ -122,7 +121,6 @@ export default function App() {
         setActiveEmployeeFilters(mappedMembers.map(m => m.name));
       }
 
-      // 2. Fetch active logged-in user's profile
       if (session?.user?.id) {
         const { data: myProfile, error: profileErr } = await supabase
           .from('profiles')
@@ -217,11 +215,13 @@ export default function App() {
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const minuteSubSlots = [0, 0.25, 0.5, 0.75];
 
-  // LIVE DATABASE FETCHING
+  // LIVE DATABASE FETCHING WITH SESSION-GATED REALTIME SUBSCRIPTION
   const [tasks, setTasks] = useState([]);
   const [isDbLoading, setIsDbLoading] = useState(true);
 
   useEffect(() => {
+    if (!session) return;
+
     const fetchCloudData = async () => {
       const { data, error } = await supabase.from('tasks').select('*');
       if (error) {
@@ -231,8 +231,28 @@ export default function App() {
       }
       setIsDbLoading(false);
     };
+
     fetchCloudData();
-  }, []);
+
+    // AUTHENTICATED REALTIME CHANNEL PER USER
+    const channel = supabase
+      .channel(`tasks-realtime-${session.user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tasks' },
+        (payload) => {
+          console.log('⚡ Realtime event received:', payload);
+          fetchCloudData();
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 Realtime Subscription Status:', status);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session]);
 
   const formatDateKey = (d) => {
     if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
@@ -772,7 +792,6 @@ export default function App() {
       }).eq('id', editingMemberId);
     }
 
-    // Refresh profiles
     const { data: updatedProfiles } = await supabase.from('profiles').select('*');
     if (updatedProfiles) {
       setTeamMembers(updatedProfiles.map(p => ({
