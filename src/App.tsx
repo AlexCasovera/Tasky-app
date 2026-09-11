@@ -1,27 +1,87 @@
 // @ts-nocheck
 import { useState, useEffect, useRef } from 'react';
-import { supabase } from './supabaseClient'
-import Auth from './Auth'
+import { supabase } from './supabaseClient';
+import Auth from './Auth';
 
-// --- ONESIGNAL CONFIGURATION ---
-const ONESIGNAL_APP_ID = "20d3b6ba-25ad-4cc0-8001-2170d5c692ca";
-const ONESIGNAL_REST_KEY = "os_v2_app_edj3norfvvgmbaabefynlruszldrhzv5sy3u3cvyaavzdjz6m7fbo6vkfxrhl6akedv4dkl3kpidosjb5wvwkqxrafg6gnagbu7qaza";
+// --- NATIVE VAPID PUSH CONFIGURATION ---
+const VAPID_PUBLIC_KEY = "BEdpaFVtcj6F-vvykhLdOaDDzUUmcnVB0knI0VjfJjqLLAStEKll692mf1M3xUAo_KS8djPg-YCIya9GOtHB3cA";
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+// HELPER: Subscribe current device browser to Native Web Push & save to Supabase
+const enableNativePush = async (userName: string) => {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    alert('Native Push notifications are not supported on this browser.');
+    return;
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      alert('Notification permission denied by browser.');
+      return;
+    }
+
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+    });
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ push_subscription: subscription })
+      .eq('name', userName);
+
+    if (error) {
+      console.error('Failed to save push subscription to Supabase:', error);
+      alert('Failed to save push subscription to database.');
+    } else {
+      alert('📲 Native Push Notifications Enabled Successfully!');
+    }
+  } catch (err) {
+    console.error('Error enabling native push:', err);
+    alert('Error enabling push notifications: ' + err.message);
+  }
+};
 
 // HELPER: Send Lock-Screen Native Push Notification via Vercel Backend Route
 const sendNativePush = async ({ targetType, targetValue, title, message }) => {
   try {
-    await fetch('/api/notify', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        targetType,
-        targetValue,
-        title,
-        message
-      })
-    });
+    let query = supabase.from('profiles').select('push_subscription');
+    if (targetType === 'role') {
+      query = query.eq('role', targetValue);
+    } else {
+      query = query.eq('name', targetValue);
+    }
+
+    const { data, error } = await query;
+    if (error || !data) return;
+
+    for (const profile of data) {
+      if (profile.push_subscription) {
+        await fetch('/api/notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            subscription: profile.push_subscription,
+            title,
+            message
+          })
+        });
+      }
+    }
   } catch (err) {
     console.error('Push Notification Error:', err);
   }
@@ -102,21 +162,21 @@ const mapFromDb = (r) => ({
 });
 
 export default function App() {
-  const [session, setSession] = useState<any>(null)
+  const [session, setSession] = useState<any>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-    })
+      setSession(session);
+    });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-    })
+      setSession(session);
+    });
 
-    return () => subscription.unsubscribe()
-  }, [])
+    return () => subscription.unsubscribe();
+  }, []);
 
   const [currentView, setCurrentView] = useState('list');
   const [previousView, setPreviousView] = useState('list');
@@ -125,40 +185,12 @@ export default function App() {
   const [teamMembers, setTeamMembers] = useState([]);
   const [activeEmployeeFilters, setActiveEmployeeFilters] = useState([]);
 
-  // INITIALIZE ONESIGNAL SDK & FORCE PROMPT INVOCATION
+  // SERVICE WORKER REGISTRATION
   useEffect(() => {
-    if (!session || !ONESIGNAL_APP_ID || ONESIGNAL_APP_ID.includes("YOUR_")) return;
-
-    window.OneSignalDeferred = window.OneSignalDeferred || [];
-    window.OneSignalDeferred.push(async function(OneSignal) {
-      await OneSignal.init({
-        appId: ONESIGNAL_APP_ID,
-        safari_web_id: "web.onesignal.auto",
-        notifyButton: { enable: false },
-        allowLocalhostAsSecureOrigin: true
-      });
-
-      if (currentProfile) {
-        OneSignal.User.addTag("userRole", userRole);
-        OneSignal.User.addTag("userName", currentProfile.name);
-      }
-
-      // Explicitly trigger the Slidedown permission prompt
-      try {
-        await OneSignal.Slidedown.promptPush({ force: true });
-      } catch (err) {
-        console.log("OneSignal Auto Prompt Note:", err);
-      }
-    });
-
-    if (!document.getElementById("onesignal-sdk")) {
-      const script = document.createElement("script");
-      script.id = "onesignal-sdk";
-      script.src = "https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js";
-      script.defer = true;
-      document.head.appendChild(script);
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(console.error);
     }
-  }, [session, currentProfile, userRole]);
+  }, []);
 
   // FETCH LIVE TEAM MEMBERS AND CURRENT USER PROFILE FROM DATABASE
   useEffect(() => {
@@ -293,7 +325,6 @@ export default function App() {
 
     fetchCloudData();
 
-    // AUTHENTICATED REALTIME CHANNEL PER USER
     const channel = supabase
       .channel(`tasks-realtime-${session.user.id}`)
       .on(
@@ -568,7 +599,6 @@ export default function App() {
             ...prev
           ]);
 
-          // TRIGGER 2: Employee Notification when task is modified
           (resizedTask.assignees || []).forEach(assigneeName => {
             sendNativePush({
               targetType: 'userName',
@@ -591,7 +621,6 @@ export default function App() {
     };
   }, [tasks]);
 
-  // OVERDUE CHECKER WITH ADMIN NATIVE PUSH TRIGGER
   useEffect(() => {
     const todayStr = formatDateKey(new Date());
 
@@ -610,7 +639,6 @@ export default function App() {
             ...prev
           ]);
 
-          // TRIGGER 7: Admin Push when task is overdue
           sendNativePush({
             targetType: 'role',
             targetValue: 'admin',
@@ -701,7 +729,6 @@ export default function App() {
         ...prev
       ]);
 
-      // TRIGGER 2: Employee Push when task schedule is moved
       const notifyUsers = targetMemberName ? [targetMemberName] : (targetTask.assignees || []);
       notifyUsers.forEach(assigneeName => {
         sendNativePush({
@@ -1031,7 +1058,6 @@ export default function App() {
       ...prev
     ]);
 
-    // TRIGGER 1: Employee Push Notification on Task Creation
     selectedAssignees.forEach(assigneeName => {
       sendNativePush({
         targetType: 'userName',
@@ -1128,7 +1154,6 @@ export default function App() {
       ...prev
     ]);
 
-    // TRIGGER 2: Employee Push Notification when Admin modifies any task property
     selectedAssignees.forEach(assigneeName => {
       sendNativePush({
         targetType: 'userName',
@@ -1167,7 +1192,6 @@ export default function App() {
     if (userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
       setNotifications(prev => [{ id: Date.now() + Math.random(), text: `💬 New Note on "${selectedTask.title}" by ${currentUserName}`, type: 'comment', recipientRole: 'admin', read: false, time: 'Just now' }, ...prev]);
 
-      // TRIGGER 3: Admin Push Notification when employee posts comment
       sendNativePush({
         targetType: 'role',
         targetValue: 'admin',
@@ -1225,7 +1249,6 @@ export default function App() {
     if (selectedTask?.notifyOnComplete !== false) {
       setNotifications(prev => [{ id: Date.now() + Math.random(), text: `✓ Task Completed: "${selectedTask.title}" by ${currentUserName}`, type: 'completion', recipientRole: 'admin', read: false, time: 'Just now' }, ...prev]);
 
-      // TRIGGER 6: Admin Push Notification on Task Completion
       sendNativePush({
         targetType: 'role',
         targetValue: 'admin',
@@ -1276,7 +1299,6 @@ export default function App() {
       if (selectedTask?.notifyOnTaskCreated !== false) {
         setNotifications(prev => [{ id: Date.now() + Math.random(), text: `➕ New Sub Task Spawned: "${completionPrompt.title}" for ${targetDate}`, type: 'subtask', recipientRole: 'admin', read: false, time: 'Just now' }, ...prev]);
 
-        // TRIGGER 5: Admin Push Notification when employee spawns new task
         sendNativePush({
           targetType: 'role',
           targetValue: 'admin',
@@ -1591,21 +1613,9 @@ export default function App() {
               <button onClick={() => setCurrentView('month')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'month' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Month</button>
             </div>
 
-            {/* DIRECT USER-GESTURE PUSH PROMPT BUTTON */}
+            {/* DIRECT NATIVE PUSH PROMPT BUTTON */}
             <button 
-              onClick={async () => {
-                if (window.OneSignalDeferred) {
-                  window.OneSignalDeferred.push(async (OneSignal) => {
-                    try {
-                      await OneSignal.Notifications.requestPermission();
-                    } catch (err) {
-                      await OneSignal.Slidedown.promptPush({ force: true });
-                    }
-                  });
-                } else {
-                  alert("Notification SDK is still loading. Please try again in a few seconds.");
-                }
-              }}
+              onClick={() => enableNativePush(currentUserName || 'Alex M.')}
               className="bg-amber-100 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-amber-200 transition flex items-center gap-1 shrink-0 shadow-2xs"
               title="Enable Lock-Screen Push Alerts">
               📲 Enable Push Alerts
@@ -2605,7 +2615,6 @@ export default function App() {
                                 ...prev
                               ]);
 
-                              // TRIGGER 4: Admin Push Notification when Employee adjusts deadline
                               sendNativePush({
                                 targetType: 'role',
                                 targetValue: 'admin',
@@ -2696,7 +2705,6 @@ export default function App() {
                             const fileExt = file.name.split('.').pop();
                             const fileName = `${selectedTask.id}-${Date.now()}.${fileExt}`;
 
-                            // 1. Upload to Supabase Storage bucket
                             const { error: uploadErr } = await supabase.storage
                               .from('task-proofs')
                               .upload(fileName, file);
@@ -2706,12 +2714,10 @@ export default function App() {
                               return;
                             }
 
-                            // 2. Retrieve public URL
                             const { data: { publicUrl } } = supabase.storage
                               .from('task-proofs')
                               .getPublicUrl(fileName);
 
-                            // 3. Post file URL into task activity comments
                             const fileNote = `📎 Proof Attached (${file.name}): ${publicUrl}`;
                             const updatedComments = [...(selectedTask.comments || []), fileNote];
                             const updatedTask = { ...selectedTask, comments: updatedComments };
@@ -2732,7 +2738,6 @@ export default function App() {
                                 time: 'Just now' 
                               }, ...prev]);
 
-                              // TRIGGER 3: Admin Push Notification when File is Uploaded
                               sendNativePush({
                                 targetType: 'role',
                                 targetValue: 'admin',
