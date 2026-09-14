@@ -852,7 +852,6 @@ export default function App() {
           ...targetTask,
           id: Date.now().toString(),
           date: targetDate,
-          seriesStartDate: targetDate, 
           activeDays: [targetDayName],
           assignees: targetMemberName ? [targetMemberName] : (targetTask.assignees || []),
           startHour: startDec,
@@ -1054,7 +1053,7 @@ export default function App() {
     setRecurrenceType('once');
     setActiveDays(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
     setGenerationTime('13:00');
-    setCadenceDays(14);
+    setCadenceDays(7); // Default to 1 week
     setChainedSteps([]);
     setRequiresPhoto(false);
     setRequiresComment(false);
@@ -1195,7 +1194,7 @@ export default function App() {
     setRecurrenceType(task.recurrenceType || 'once');
     setActiveDays(task.activeDays || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
     setGenerationTime(task.generationTime || '13:00');
-    setCadenceDays(task.cadenceDays || 14);
+    setCadenceDays(task.cadenceDays || 7);
     setRequiresPhoto(task.requiresPhoto || false);
     setRequiresComment(task.requiresComment || false);
     setAllowAssigneeDeadlineChange(task.allowAssigneeDeadlineChange || false);
@@ -1618,8 +1617,34 @@ export default function App() {
     if (task.endDate && dateStr > task.endDate) return false;
 
     if (task.recurrenceType === 'fixed') {
-      if (task.seriesStartDate && dateStr < task.seriesStartDate) return false;
-      return task.activeDays && task.activeDays.includes(dayOfWeekStr);
+      const startDate = task.date;
+      if (startDate && dateStr < startDate) return false;
+      if (!task.activeDays || !task.activeDays.includes(dayOfWeekStr)) return false;
+
+      // Week interval logic: Ensure the task only shows up on the defined week cadence
+      const intervalWeeks = Math.max(1, Math.round((task.cadenceDays || 7) / 7));
+      if (intervalWeeks > 1 && startDate) {
+        const parseDate = (ds) => {
+          const [y, m, d] = ds.split('-').map(Number);
+          return new Date(y, m - 1, d);
+        };
+        const sDate = parseDate(startDate);
+        const cDate = parseDate(dateStr);
+
+        // Find the Sunday (start of week) for both the origin start date and current date
+        const sSunday = new Date(sDate);
+        sSunday.setDate(sDate.getDate() - sDate.getDay());
+
+        const cSunday = new Date(cDate);
+        cSunday.setDate(cDate.getDate() - cDate.getDay());
+
+        const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+        const weeksDiff = Math.round((cSunday.getTime() - sSunday.getTime()) / msPerWeek);
+
+        if (weeksDiff % intervalWeeks !== 0) return false;
+      }
+
+      return true;
     }
     return task.date === dateStr;
   };
@@ -2553,9 +2578,22 @@ export default function App() {
                           ))}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-gray-600">Generation Time:</span>
-                        <input type="time" value={generationTime} onChange={(e) => setGenerationTime(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-sm w-32 focus:outline-none" />
+                      <div className="flex items-center gap-6">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-gray-600">Repeat every:</span>
+                          <input
+                            type="number"
+                            min="1"
+                            value={Math.max(1, Math.round(cadenceDays / 7))}
+                            onChange={(e) => setCadenceDays(Math.max(1, Number(e.target.value)) * 7)}
+                            className="border border-gray-300 rounded px-2 py-1 text-sm w-16 text-center focus:outline-none"
+                          />
+                          <span className="text-xs font-semibold text-gray-600">weeks</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-gray-600">Generation Time:</span>
+                          <input type="time" value={generationTime} onChange={(e) => setGenerationTime(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-sm w-32 focus:outline-none" />
+                        </div>
                       </div>
                     </div>
                   )}
@@ -2923,16 +2961,29 @@ export default function App() {
                     </select>
 
                     {recurrenceType === 'fixed' && (
-                      <div className="flex gap-1 mt-2">
-                        {daysOfWeek.map(day => (
-                          <button 
-                            key={day}
-                            type="button"
-                            onClick={() => toggleDay(day)}
-                            className={`flex-1 py-1 text-[10px] font-bold rounded border ${activeDays.includes(day) ? 'bg-[#A9B1A6] text-white border-[#A9B1A6]' : 'bg-white text-gray-500'}`}>
-                            {day}
-                          </button>
-                        ))}
+                      <div className="flex flex-col gap-2 mt-2">
+                        <div className="flex gap-1">
+                          {daysOfWeek.map(day => (
+                            <button 
+                              key={day}
+                              type="button"
+                              onClick={() => toggleDay(day)}
+                              className={`flex-1 py-1 text-[10px] font-bold rounded border ${activeDays.includes(day) ? 'bg-[#A9B1A6] text-white border-[#A9B1A6]' : 'bg-white text-gray-500'}`}>
+                              {day}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs font-bold text-gray-700">Repeat every:</span>
+                          <input
+                            type="number"
+                            min="1"
+                            value={Math.max(1, Math.round(cadenceDays / 7))}
+                            onChange={(e) => setCadenceDays(Math.max(1, Number(e.target.value)) * 7)}
+                            className="w-12 p-1 border rounded text-center font-bold"
+                          />
+                          <span className="text-xs font-bold text-gray-700">weeks</span>
+                        </div>
                       </div>
                     )}
 
@@ -3004,7 +3055,7 @@ export default function App() {
                       {isEditing ? 'Cancel Edit' : 'Full Edit Settings'}
                     </button>
                     <button onClick={() => handleDeleteTask(selectedTask.id)} className="text-xs text-red-600 font-bold hover:underline">
-                      Delete Rule
+                      Delete Task
                     </button>
                   </div>
                 )}
@@ -3176,7 +3227,7 @@ export default function App() {
                 <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
               </div>
 
-              {/* PUSH NOTIFICATION SETTINGS CARD (Visible to Everyone) */}
+              {/* PUSH NOTIFICATION SETTINGS CARD */}
               <div className="bg-white p-4 rounded-lg border border-amber-300 flex justify-between items-center shadow-2xs">
                 <div>
                   <h4 className="font-bold text-xs uppercase tracking-wider text-amber-900">Device Push Alerts</h4>
