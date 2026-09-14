@@ -366,8 +366,7 @@ export default function App() {
   const [endTime, setEndTime] = useState('14:00');
 
   const [recurrenceType, setRecurrenceType] = useState('once');
-  const [activeDays, setActiveDays] = useState(['Fri']);
-  const [generationTime, setGenerationTime] = useState('13:00');
+  const [activeDays, setActiveDays] = useState([]);
   const [cadenceDays, setCadenceDays] = useState(14);
 
   const [chainedSteps, setChainedSteps] = useState([]);
@@ -852,6 +851,7 @@ export default function App() {
           ...targetTask,
           id: Date.now().toString(),
           date: targetDate,
+          seriesStartDate: targetDate, 
           activeDays: [targetDayName],
           assignees: targetMemberName ? [targetMemberName] : (targetTask.assignees || []),
           startHour: startDec,
@@ -1051,8 +1051,7 @@ export default function App() {
     setStartTime('09:00');
     setEndTime('11:00');
     setRecurrenceType('once');
-    setActiveDays(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
-    setGenerationTime('13:00');
+    setActiveDays([]);
     setCadenceDays(7); // Default to 1 week
     setChainedSteps([]);
     setRequiresPhoto(false);
@@ -1192,8 +1191,7 @@ export default function App() {
     setStartTime(task.startTime || '09:00');
     setEndTime(task.endTime || '11:00');
     setRecurrenceType(task.recurrenceType || 'once');
-    setActiveDays(task.activeDays || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
-    setGenerationTime(task.generationTime || '13:00');
+    setActiveDays(task.activeDays || []);
     setCadenceDays(task.cadenceDays || 7);
     setRequiresPhoto(task.requiresPhoto || false);
     setRequiresComment(task.requiresComment || false);
@@ -2558,8 +2556,8 @@ export default function App() {
                     onChange={(e) => setRecurrenceType(e.target.value)}
                     className="w-full px-3 py-2 text-sm rounded border border-gray-300 bg-gray-50 mb-2 focus:outline-none">
                     <option value="once">One-time Task</option>
-                    <option value="fixed">Fixed Calendar Schedule</option>
-                    <option value="completion">Completion-Triggered</option>
+                    <option value="fixed">Recurring Tasks</option>
+                    <option value="completion">Multi-Step Tasks</option>
                   </select>
 
                   {recurrenceType === 'fixed' && (
@@ -2578,22 +2576,16 @@ export default function App() {
                           ))}
                         </div>
                       </div>
-                      <div className="flex items-center gap-6">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-gray-600">Repeat every:</span>
-                          <input
-                            type="number"
-                            min="1"
-                            value={Math.max(1, Math.round(cadenceDays / 7))}
-                            onChange={(e) => setCadenceDays(Math.max(1, Number(e.target.value)) * 7)}
-                            className="border border-gray-300 rounded px-2 py-1 text-sm w-16 text-center focus:outline-none"
-                          />
-                          <span className="text-xs font-semibold text-gray-600">weeks</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-gray-600">Generation Time:</span>
-                          <input type="time" value={generationTime} onChange={(e) => setGenerationTime(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-sm w-32 focus:outline-none" />
-                        </div>
+                      <div className="flex items-center gap-2 mt-2">
+                        <span className="text-xs font-semibold text-gray-600">Repeat every:</span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={Math.max(1, Math.round(cadenceDays / 7))}
+                          onChange={(e) => setCadenceDays(Math.max(1, Number(e.target.value)) * 7)}
+                          className="border border-gray-300 rounded px-2 py-1 text-sm w-16 text-center focus:outline-none"
+                        />
+                        <span className="text-xs font-semibold text-gray-600">weeks</span>
                       </div>
                     </div>
                   )}
@@ -2607,49 +2599,51 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
-                  <div className="flex justify-between items-center mb-2">
-                    <h4 className="font-bold text-sm">Multi-Step Task Chaining Engine</h4>
-                    <button type="button" onClick={handleAddChainedStep} className="text-[10px] font-bold bg-[#A9B1A6] text-white px-2.5 py-1 rounded hover:bg-[#5B7049] transition">+ Add Step</button>
-                  </div>
-                  <p className="text-xs text-gray-500 mb-3">Build an automated pipeline of sub tasks triggered upon completion.</p>
+                {recurrenceType === 'completion' && (
+                  <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
+                    <div className="flex justify-between items-center mb-2">
+                      <h4 className="font-bold text-sm">Multi-Step Task Chaining Engine</h4>
+                      <button type="button" onClick={handleAddChainedStep} className="text-[10px] font-bold bg-[#A9B1A6] text-white px-2.5 py-1 rounded hover:bg-[#5B7049] transition">+ Add Step</button>
+                    </div>
+                    <p className="text-xs text-gray-500 mb-3">Build an automated pipeline of sub tasks triggered upon completion.</p>
 
-                  {chainedSteps.length === 0 ? (
-                    <p className="text-xs text-gray-400 italic">No sub tasks configured.</p>
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      {chainedSteps.map((step, idx) => (
-                        <div key={idx} className="bg-gray-50 p-3 rounded border border-gray-200 text-xs flex flex-col gap-2.5 relative">
-                          <div className="flex justify-between items-center font-bold text-gray-700">
-                            <span>Step {idx + 1} Sub Task</span>
-                            <button type="button" onClick={() => handleRemoveChainedStep(idx)} className="text-red-600 font-bold hover:underline">Remove</button>
-                          </div>
-                          
-                          <input type="text" value={step.title} onChange={(e) => handleUpdateChainedStep(idx, 'title', e.target.value)} placeholder="Step Title" className="p-1.5 border rounded bg-white" />
-                          <textarea rows={2} value={step.desc} onChange={(e) => handleUpdateChainedStep(idx, 'desc', e.target.value)} placeholder="Instructions..." className="p-1.5 border rounded bg-white"></textarea>
+                    {chainedSteps.length === 0 ? (
+                      <p className="text-xs text-gray-400 italic">No sub tasks configured.</p>
+                    ) : (
+                      <div className="flex flex-col gap-3">
+                        {chainedSteps.map((step, idx) => (
+                          <div key={idx} className="bg-gray-50 p-3 rounded border border-gray-200 text-xs flex flex-col gap-2.5 relative">
+                            <div className="flex justify-between items-center font-bold text-gray-700">
+                              <span>Step {idx + 1} Sub Task</span>
+                              <button type="button" onClick={() => handleRemoveChainedStep(idx)} className="text-red-600 font-bold hover:underline">Remove</button>
+                            </div>
+                            
+                            <input type="text" value={step.title} onChange={(e) => handleUpdateChainedStep(idx, 'title', e.target.value)} placeholder="Step Title" className="p-1.5 border rounded bg-white" />
+                            <textarea rows={2} value={step.desc} onChange={(e) => handleUpdateChainedStep(idx, 'desc', e.target.value)} placeholder="Instructions..." className="p-1.5 border rounded bg-white"></textarea>
 
-                          <div className="flex gap-2">
-                            <div className="w-1/2">
-                              <label className="block font-bold text-[10px] text-gray-500 mb-0.5">Deployment Offset</label>
-                              <div className="flex items-center gap-1">
-                                <input type="number" value={step.relativeDays} onChange={(e) => handleUpdateChainedStep(idx, 'relativeDays', Number(e.target.value))} className="w-12 p-1 border rounded bg-white text-center font-bold" />
-                                <span className="text-[11px] text-gray-600">days after</span>
+                            <div className="flex gap-2">
+                              <div className="w-1/2">
+                                <label className="block font-bold text-[10px] text-gray-500 mb-0.5">Deployment Offset</label>
+                                <div className="flex items-center gap-1">
+                                  <input type="number" value={step.relativeDays} onChange={(e) => handleUpdateChainedStep(idx, 'relativeDays', Number(e.target.value))} className="w-12 p-1 border rounded bg-white text-center font-bold" />
+                                  <span className="text-[11px] text-gray-600">days after</span>
+                                </div>
+                              </div>
+
+                              <div className="w-1/2">
+                                <label className="block font-bold text-[10px] text-gray-500 mb-0.5">Assigned to</label>
+                                <select value={step.assignee} onChange={(e) => handleUpdateChainedStep(idx, 'assignee', e.target.value)} className="w-full p-1 border rounded bg-white text-xs">
+                                  <option value="Same as Parent">Same as Parent</option>
+                                  {teamMembers.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+                                </select>
                               </div>
                             </div>
-
-                            <div className="w-1/2">
-                              <label className="block font-bold text-[10px] text-gray-500 mb-0.5">Assigned to</label>
-                              <select value={step.assignee} onChange={(e) => handleUpdateChainedStep(idx, 'assignee', e.target.value)} className="w-full p-1 border rounded bg-white text-xs">
-                                <option value="Same as Parent">Same as Parent</option>
-                                {teamMembers.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
-                              </select>
-                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
                   <h4 className="font-bold text-sm mb-2">Proof of Work & Permissions</h4>
@@ -2956,8 +2950,8 @@ export default function App() {
                     <h4 className="font-bold mb-2 text-gray-700">Recurrence Engine</h4>
                     <select value={recurrenceType} onChange={(e) => setRecurrenceType(e.target.value)} className="w-full p-1.5 border rounded bg-gray-50 mb-2">
                       <option value="once">One-time Task</option>
-                      <option value="fixed">Fixed Calendar Schedule</option>
-                      <option value="completion">Completion-Triggered</option>
+                      <option value="fixed">Recurring Tasks</option>
+                      <option value="completion">Multi-Step Tasks</option>
                     </select>
 
                     {recurrenceType === 'fixed' && (
@@ -2996,26 +2990,28 @@ export default function App() {
                     )}
                   </div>
 
-                  <div className="bg-white p-3 rounded border border-gray-200">
-                    <div className="flex justify-between items-center mb-2">
-                      <h4 className="font-bold text-gray-700">Chained Workflow Steps ({chainedSteps.length})</h4>
-                      <button type="button" onClick={handleAddChainedStep} className="text-[10px] font-bold bg-[#A9B1A6] text-white px-2 py-0.5 rounded">+ Step</button>
-                    </div>
-
-                    {chainedSteps.map((step, idx) => (
-                      <div key={idx} className="bg-gray-50 p-2 rounded border border-gray-200 mb-2 flex flex-col gap-1.5">
-                        <div className="flex justify-between font-bold text-gray-600">
-                          <span>Step {idx + 1} Sub Task</span>
-                          <button type="button" onClick={() => handleRemoveChainedStep(idx)} className="text-red-600">Remove</button>
-                        </div>
-                        <input type="text" value={step.title} onChange={(e) => handleUpdateChainedStep(idx, 'title', e.target.value)} placeholder="Step Title" className="p-1 border rounded bg-white" />
-                        <div className="flex gap-2">
-                          <input type="number" value={step.relativeDays} onChange={(e) => handleUpdateChainedStep(idx, 'relativeDays', Number(e.target.value))} className="w-12 p-1 border rounded bg-white text-center font-bold" />
-                          <span className="self-center">days after</span>
-                        </div>
+                  {recurrenceType === 'completion' && (
+                    <div className="bg-white p-3 rounded border border-gray-200">
+                      <div className="flex justify-between items-center mb-2">
+                        <h4 className="font-bold text-gray-700">Chained Workflow Steps ({chainedSteps.length})</h4>
+                        <button type="button" onClick={handleAddChainedStep} className="text-[10px] font-bold bg-[#A9B1A6] text-white px-2 py-0.5 rounded">+ Step</button>
                       </div>
-                    ))}
-                  </div>
+
+                      {chainedSteps.map((step, idx) => (
+                        <div key={idx} className="bg-gray-50 p-2 rounded border border-gray-200 mb-2 flex flex-col gap-1.5">
+                          <div className="flex justify-between font-bold text-gray-600">
+                            <span>Step {idx + 1} Sub Task</span>
+                            <button type="button" onClick={() => handleRemoveChainedStep(idx)} className="text-red-600">Remove</button>
+                          </div>
+                          <input type="text" value={step.title} onChange={(e) => handleUpdateChainedStep(idx, 'title', e.target.value)} placeholder="Step Title" className="p-1 border rounded bg-white" />
+                          <div className="flex gap-2">
+                            <input type="number" value={step.relativeDays} onChange={(e) => handleUpdateChainedStep(idx, 'relativeDays', Number(e.target.value))} className="w-12 p-1 border rounded bg-white text-center font-bold" />
+                            <span className="self-center">days after</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   <div className="bg-white p-3 rounded border border-gray-200 flex flex-col gap-1.5">
                     <label className="flex items-center gap-1.5 font-bold cursor-pointer">
