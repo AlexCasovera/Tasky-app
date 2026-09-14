@@ -38,7 +38,7 @@ const compressImage = (file: File, maxWidth: number, maxHeight: number, quality:
             if (blob) {
               resolve(new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() }));
             } else {
-              resolve(file);
+              resolve(file); 
             }
           },
           'image/jpeg',
@@ -216,7 +216,9 @@ export default function App() {
       setSession(session);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
     });
 
@@ -302,21 +304,7 @@ export default function App() {
   };
 
   const [currentDate, setCurrentDate] = useState(new Date());
-  
-  // HCP SEARCH ENGINE STATE
   const [searchQuery, setSearchQuery] = useState('');
-  const [isSearchFocused, setIsSearchFocused] = useState(false);
-  const searchRef = useRef(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (searchRef.current && !searchRef.current.contains(e.target)) {
-        setIsSearchFocused(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
@@ -427,7 +415,15 @@ export default function App() {
       if (error) {
         console.error('Error fetching tasks from cloud:', error);
       } else if (data) {
-        setTasks(data.map(mapFromDb));
+        const mapped = data.map(mapFromDb);
+        setTasks(mapped);
+
+        // ANTI-ORPHANING FAILSAFE: Add any missing companies found in active tasks to the filter bar
+        const missingCompanies = [...new Set(mapped.map(t => t.company).filter(c => c && !companies.includes(c)))];
+        if (missingCompanies.length > 0) {
+          setCompanies(prev => [...new Set([...prev, ...missingCompanies])]);
+          setActiveCompanyFilters(prev => [...new Set([...prev, ...missingCompanies])]);
+        }
       }
       setIsDbLoading(false);
     };
@@ -448,7 +444,10 @@ export default function App() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [session]);
+  }, [session, companies]);
+
+  // COMBINED MASTER COMPANY LIST (Ensures no data ever vanishes)
+  const masterCompanyList = [...new Set([...companies, ...tasks.map(t => t.company).filter(Boolean)])];
 
   const formatDateKey = (d) => {
     if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
@@ -1048,11 +1047,14 @@ export default function App() {
 
     const trimmed = newName.trim();
 
+    // OPTIMISTIC UI
     setCompanies(prev => prev.map(c => c === oldName ? trimmed : c));
     setActiveCompanyFilters(prev => prev.map(c => c === oldName ? trimmed : c));
     setTasks(prev => prev.map(t => t.company === oldName ? { ...t, company: trimmed } : t));
 
-    await supabase.from('companies').update({ name: trimmed }).eq('name', oldName);
+    const { error: cErr } = await supabase.from('companies').update({ name: trimmed }).eq('name', oldName);
+    if (cErr) alert(`Failed to rename company in DB: ${cErr.message}`);
+    
     await supabase.from('tasks').update({ company: trimmed }).eq('company', oldName);
 
     setEditingCompany(null);
@@ -1073,7 +1075,8 @@ export default function App() {
     setCompanies(prev => prev.filter(c => c !== nameToDelete));
     setActiveCompanyFilters(prev => prev.filter(c => c !== nameToDelete));
     
-    await supabase.from('companies').delete().eq('name', nameToDelete);
+    const { error } = await supabase.from('companies').delete().eq('name', nameToDelete);
+    if (error) alert(`Database Error: ${error.message}`);
   };
 
   const handleAddCompany = async () => {
@@ -1085,7 +1088,13 @@ export default function App() {
     setNewCompanyInput('');
 
     const newId = crypto.randomUUID();
-    await supabase.from('companies').insert({ id: newId, name: newName });
+    const { error } = await supabase.from('companies').insert({ id: newId, name: newName });
+    
+    if (error) {
+      alert(`Database Error: ${error.message}\nPlease make sure your "companies" table has RLS disabled or a valid Insert policy.`);
+      setCompanies(prev => prev.filter(c => c !== newName));
+      setActiveCompanyFilters(prev => prev.filter(c => c !== newName));
+    }
   };
 
   const resetForm = () => {
@@ -1101,7 +1110,7 @@ export default function App() {
     setIsLongTerm(false);
     setRecurrenceType('once');
     setActiveDays([]);
-    setCadenceDays(7);
+    setCadenceDays(7); 
     setChainedSteps([]);
     setRequiresPhoto(false);
     setRequiresComment(false);
@@ -1234,6 +1243,12 @@ export default function App() {
     setTaskTitle(task.title);
     setTaskDesc(task.desc);
     setTaskCompany(task.company || '');
+    
+    // SAFEGUARD: If the task's company isn't in the active companies list, temporarily add it to the state so the dropdown doesn't blank out.
+    if (task.company && !masterCompanyList.includes(task.company)) {
+      setCompanies(prev => [...prev, task.company]);
+    }
+
     setSelectedAssignees(task.assignees || []);
     setTaskPriority(task.priority);
     setTaskDate(task.date || instanceDateStr);
@@ -1652,34 +1667,17 @@ export default function App() {
 
     const isCompanyMatch = activeCompanyFilters.includes(t.company);
 
-    return isAssigneeMatch && isCompanyMatch;
+    const isSearchMatch = !searchQuery.trim() || 
+      (t.title && t.title.toLowerCase().includes(searchQuery.toLowerCase())) || 
+      (t.desc && t.desc.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (t.assignees && t.assignees.some(a => a && a.toLowerCase().includes(searchQuery.toLowerCase())));
+
+    return isAssigneeMatch && isCompanyMatch && isSearchMatch;
   });
 
   const backlogTasks = tasks.filter(t => !t.isLongTerm && (!t.assignees || t.assignees.length === 0) && t.status !== 'completed' && activeCompanyFilters.includes(t.company) && !hiddenCompanies.includes(t.company));
   
   const longTermTasks = visibleTasks.filter(t => t.isLongTerm && t.status !== 'completed');
-
-  // HCP SEARCH CATEGORIZATION ENGINE
-  const searchResults = {
-    tasks: tasks.filter(t => 
-      searchQuery.trim() && !hiddenCompanies.includes(t.company) && (
-        t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        t.desc.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (t.comments && t.comments.some(c => c.toLowerCase().includes(searchQuery.toLowerCase())))
-      )
-    ).slice(0, 5),
-    companies: companies.filter(c => 
-      searchQuery.trim() && !hiddenCompanies.includes(c) && c.toLowerCase().includes(searchQuery.toLowerCase())
-    ),
-    members: teamMembers.filter(m => 
-      searchQuery.trim() && !hiddenMembers.includes(m.name) && (
-        m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        m.email.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    )
-  };
-
-  const hasSearchResults = searchResults.tasks.length > 0 || searchResults.companies.length > 0 || searchResults.members.length > 0;
 
   const isTaskActiveOnDay = (task, dayOfWeekStr, dateStr) => {
     if (!task) return false;
@@ -1694,6 +1692,7 @@ export default function App() {
       if (startDate && dateStr < startDate) return false;
       if (!task.activeDays || !task.activeDays.includes(dayOfWeekStr)) return false;
 
+      // Week interval logic: Ensure the task only shows up on the defined week cadence
       const intervalWeeks = Math.max(1, Math.round((task.cadenceDays || 7) / 7));
       if (intervalWeeks > 1 && startDate) {
         const parseDate = (ds) => {
@@ -1703,6 +1702,7 @@ export default function App() {
         const sDate = parseDate(startDate);
         const cDate = parseDate(dateStr);
 
+        // Find the Sunday (start of week) for both the origin start date and current date
         const sSunday = new Date(sDate);
         sSunday.setDate(sDate.getDate() - sDate.getDay());
 
@@ -1764,8 +1764,8 @@ export default function App() {
     <div className="min-h-screen bg-[#A9B1A6] p-4 sm:p-8 font-sans text-[#333333]">
       <div className="max-w-[95%] mx-auto bg-[#F4F3ED] p-6 rounded-lg shadow-sm min-h-[850px] flex flex-col relative">
         
-        {/* REAL USER SESSION HEADER WITH HCP GLOBAL SEARCH */}
-        <div className="bg-[#333333] text-white px-4 py-2 rounded-md mb-4 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs shadow-md z-40 relative">
+        {/* REAL USER SESSION HEADER */}
+        <div className="bg-[#333333] text-white px-4 py-2 rounded-md mb-4 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs shadow-md">
           <div className="flex items-center gap-2">
             <span className="font-bold text-gray-400 uppercase tracking-wider">User:</span>
             <span className="text-white font-semibold">{currentProfile?.name || session?.user?.email}</span>
@@ -1775,112 +1775,15 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
-            
-            {/* HCP OVERLAY SEARCH INPUT & DROPDOWN */}
-            <div className="relative w-full sm:w-80" ref={searchRef}>
-              <div className="flex items-center bg-gray-800 rounded border border-gray-700 focus-within:border-[#A9B1A6] px-2.5 py-1">
-                <span className="text-gray-400 mr-2 text-xs">🔍</span>
-                <input 
-                  type="text" 
-                  value={searchQuery}
-                  onFocus={() => setIsSearchFocused(true)}
-                  onChange={(e) => {
-                    setSearchQuery(e.target.value);
-                    setIsSearchFocused(true);
-                  }}
-                  placeholder="Search jobs, companies, notes..." 
-                  className="bg-transparent text-white placeholder-gray-400 text-xs focus:outline-none w-full" 
-                />
-                {searchQuery && (
-                  <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-white font-bold text-xs ml-1">✕</button>
-                )}
-              </div>
-
-              {/* HCP STYLE OVERLAY DROPDOWN PANEL */}
-              {isSearchFocused && searchQuery.trim().length > 0 && (
-                <div className="absolute left-0 right-0 mt-2 bg-white rounded-lg shadow-2xl border border-gray-300 text-gray-800 z-50 overflow-hidden animate-fade-in max-h-96 overflow-y-auto">
-                  {hasSearchResults ? (
-                    <div className="flex flex-col">
-                      
-                      {/* TASKS SECTION */}
-                      {searchResults.tasks.length > 0 && (
-                        <div className="p-2 border-b border-gray-100">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 px-2 block mb-1">📋 Jobs & Tasks</span>
-                          {searchResults.tasks.map(task => (
-                            <div 
-                              key={task.id}
-                              onClick={() => {
-                                handleOpenModal(task, task.date || formatDateKey(new Date()));
-                                setIsSearchFocused(false);
-                              }}
-                              className="p-2 hover:bg-blue-50 rounded cursor-pointer transition flex items-center justify-between group"
-                            >
-                              <div className="min-w-0 pr-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-bold text-xs text-gray-900 group-hover:text-blue-600 truncate">{task.title}</span>
-                                  <span className="text-[9px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-bold shrink-0">{task.company}</span>
-                                </div>
-                                <p className="text-[10px] text-gray-500 truncate mt-0.5">{task.desc}</p>
-                              </div>
-                              <span className="text-[10px] font-mono text-gray-400 shrink-0">{task.date || 'Unscheduled'}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* COMPANIES SECTION */}
-                      {searchResults.companies.length > 0 && (
-                        <div className="p-2 border-b border-gray-100 bg-gray-50/50">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 px-2 block mb-1">🏢 Companies</span>
-                          {searchResults.companies.map(comp => (
-                            <div 
-                              key={comp}
-                              onClick={() => {
-                                setActiveCompanyFilters([comp]);
-                                setIsSearchFocused(false);
-                              }}
-                              className="p-1.5 hover:bg-gray-200/60 rounded cursor-pointer transition flex items-center justify-between text-xs font-bold text-gray-700"
-                            >
-                              <span>{comp}</span>
-                              <span className="text-[9px] text-blue-600 font-semibold">Filter Dashboard →</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* TEAM MEMBERS SECTION */}
-                      {searchResults.members.length > 0 && (
-                        <div className="p-2">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 px-2 block mb-1">👤 Team Members</span>
-                          {searchResults.members.map(member => (
-                            <div 
-                              key={member.id}
-                              onClick={() => {
-                                setActiveEmployeeFilters([member.name]);
-                                setIsSearchFocused(false);
-                              }}
-                              className="p-1.5 hover:bg-gray-100 rounded cursor-pointer transition flex items-center justify-between"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: member.color }}></span>
-                                <span className="font-bold text-xs text-gray-800">{member.name}</span>
-                              </div>
-                              <span className="text-[9px] text-gray-400">{member.email}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                    </div>
-                  ) : (
-                    <div className="p-4 text-center text-xs text-gray-400 italic">
-                      No results found for "{searchQuery}"
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
+            <input 
+              type="text" 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search active & past tasks..." 
+              className="px-3 py-1 rounded bg-gray-800 text-white placeholder-gray-400 text-xs focus:outline-none focus:ring-1 focus:ring-[#A9B1A6] w-full sm:w-64" />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-white font-bold">✕</button>
+            )}
             <button 
               onClick={handleLogout} 
               className="px-3 py-1 font-bold text-white transition bg-red-600 rounded hover:bg-red-700 shrink-0"
@@ -1971,7 +1874,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Companies:</span>
                 <div className="flex flex-wrap gap-1">
-                  {companies.filter(c => !hiddenCompanies.includes(c)).map(comp => {
+                  {masterCompanyList.filter(c => !hiddenCompanies.includes(c)).map(comp => {
                     const isActive = activeCompanyFilters.includes(comp);
                     return (
                       <button
@@ -2010,7 +1913,7 @@ export default function App() {
 
             <button 
               onClick={() => {
-                setActiveCompanyFilters([...companies]);
+                setActiveCompanyFilters([...masterCompanyList]);
                 setActiveEmployeeFilters(teamMembers.map(m => m.name));
               }} 
               className="text-[11px] font-bold text-[#A9B1A6] hover:underline self-end md:self-center">
@@ -2100,7 +2003,7 @@ export default function App() {
                       </h2>
                     </div>
 
-                    {companies.filter(c => activeCompanyFilters.includes(c) && !hiddenCompanies.includes(c)).map(company => {
+                    {masterCompanyList.filter(c => activeCompanyFilters.includes(c) && !hiddenCompanies.includes(c)).map(company => {
                       
                       let compWeekTasks = [];
                       let compWeekCompleted = [];
@@ -2698,6 +2601,7 @@ export default function App() {
                 const dayOfWeekStr = daysOfWeek[cellDate.getDay()];
                 const isTodayCell = dateStr === formatDateKey(new Date());
 
+                // FIX: Look up tasks for every day, regardless of whether it's in the current month or not.
                 const pendingDayTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, dayOfWeekStr, dateStr));
                 const completedDayTasks = visibleTasks.filter(t => isTaskCompletedOnDay(t, dateStr));
 
@@ -2821,7 +2725,7 @@ export default function App() {
                     <label className="block text-sm font-bold text-gray-700 mb-1">Company</label>
                     <select value={taskCompany} onChange={(e) => setTaskCompany(e.target.value)} className="w-full px-4 py-2 rounded border border-gray-300 bg-white text-sm">
                       <option value="" disabled>Select a Company...</option>
-                      {companies.map(c => <option key={c} value={c}>{c}</option>)}
+                      {masterCompanyList.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
                   <div className="w-1/2">
@@ -3096,6 +3000,7 @@ export default function App() {
                     )}
                   </div>
 
+                  {/* UNIVERSAL ATTACHMENTS & PROOF OF WORK */}
                   {!isCurrentInstanceCompleted && (
                     <div className="bg-white p-3 rounded border border-amber-300 flex justify-between items-center my-1">
                       <div className="flex flex-col">
@@ -3116,6 +3021,7 @@ export default function App() {
                             let file = e.target.files?.[0];
                             if (!file) return;
 
+                            // Apply compression if it's an image
                             if (file.type.startsWith('image/')) {
                               file = await compressImage(file, 1280, 1280, 0.7);
                             }
@@ -3188,7 +3094,7 @@ export default function App() {
                         <label className="block font-bold mb-1 text-gray-700">Company</label>
                         <select value={taskCompany} onChange={(e) => setTaskCompany(e.target.value)} className="w-full p-2 border rounded bg-white">
                           <option value="" disabled>Select a Company...</option>
-                          {companies.map(c => <option key={c} value={c}>{c}</option>)}
+                          {masterCompanyList.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                       </div>
                       <div className="w-1/2">
@@ -3526,6 +3432,7 @@ export default function App() {
                 <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
               </div>
 
+              {/* PUSH NOTIFICATION SETTINGS CARD */}
               <div className="bg-white p-4 rounded-lg border border-amber-300 flex justify-between items-center shadow-2xs">
                 <div>
                   <h4 className="font-bold text-xs uppercase tracking-wider text-amber-900">Device Push Alerts</h4>
@@ -3538,8 +3445,10 @@ export default function App() {
                 </button>
               </div>
 
+              {/* ADMIN ONLY CONTROLS */}
               {userRole === 'admin' && (
                 <>
+                  {/* NEW DASHBOARD VISIBILITY MODULE */}
                   <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3 shadow-2xs">
                     <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Dashboard Visibility (This Device)</h4>
                     <p className="text-[10px] text-gray-500">Uncheck items below to completely hide them from your personal dashboard filters and calendar views.</p>
@@ -3547,7 +3456,7 @@ export default function App() {
                     <div className="flex gap-6 mt-1">
                       <div className="w-1/2 flex flex-col gap-2">
                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Companies</span>
-                        {companies.map(comp => (
+                        {masterCompanyList.map(comp => (
                           <label key={comp} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
                             <input 
                               type="checkbox" 
@@ -3720,7 +3629,7 @@ export default function App() {
                       </button>
                     </div>
                     <div className="flex flex-col gap-1 mt-2">
-                      {companies.map(comp => (
+                      {masterCompanyList.map(comp => (
                         <div key={comp} className="flex justify-between items-center bg-gray-50 p-2 rounded border border-gray-100 text-xs">
                           {editingCompany === comp ? (
                             <div className="flex items-center gap-2 w-full">
