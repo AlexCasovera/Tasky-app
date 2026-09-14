@@ -170,7 +170,8 @@ const mapToDb = (t) => ({
   completed_dates: t.completedDates || [],
   exception_dates: t.exceptionDates || [],
   is_overdue: t.isOverdue ?? false,
-  overdue_notified: t.overdueNotified ?? false
+  overdue_notified: t.overdueNotified ?? false,
+  is_long_term: t.isLongTerm ?? false
 });
 
 const mapFromDb = (r) => ({
@@ -206,7 +207,8 @@ const mapFromDb = (r) => ({
   completedDates: r.completed_dates || [],
   exceptionDates: r.exception_dates || [],
   isOverdue: r.is_overdue ?? false,
-  overdueNotified: r.overdue_notified ?? false
+  overdueNotified: r.overdue_notified ?? false,
+  isLongTerm: r.is_long_term ?? false
 });
 
 export default function App() {
@@ -376,6 +378,7 @@ export default function App() {
   const [hasSpecificTime, setHasSpecificTime] = useState(false); 
   const [startTime, setStartTime] = useState('13:00');
   const [endTime, setEndTime] = useState('14:00');
+  const [isLongTerm, setIsLongTerm] = useState(false);
 
   const [recurrenceType, setRecurrenceType] = useState('once');
   const [activeDays, setActiveDays] = useState([]);
@@ -1060,6 +1063,7 @@ export default function App() {
     setHasSpecificTime(false); 
     setStartTime('09:00');
     setEndTime('11:00');
+    setIsLongTerm(false);
     setRecurrenceType('once');
     setActiveDays([]);
     setCadenceDays(7); // Default to 1 week
@@ -1159,6 +1163,7 @@ export default function App() {
       notifyOnComment,
       notifyOnDeadlineChange,
       notifyOnTaskCreated,
+      isLongTerm,
       comments: []
     };
 
@@ -1210,6 +1215,7 @@ export default function App() {
     setNotifyOnComment(task.notifyOnComment ?? true);
     setNotifyOnDeadlineChange(task.notifyOnDeadlineChange ?? true);
     setNotifyOnTaskCreated(task.notifyOnTaskCreated ?? true);
+    setIsLongTerm(task.isLongTerm || false);
     setChainedSteps(task.chainedSteps || []);
   };
 
@@ -1249,7 +1255,8 @@ export default function App() {
       notifyOnTaskCreated,
       chainedSteps: chainedSteps.filter(s => s.title.trim() !== ''),
       isOverdue: isStillOverdue,
-      overdueNotified: isStillOverdue
+      overdueNotified: isStillOverdue,
+      isLongTerm
     };
 
     setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t));
@@ -1409,6 +1416,7 @@ export default function App() {
         notifyOnComment: true,
         notifyOnDeadlineChange: true,
         notifyOnTaskCreated: true,
+        isLongTerm: false,
         comments: [`Auto-deployed via Sub Task prompt upon completion of "${selectedTask.title}"`]
       };
 
@@ -1479,6 +1487,7 @@ export default function App() {
         notifyOnComment: true,
         notifyOnDeadlineChange: true,
         notifyOnTaskCreated: true,
+        isLongTerm: false,
         comments: [`Auto-deployed via Pre-Configured Workflow from "${selectedTask.title}"`]
       };
       updatedTasks = [chainedTask, ...updatedTasks];
@@ -1616,7 +1625,9 @@ export default function App() {
     return isAssigneeMatch && isCompanyMatch && isSearchMatch;
   });
 
-  const backlogTasks = tasks.filter(t => (!t.assignees || t.assignees.length === 0) && t.status !== 'completed' && activeCompanyFilters.includes(t.company) && !hiddenCompanies.includes(t.company));
+  const backlogTasks = tasks.filter(t => !t.isLongTerm && (!t.assignees || t.assignees.length === 0) && t.status !== 'completed' && activeCompanyFilters.includes(t.company) && !hiddenCompanies.includes(t.company));
+  
+  const longTermTasks = visibleTasks.filter(t => t.isLongTerm && t.status !== 'completed');
 
   const isTaskActiveOnDay = (task, dayOfWeekStr, dateStr) => {
     if (!task) return false;
@@ -1858,6 +1869,33 @@ export default function App() {
               className="text-[11px] font-bold text-[#A9B1A6] hover:underline self-end md:self-center">
               Reset All Filters
             </button>
+          </div>
+        )}
+
+        {/* LONG-TERM PIPELINE TRAY */}
+        {(userRole === 'admin' || userRole === 'employee') && longTermTasks.length > 0 && currentView !== 'create' && currentView !== 'completed' && (
+          <div className="bg-blue-50 border border-blue-300 rounded-lg p-3 mb-4">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-blue-900 flex items-center gap-2">
+                📌 Long-Term & Pipeline Tasks ({longTermTasks.length} Active)
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {longTermTasks.map(task => (
+                <div 
+                  key={`lt-${task.id}`}
+                  draggable={userRole === 'admin' && !resizingTaskId}
+                  onDragStart={(e) => handleDragStart(e, task.id, task.date)}
+                  onDragEnd={handleDragEnd}
+                  onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
+                  className="bg-white px-3 py-1.5 rounded border border-blue-200 text-xs font-bold text-gray-800 cursor-grab active:cursor-grabbing hover:bg-blue-100 transition shadow-2xs flex items-center gap-2">
+                  <span>{task.title}</span>
+                  <span className="text-[9px] bg-gray-200 text-gray-700 px-1 py-0.5 rounded">{task.company}</span>
+                  {task.date && <span className="text-[10px] bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded border border-blue-200">Due: {task.date}</span>}
+                  {(!task.assignees || task.assignees.length === 0) && <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">Unassigned</span>}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -2621,6 +2659,14 @@ export default function App() {
                         </div>
                       </div>
                     )}
+                    
+                    <div className="mt-3 pt-3 border-t border-gray-200">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={isLongTerm} onChange={(e) => setIsLongTerm(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" />
+                        <span className="text-xs font-bold text-gray-700">📌 Mark as Long-Term / Pipeline Task</span>
+                      </label>
+                      <p className="text-[10px] text-gray-500 mt-1 ml-6">Pins this task to the top of the dashboard for constant visibility, with or without a deadline.</p>
+                    </div>
                   </div>
                 </div>
 
@@ -2807,6 +2853,12 @@ export default function App() {
 
               {!isEditing ? (
                 <>
+                  {selectedTask.isLongTerm && (
+                    <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold px-3 py-2 rounded mb-1 flex items-center gap-2">
+                      <span>📌</span> This is a Long-Term Pipeline task pinned to the dashboard.
+                    </div>
+                  )}
+
                   <p className="text-sm text-gray-600 bg-white p-3 rounded border border-gray-200">{selectedTask.desc}</p>
 
                   <div className="flex justify-between text-xs text-gray-500 bg-gray-100 p-2 rounded">
@@ -3028,6 +3080,13 @@ export default function App() {
                           <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-1/2 p-1 border rounded bg-white" />
                         </div>
                       )}
+                      
+                      <div className="col-span-2 bg-[#A9B1A6]/10 p-3 rounded border border-[#A9B1A6]/30 mt-3">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={isLongTerm} onChange={(e) => setIsLongTerm(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" />
+                          <span className="text-[11px] font-bold text-gray-800">📌 Mark as Long-Term / Pipeline Task</span>
+                        </label>
+                      </div>
                     </div>
 
                     <div>
