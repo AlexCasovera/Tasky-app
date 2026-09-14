@@ -254,13 +254,23 @@ export default function App() {
     }
   }, []);
 
-  // FETCH LIVE TEAM MEMBERS AND CURRENT USER PROFILE FROM DATABASE
-  useEffect(() => {
-    async function loadProfiles() {
-      const { data: allProfiles, error: teamErr } = await supabase
-        .from('profiles')
-        .select('*');
+  const [companies, setCompanies] = useState([]);
+  const [activeCompanyFilters, setActiveCompanyFilters] = useState([]);
 
+  // FETCH LIVE DATA: TEAMS, PROFILES, AND NOW COMPANIES
+  useEffect(() => {
+    async function loadData() {
+      // Load Companies
+      const { data: companyData, error: compErr } = await supabase.from('companies').select('*');
+      if (companyData && !compErr) {
+        const compNames = companyData.map(c => c.name);
+        setCompanies(compNames);
+        // Only set active filters if they haven't been touched yet
+        if (activeCompanyFilters.length === 0) setActiveCompanyFilters(compNames);
+      }
+
+      // Load Team Profiles
+      const { data: allProfiles, error: teamErr } = await supabase.from('profiles').select('*');
       if (allProfiles && !teamErr) {
         const mappedMembers = allProfiles.map(p => ({
           id: p.id,
@@ -271,9 +281,10 @@ export default function App() {
           color: p.color || '#2A9D8F'
         }));
         setTeamMembers(mappedMembers);
-        setActiveEmployeeFilters(mappedMembers.map(m => m.name));
+        if (activeEmployeeFilters.length === 0) setActiveEmployeeFilters(mappedMembers.map(m => m.name));
       }
 
+      // Set Current User
       if (session?.user?.id) {
         const { data: myProfile, error: profileErr } = await supabase
           .from('profiles')
@@ -295,9 +306,7 @@ export default function App() {
       }
     }
 
-    if (session) {
-      loadProfiles();
-    }
+    if (session) loadData();
   }, [session]);
 
   const handleLogout = async () => {
@@ -352,8 +361,6 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingMemberId, setEditingMemberId] = useState(null);
 
-  const [companies, setCompanies] = useState(['Sparkulous', 'Casovera', 'TMLFO', 'Leprino Personal']);
-  const [activeCompanyFilters, setActiveCompanyFilters] = useState(['Sparkulous', 'Casovera', 'TMLFO', 'Leprino Personal']);
   const [newCompanyInput, setNewCompanyInput] = useState('');
   const [editingCompany, setEditingCompany] = useState<string | null>(null);
   const [editingCompanyInput, setEditingCompanyInput] = useState('');
@@ -1043,14 +1050,53 @@ export default function App() {
 
     const trimmed = newName.trim();
 
+    // Optimistic UI updates
     setCompanies(prev => prev.map(c => c === oldName ? trimmed : c));
     setActiveCompanyFilters(prev => prev.map(c => c === oldName ? trimmed : c));
-
     setTasks(prev => prev.map(t => t.company === oldName ? { ...t, company: trimmed } : t));
+
+    // Update Companies table
+    await supabase.from('companies').update({ name: trimmed }).eq('name', oldName);
+    
+    // Update all tasks with old company name
     await supabase.from('tasks').update({ company: trimmed }).eq('company', oldName);
 
     setEditingCompany(null);
     setEditingCompanyInput('');
+  };
+
+  const handleDeleteCompany = async (nameToDelete: string) => {
+    if (companies.length <= 1) {
+      return alert('You must have at least one company in the system.');
+    }
+
+    // Check if there are active tasks using this company to prevent orphaned tasks
+    const tasksUsingCompany = tasks.filter(t => t.company === nameToDelete);
+    if (tasksUsingCompany.length > 0) {
+      const confirmDelete = window.confirm(`There are ${tasksUsingCompany.length} tasks associated with ${nameToDelete}. Deleting this company will leave those tasks without a valid company tag. Are you sure you want to proceed?`);
+      if (!confirmDelete) return;
+    }
+
+    // Optimistic UI Update
+    setCompanies(prev => prev.filter(c => c !== nameToDelete));
+    setActiveCompanyFilters(prev => prev.filter(c => c !== nameToDelete));
+    
+    // Cloud Delete
+    await supabase.from('companies').delete().eq('name', nameToDelete);
+  };
+
+  const handleAddCompany = async () => {
+    const newName = newCompanyInput.trim();
+    if (!newName || companies.includes(newName)) return;
+
+    // Optimistic UI Update
+    setCompanies(prev => [...prev, newName]);
+    setActiveCompanyFilters(prev => [...prev, newName]);
+    setNewCompanyInput('');
+
+    // Cloud Insert
+    const newId = crypto.randomUUID();
+    await supabase.from('companies').insert({ id: newId, name: newName });
   };
 
   const resetForm = () => {
@@ -3573,14 +3619,7 @@ export default function App() {
                         className="flex-1 p-2 text-xs border border-gray-300 rounded focus:outline-none"
                       />
                       <button 
-                        onClick={() => {
-                          if(newCompanyInput.trim() && !companies.includes(newCompanyInput.trim())) {
-                            const added = newCompanyInput.trim();
-                            setCompanies([...companies, added]);
-                            setActiveCompanyFilters([...activeCompanyFilters, added]);
-                            setNewCompanyInput('');
-                          }
-                        }}
+                        onClick={handleAddCompany}
                         className="bg-[#333333] text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-black transition">
                         Add
                       </button>
@@ -3614,14 +3653,7 @@ export default function App() {
                                   }}
                                   className="text-blue-600 font-bold hover:underline">Edit</button>
                                 <button 
-                                  onClick={() => {
-                                    if(companies.length > 1) {
-                                      setCompanies(companies.filter(c => c !== comp));
-                                      setActiveCompanyFilters(activeCompanyFilters.filter(c => c !== comp));
-                                    } else {
-                                      alert('You must have at least one company in the system.');
-                                    }
-                                  }}
+                                  onClick={() => handleDeleteCompany(comp)}
                                   className="text-red-500 font-bold hover:underline">Remove</button>
                               </div>
                             </>
