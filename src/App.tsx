@@ -1968,18 +1968,18 @@ export default function App() {
                                     <div 
                                       key={`${task.id}-${task.instanceDate}`}
                                       onClick={() => handleOpenModal(task, task.instanceDate)}
-                                      className={`bg-white p-3 rounded border-l-4 ${task.isOverdue ? 'border-red-600 bg-red-50/50 ring-1 ring-red-400' : style.border} shadow-sm flex justify-between items-center cursor-pointer hover:bg-gray-50 transition`}>
+                                      className={`bg-white p-3 rounded border-l-4 ${task.isOverdue ? 'border-red-600 bg-red-50/50 ring-1 ring-red-400' : style.border} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-50 transition gap-3`}>
                                       
-                                      <div className="flex items-center gap-4 w-2/3">
+                                      <div className="flex items-start sm:items-center gap-3 sm:gap-4 w-full sm:w-2/3">
                                         <div className="flex flex-col items-center justify-center bg-gray-50 rounded px-2.5 py-1 min-w-[50px] border border-gray-200 shrink-0">
                                           <span className="text-[9px] font-bold text-gray-500 uppercase">{task.instanceDay}</span>
                                           <span className="text-sm font-bold text-gray-800">{task.instanceDate.split('-')[2]}</span>
                                         </div>
                                         
-                                        <span className="font-mono text-xs font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200 shrink-0">{task.timeLabel}</span>
+                                        <span className="font-mono text-xs font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200 shrink-0 self-start sm:self-auto">{task.timeLabel}</span>
                                         
-                                        <div className="truncate pr-2">
-                                          <div className="flex items-center gap-2">
+                                        <div className="truncate pr-2 w-full">
+                                          <div className="flex items-center gap-2 flex-wrap">
                                             <h3 className="font-bold text-sm truncate">{task.title}</h3>
                                             {task.isOverdue && <span className="text-[9px] bg-red-600 text-white font-bold px-1.5 py-0.5 rounded animate-pulse shrink-0">OVERDUE</span>}
                                             {task.recurrenceType === 'completion' && <span className="text-[9px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded shrink-0">🔄</span>}
@@ -1988,7 +1988,7 @@ export default function App() {
                                         </div>
                                       </div>
 
-                                      <div className="flex items-center gap-3 shrink-0">
+                                      <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100 mt-1 sm:mt-0">
                                         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${style.badge}`}>{task.priority}</span>
                                         <div className="flex -space-x-1.5">
                                           {(task.assignees || []).map((a, idx) => {
@@ -2022,18 +2022,18 @@ export default function App() {
                                   <div 
                                     key={`${task.id}-comp-${task.instanceDate}`}
                                     onClick={() => handleOpenModal(task, task.instanceDate)}
-                                    className="bg-gray-200/60 p-2.5 rounded flex justify-between items-center cursor-pointer hover:bg-gray-200 transition">
-                                    <div className="flex items-center gap-3">
+                                    className="bg-gray-200/60 p-2.5 rounded flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-200 transition gap-2">
+                                    <div className="flex items-center gap-3 w-full sm:w-auto">
                                       <div className="flex flex-col items-center justify-center bg-gray-300/50 rounded px-2 py-0.5 min-w-[40px] shrink-0">
                                         <span className="text-[8px] font-bold text-gray-500 uppercase">{task.instanceDay}</span>
                                         <span className="text-xs font-bold text-gray-600">{task.instanceDate.split('-')[2]}</span>
                                       </div>
-                                      <div>
-                                        <span className="line-through text-xs font-bold text-gray-600 block">{task.title}</span>
+                                      <div className="min-w-0 flex-1">
+                                        <span className="line-through text-xs font-bold text-gray-600 block truncate">{task.title}</span>
                                         <span className="text-[10px] text-gray-500">Assigned to: {(task.assignees || []).join(', ')}</span>
                                       </div>
                                     </div>
-                                    <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full border border-green-300">
+                                    <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full border border-green-300 self-end sm:self-auto shrink-0">
                                       ✓ Completed
                                     </span>
                                   </div>
@@ -2071,20 +2071,20 @@ export default function App() {
                             <div 
                               key={task.id}
                               onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                              className={`bg-white p-4 rounded border-l-4 ${task.isOverdue ? 'border-red-600 bg-red-50/50 ring-1 ring-red-400' : style.border} shadow-sm flex justify-between items-center cursor-pointer hover:bg-gray-50 transition`}>
-                              <div className="w-1/2 flex items-center gap-4">
-                                <span className="font-mono text-sm font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200">{task.timeLabel}</span>
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <h3 className="font-bold text-lg">{task.title}</h3>
+                              className={`bg-white p-3 sm:p-4 rounded border-l-4 ${task.isOverdue ? 'border-red-600 bg-red-50/50 ring-1 ring-red-400' : style.border} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-50 transition gap-3 sm:gap-0`}>
+                              <div className="w-full sm:w-2/3 flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
+                                <span className="font-mono text-[10px] sm:text-sm font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200 shrink-0 self-start sm:self-auto">{task.timeLabel}</span>
+                                <div className="min-w-0 w-full">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <h3 className="font-bold text-base sm:text-lg truncate">{task.title}</h3>
                                     <span className="text-[9px] bg-gray-200 text-gray-700 px-1 py-0.5 rounded">{task.company}</span>
                                     {task.isOverdue && <span className="text-[10px] bg-red-600 text-white font-bold px-1.5 py-0.5 rounded animate-pulse">OVERDUE</span>}
                                     {task.recurrenceType === 'completion' && <span className="text-[10px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded">🔄 Interval</span>}
                                   </div>
-                                  <p className="text-sm text-gray-500 truncate">{task.desc}</p>
+                                  <p className="text-xs sm:text-sm text-gray-500 truncate">{task.desc}</p>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-4">
+                              <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto pt-3 sm:pt-0 border-t sm:border-t-0 border-gray-100 mt-1 sm:mt-0">
                                 <span className={`text-xs font-semibold px-3 py-1 rounded-full ${style.badge}`}>{task.priority}</span>
                                 <div className="flex -space-x-2">
                                   {(task.assignees || []).map((a, idx) => {
@@ -2115,15 +2115,15 @@ export default function App() {
                         <div 
                           key={task.id} 
                           onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                          className="bg-gray-200/60 p-3 rounded flex justify-between items-center cursor-pointer hover:bg-gray-200 transition">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="line-through text-sm font-bold text-gray-600 block">{task.title}</span>
-                              <span className="text-[9px] bg-gray-300 text-gray-600 px-1 py-0.5 rounded">{task.company}</span>
+                          className="bg-gray-200/60 p-3 rounded flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-200 transition gap-2">
+                          <div className="flex items-center gap-2 w-full sm:w-auto">
+                            <div className="min-w-0 flex-1">
+                              <span className="line-through text-sm font-bold text-gray-600 block truncate">{task.title}</span>
+                              <span className="text-[9px] bg-gray-300 text-gray-600 px-1 py-0.5 rounded inline-block mt-0.5">{task.company}</span>
                             </div>
-                            <span className="text-xs text-gray-500">Assigned to: {(task.assignees || []).join(', ')}</span>
+                            <span className="text-xs text-gray-500 sm:ml-4">Assigned to: {(task.assignees || []).join(', ')}</span>
                           </div>
-                          <span className="text-xs font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-300">
+                          <span className="text-xs font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-300 self-end sm:self-auto shrink-0">
                             ✓ Completed
                           </span>
                         </div>
@@ -2142,164 +2142,166 @@ export default function App() {
 
         {/* DAY VIEW */}
         {currentView === 'day' && (
-          <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm min-w-[600px]">
-            <div className="flex border-b border-gray-300 bg-gray-100">
-              <div className="w-20 py-3 text-center text-xs font-bold text-gray-500 border-r border-gray-300">Time</div>
-              <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
-                {visibleMembers.map(member => (
-                  <div key={member.id} className="py-3 px-2 border-r border-gray-300 last:border-r-0 flex items-center justify-center gap-2">
-                    <div style={{ backgroundColor: member.color }} className="w-7 h-7 rounded-full text-white flex items-center justify-center text-xs font-bold shadow-sm">
-                      {member.initials}
+          <div className="w-full overflow-x-auto pb-4">
+            <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm min-w-[700px]">
+              <div className="flex border-b border-gray-300 bg-gray-100">
+                <div className="w-20 py-3 text-center text-xs font-bold text-gray-500 border-r border-gray-300">Time</div>
+                <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
+                  {visibleMembers.map(member => (
+                    <div key={member.id} className="py-3 px-2 border-r border-gray-300 last:border-r-0 flex items-center justify-center gap-2">
+                      <div style={{ backgroundColor: member.color }} className="w-7 h-7 rounded-full text-white flex items-center justify-center text-xs font-bold shadow-sm">
+                        {member.initials}
+                      </div>
+                      <span className="font-bold text-sm text-gray-800">{member.name}</span>
                     </div>
-                    <span className="font-bold text-sm text-gray-800">{member.name}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex border-b border-gray-300 bg-gray-50/80 min-h-[40px] shrink-0">
-              <div className="w-20 py-2 text-center text-[10px] font-bold text-gray-500 border-r border-gray-300 flex items-center justify-center bg-gray-100">All-Day</div>
-              <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
-                {visibleMembers.map(member => {
-                  const dayDateStr = formatDateKey(currentDate);
-                  const allDayTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], dayDateStr) && t.assignees && t.assignees.includes(member.name) && t.type === 'flexible');
-                  
-                  return (
-                    <div 
-                      key={member.id} 
-                      className="p-1 border-r border-gray-300 last:border-r-0 flex flex-col gap-1 min-h-[40px]"
-                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                      onDrop={(e) => handleDropSlot(e, dayDateStr, null, member.name, true)}
-                    >
-                      {allDayTasks.map(task => (
-                        <div
-                          key={task.id}
-                          draggable={userRole === 'admin' && !resizingTaskId}
-                          onDragStart={(e) => handleDragStart(e, task.id, dayDateStr)}
-                          onDragEnd={handleDragEnd}
-                          onClick={() => handleOpenModal(task, dayDateStr)}
-                          style={{ backgroundColor: member.color }}
-                          className={`text-white text-[10px] font-semibold px-2 py-1 rounded truncate shadow-sm ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}
-                        >
-                          {task.title}
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="flex-1 relative overflow-y-auto flex" style={{ maxHeight: '580px' }}>
-              <div className="w-20 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
-                {dynamicTimeSlots.map(hour => (
-                  <div key={hour} className="h-20 border-b border-gray-200 p-2 text-xs font-mono font-bold text-gray-400 text-right pr-3">
-                    {hour === 12 ? '12:00 PM' : hour > 12 ? `${hour - 12}:00 PM` : hour === 0 ? '12:00 AM' : `${hour}:00 AM`}
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
 
-              <div className="flex-1 grid relative" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))`, height: `${dynamicTimeSlots.length * 80}px` }}>
-                {visibleMembers.map(member => {
-                  const dayDateStr = formatDateKey(currentDate);
-                  const memberColTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], dayDateStr) && t.assignees && t.assignees.includes(member.name) && t.type === 'timed');
-                  const layouts = computeDynamicLayouts(memberColTasks);
-
-                  return (
-                    <div key={member.id} className="border-r border-gray-200 last:border-r-0 relative h-full">
-                      {dynamicTimeSlots.map(hour => (
-                        <div key={hour} className="h-20 border-b border-gray-200 flex flex-col">
-                          {minuteSubSlots.map(subOffset => (
-                            <div 
-                              key={subOffset}
-                              onDragOver={(e) => handleSubSlotDragOver(e, dayDateStr, hour + subOffset, member.name)}
-                              onDrop={(e) => handleDropSlot(e, dayDateStr, hour + subOffset, member.name, false)}
-                              className="flex-1 hover:bg-blue-50/50 transition border-b border-dashed border-gray-100 last:border-b-0"
-                              title={`Schedule for ${decimalToTimeString(hour + subOffset)} - ${member.name}`}>
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-
-                      {draggedTaskObj && hoverSlot && hoverSlot.memberName === member.name && hoverSlot.dateStr === dayDateStr && (
-                        <div 
-                          style={{
-                            top: `${(hoverSlot.targetHour - gridStartHour) * 80}px`,
-                            height: `${Math.max(32, (draggedTaskObj.duration || 1) * 80)}px`,
-                            left: '2px',
-                            right: '2px'
-                          }}
-                          className="absolute z-30 bg-blue-500/20 border-2 border-dashed border-blue-600 rounded-md p-2 shadow-lg pointer-events-none flex flex-col justify-between text-blue-950 font-bold backdrop-blur-[2px] animate-pulse">
-                          <div className="flex justify-between items-start gap-1">
-                            <span className="text-[10px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded shadow-2xs font-mono shrink-0">
-                              🎯 {formatTimeLabel(decimalToTimeString(hoverSlot.targetHour), decimalToTimeString(hoverSlot.targetHour + (draggedTaskObj.duration || 1)))}
-                            </span>
-                            <span className="text-[9px] bg-white/90 px-1 py-0.5 rounded border border-blue-300 text-blue-900 truncate">
-                              {member.name}
-                            </span>
-                          </div>
-                          <span className="text-xs truncate text-blue-950 mt-1">{draggedTaskObj.title}</span>
-                        </div>
-                      )}
-
-                      {memberColTasks.map(task => {
-                        const layout = layouts[task.id] || { left: '0%', width: '100%', startPx: 0, heightPx: 80, isFlex: false };
-                        const isFlex = layout.isFlex;
-
-                        return (
+              <div className="flex border-b border-gray-300 bg-gray-50/80 min-h-[40px] shrink-0">
+                <div className="w-20 py-2 text-center text-[10px] font-bold text-gray-500 border-r border-gray-300 flex items-center justify-center bg-gray-100">All-Day</div>
+                <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
+                  {visibleMembers.map(member => {
+                    const dayDateStr = formatDateKey(currentDate);
+                    const allDayTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], dayDateStr) && t.assignees && t.assignees.includes(member.name) && t.type === 'flexible');
+                    
+                    return (
+                      <div 
+                        key={member.id} 
+                        className="p-1 border-r border-gray-300 last:border-r-0 flex flex-col gap-1 min-h-[40px]"
+                        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                        onDrop={(e) => handleDropSlot(e, dayDateStr, null, member.name, true)}
+                      >
+                        {allDayTasks.map(task => (
                           <div
                             key={task.id}
                             draggable={userRole === 'admin' && !resizingTaskId}
                             onDragStart={(e) => handleDragStart(e, task.id, dayDateStr)}
                             onDragEnd={handleDragEnd}
                             onClick={() => handleOpenModal(task, dayDateStr)}
-                            style={{ 
-                              top: `${layout.startPx}px`, 
-                              height: `${layout.heightPx}px`, 
-                              left: layout.left, 
-                              width: layout.width, 
-                              backgroundColor: member.color 
-                            }}
-                            className={`absolute text-white rounded-md p-2 shadow-md border-l-4 ${task.isOverdue ? 'border-red-500 ring-2 ring-red-400' : 'border-black/20'} ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden ${isFlex ? 'opacity-95' : ''}`}>
-                            
-                            {!isFlex && userRole === 'admin' && (
-                              <div 
-                                className="absolute top-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-t-md"
-                                onPointerDown={(e) => handleResizeStart(e, task, 'top')}
-                              />
-                            )}
-
-                            <div>
-                              <div className="flex justify-between items-start gap-1">
-                                <h4 className="font-bold text-xs leading-tight drop-shadow-sm truncate">
-                                  {task.title}
-                                </h4>
-                                {task.isOverdue ? (
-                                  <span className="bg-red-600 text-[8px] font-bold px-1 rounded shrink-0">OVERDUE</span>
-                                ) : (
-                                  isFlex && <span className="bg-black/30 text-[8px] font-bold px-1 rounded shrink-0">ALL-DAY</span>
-                                )}
-                              </div>
-                              <span className="text-[10px] bg-black/20 px-1 rounded font-mono inline-block mt-0.5">{task.timeLabel}</span>
-                              <p className="text-[10px] opacity-90 truncate mt-0.5">[{task.company}] {task.desc}</p>
-                            </div>
-                            <div className="flex items-center justify-between text-[9px] opacity-80 pt-0.5 border-t border-white/20 mt-auto">
-                              <span>Priority: {task.priority}</span>
-                              <span>{task.recurrenceType === 'completion' ? '🔄' : task.recurrenceType === 'fixed' ? '↻' : ''}</span>
-                            </div>
-
-                            {!isFlex && userRole === 'admin' && (
-                              <div 
-                                className="absolute bottom-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-b-md"
-                                onPointerDown={(e) => handleResizeStart(e, task, 'bottom')}
-                              />
-                            )}
+                            style={{ backgroundColor: member.color }}
+                            className={`text-white text-[10px] font-semibold px-2 py-1 rounded truncate shadow-sm ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}
+                          >
+                            {task.title}
                           </div>
-                        );
-                      })}
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex-1 relative overflow-y-auto flex" style={{ maxHeight: '580px' }}>
+                <div className="w-20 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
+                  {dynamicTimeSlots.map(hour => (
+                    <div key={hour} className="h-20 border-b border-gray-200 p-2 text-xs font-mono font-bold text-gray-400 text-right pr-3">
+                      {hour === 12 ? '12:00 PM' : hour > 12 ? `${hour - 12}:00 PM` : hour === 0 ? '12:00 AM' : `${hour}:00 AM`}
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
+
+                <div className="flex-1 grid relative" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))`, height: `${dynamicTimeSlots.length * 80}px` }}>
+                  {visibleMembers.map(member => {
+                    const dayDateStr = formatDateKey(currentDate);
+                    const memberColTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], dayDateStr) && t.assignees && t.assignees.includes(member.name) && t.type === 'timed');
+                    const layouts = computeDynamicLayouts(memberColTasks);
+
+                    return (
+                      <div key={member.id} className="border-r border-gray-200 last:border-r-0 relative h-full">
+                        {dynamicTimeSlots.map(hour => (
+                          <div key={hour} className="h-20 border-b border-gray-200 flex flex-col">
+                            {minuteSubSlots.map(subOffset => (
+                              <div 
+                                key={subOffset}
+                                onDragOver={(e) => handleSubSlotDragOver(e, dayDateStr, hour + subOffset, member.name)}
+                                onDrop={(e) => handleDropSlot(e, dayDateStr, hour + subOffset, member.name, false)}
+                                className="flex-1 hover:bg-blue-50/50 transition border-b border-dashed border-gray-100 last:border-b-0"
+                                title={`Schedule for ${decimalToTimeString(hour + subOffset)} - ${member.name}`}>
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+
+                        {draggedTaskObj && hoverSlot && hoverSlot.memberName === member.name && hoverSlot.dateStr === dayDateStr && (
+                          <div 
+                            style={{
+                              top: `${(hoverSlot.targetHour - gridStartHour) * 80}px`,
+                              height: `${Math.max(32, (draggedTaskObj.duration || 1) * 80)}px`,
+                              left: '2px',
+                              right: '2px'
+                            }}
+                            className="absolute z-30 bg-blue-500/20 border-2 border-dashed border-blue-600 rounded-md p-2 shadow-lg pointer-events-none flex flex-col justify-between text-blue-950 font-bold backdrop-blur-[2px] animate-pulse">
+                            <div className="flex justify-between items-start gap-1">
+                              <span className="text-[10px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded shadow-2xs font-mono shrink-0">
+                                🎯 {formatTimeLabel(decimalToTimeString(hoverSlot.targetHour), decimalToTimeString(hoverSlot.targetHour + (draggedTaskObj.duration || 1)))}
+                              </span>
+                              <span className="text-[9px] bg-white/90 px-1 py-0.5 rounded border border-blue-300 text-blue-900 truncate">
+                                {member.name}
+                              </span>
+                            </div>
+                            <span className="text-xs truncate text-blue-950 mt-1">{draggedTaskObj.title}</span>
+                          </div>
+                        )}
+
+                        {memberColTasks.map(task => {
+                          const layout = layouts[task.id] || { left: '0%', width: '100%', startPx: 0, heightPx: 80, isFlex: false };
+                          const isFlex = layout.isFlex;
+
+                          return (
+                            <div
+                              key={task.id}
+                              draggable={userRole === 'admin' && !resizingTaskId}
+                              onDragStart={(e) => handleDragStart(e, task.id, dayDateStr)}
+                              onDragEnd={handleDragEnd}
+                              onClick={() => handleOpenModal(task, dayDateStr)}
+                              style={{ 
+                                top: `${layout.startPx}px`, 
+                                height: `${layout.heightPx}px`, 
+                                left: layout.left, 
+                                width: layout.width, 
+                                backgroundColor: member.color 
+                              }}
+                              className={`absolute text-white rounded-md p-2 shadow-md border-l-4 ${task.isOverdue ? 'border-red-500 ring-2 ring-red-400' : 'border-black/20'} ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden ${isFlex ? 'opacity-95' : ''}`}>
+                              
+                              {!isFlex && userRole === 'admin' && (
+                                <div 
+                                  className="absolute top-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-t-md"
+                                  onPointerDown={(e) => handleResizeStart(e, task, 'top')}
+                                />
+                              )}
+
+                              <div>
+                                <div className="flex justify-between items-start gap-1">
+                                  <h4 className="font-bold text-xs leading-tight drop-shadow-sm truncate">
+                                    {task.title}
+                                  </h4>
+                                  {task.isOverdue ? (
+                                    <span className="bg-red-600 text-[8px] font-bold px-1 rounded shrink-0">OVERDUE</span>
+                                  ) : (
+                                    isFlex && <span className="bg-black/30 text-[8px] font-bold px-1 rounded shrink-0">ALL-DAY</span>
+                                  )}
+                                </div>
+                                <span className="text-[10px] bg-black/20 px-1 rounded font-mono inline-block mt-0.5">{task.timeLabel}</span>
+                                <p className="text-[10px] opacity-90 truncate mt-0.5">[{task.company}] {task.desc}</p>
+                              </div>
+                              <div className="flex items-center justify-between text-[9px] opacity-80 pt-0.5 border-t border-white/20 mt-auto">
+                                <span>Priority: {task.priority}</span>
+                                <span>{task.recurrenceType === 'completion' ? '🔄' : task.recurrenceType === 'fixed' ? '↻' : ''}</span>
+                              </div>
+
+                              {!isFlex && userRole === 'admin' && (
+                                <div 
+                                  className="absolute bottom-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-b-md"
+                                  onPointerDown={(e) => handleResizeStart(e, task, 'bottom')}
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>
@@ -2307,172 +2309,174 @@ export default function App() {
 
         {/* WEEK VIEW */}
         {currentView === 'week' && (
-          <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm min-w-[800px]">
-            <div className="flex border-b border-gray-300 bg-gray-100 font-bold text-xs text-gray-700">
-              <div className="w-16 py-2 text-center border-r border-gray-300">Time</div>
-              <div className="flex-1 grid grid-cols-7">
-                {daysOfWeek.map((dayName, idx) => {
-                  const weekStart = getWeekStart(currentDate);
-                  const cellDate = new Date(weekStart);
-                  cellDate.setDate(cellDate.getDate() + idx);
-                  const isTodayCell = formatDateKey(cellDate) === formatDateKey(new Date());
+          <div className="w-full overflow-x-auto pb-4">
+            <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm min-w-[800px]">
+              <div className="flex border-b border-gray-300 bg-gray-100 font-bold text-xs text-gray-700">
+                <div className="w-16 py-2 text-center border-r border-gray-300">Time</div>
+                <div className="flex-1 grid grid-cols-7">
+                  {daysOfWeek.map((dayName, idx) => {
+                    const weekStart = getWeekStart(currentDate);
+                    const cellDate = new Date(weekStart);
+                    cellDate.setDate(cellDate.getDate() + idx);
+                    const isTodayCell = formatDateKey(cellDate) === formatDateKey(new Date());
 
-                  return (
-                    <div key={dayName} className={`py-2 text-center border-r border-gray-300 last:border-r-0 ${isTodayCell ? 'bg-[#A9B1A6] text-white' : ''}`}>
-                      <span className="block text-[10px] uppercase">{dayName}</span>
-                      <span className="text-xs font-serif">{cellDate.getMonth() + 1}/{cellDate.getDate()}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="flex border-b border-gray-300 bg-gray-50/80 min-h-[40px] shrink-0">
-              <div className="w-16 py-2 text-center text-[10px] font-bold text-gray-500 border-r border-gray-300 flex items-center justify-center bg-gray-100">All-Day</div>
-              <div className="flex-1 grid grid-cols-7">
-                {daysOfWeek.map((dayName, idx) => {
-                  const weekStart = getWeekStart(currentDate);
-                  const cellDate = new Date(weekStart);
-                  cellDate.setDate(cellDate.getDate() + idx);
-                  const dateStr = formatDateKey(cellDate);
-
-                  const allDayTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, dayName, dateStr) && t.type === 'flexible');
-
-                  return (
-                    <div 
-                      key={dayName} 
-                      className="p-1 border-r border-gray-300 last:border-r-0 flex flex-col gap-1 min-h-[40px]"
-                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                      onDrop={(e) => handleDropSlot(e, dateStr, null, null, true)}
-                    >
-                      {allDayTasks.map(task => {
-                        const member = getMemberConfig(task.assignees && task.assignees[0]);
-                        return (
-                          <div
-                            key={`${task.id}-${dateStr}`}
-                            draggable={userRole === 'admin' && !resizingTaskId}
-                            onDragStart={(e) => handleDragStart(e, task.id, dateStr)}
-                            onDragEnd={handleDragEnd}
-                            onClick={() => handleOpenModal(task, dateStr)}
-                            style={{ backgroundColor: member.color }}
-                            className={`text-white text-[9px] font-semibold px-1.5 py-0.5 rounded truncate shadow-sm ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}
-                          >
-                            {task.title}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="flex-1 relative overflow-y-auto flex" style={{ maxHeight: '550px' }}>
-              <div className="w-16 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
-                {dynamicTimeSlots.map(hour => (
-                  <div key={hour} className="h-20 border-b border-gray-200 p-1 text-[10px] font-mono font-bold text-gray-400 text-right pr-2">
-                    {hour === 12 ? '12 PM' : hour > 12 ? `${hour - 12} PM` : hour === 0 ? '12 AM' : `${hour} AM`}
-                  </div>
-                ))}
+                    return (
+                      <div key={dayName} className={`py-2 text-center border-r border-gray-300 last:border-r-0 ${isTodayCell ? 'bg-[#A9B1A6] text-white' : ''}`}>
+                        <span className="block text-[10px] uppercase">{dayName}</span>
+                        <span className="text-xs font-serif">{cellDate.getMonth() + 1}/{cellDate.getDate()}</span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
-              <div className="flex-1 grid grid-cols-7 relative" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
-                {daysOfWeek.map((dayName, idx) => {
-                  const weekStart = getWeekStart(currentDate);
-                  const cellDate = new Date(weekStart);
-                  cellDate.setDate(cellDate.getDate() + idx);
-                  const dateStr = formatDateKey(cellDate);
+              <div className="flex border-b border-gray-300 bg-gray-50/80 min-h-[40px] shrink-0">
+                <div className="w-16 py-2 text-center text-[10px] font-bold text-gray-500 border-r border-gray-300 flex items-center justify-center bg-gray-100">All-Day</div>
+                <div className="flex-1 grid grid-cols-7">
+                  {daysOfWeek.map((dayName, idx) => {
+                    const weekStart = getWeekStart(currentDate);
+                    const cellDate = new Date(weekStart);
+                    cellDate.setDate(cellDate.getDate() + idx);
+                    const dateStr = formatDateKey(cellDate);
 
-                  const dayColTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, dayName, dateStr) && t.type === 'timed');
-                  const layouts = computeDynamicLayouts(dayColTasks);
+                    const allDayTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, dayName, dateStr) && t.type === 'flexible');
 
-                  return (
-                    <div key={dayName} className="border-r border-gray-200 last:border-r-0 relative h-full">
-                      {dynamicTimeSlots.map(hour => (
-                        <div key={hour} className="h-20 border-b border-gray-200 flex flex-col">
-                          {minuteSubSlots.map(subOffset => (
-                            <div 
-                              key={subOffset}
-                              onDragOver={(e) => handleSubSlotDragOver(e, dateStr, hour + subOffset, null)}
-                              onDrop={(e) => handleDropSlot(e, dateStr, hour + subOffset, null, false)}
-                              className="flex-1 hover:bg-blue-50/50 transition border-b border-dashed border-gray-100 last:border-b-0"
-                              title={`${dateStr} @ ${decimalToTimeString(hour + subOffset)}`}>
+                    return (
+                      <div 
+                        key={dayName} 
+                        className="p-1 border-r border-gray-300 last:border-r-0 flex flex-col gap-1 min-h-[40px]"
+                        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                        onDrop={(e) => handleDropSlot(e, dateStr, null, null, true)}
+                      >
+                        {allDayTasks.map(task => {
+                          const member = getMemberConfig(task.assignees && task.assignees[0]);
+                          return (
+                            <div
+                              key={`${task.id}-${dateStr}`}
+                              draggable={userRole === 'admin' && !resizingTaskId}
+                              onDragStart={(e) => handleDragStart(e, task.id, dateStr)}
+                              onDragEnd={handleDragEnd}
+                              onClick={() => handleOpenModal(task, dateStr)}
+                              style={{ backgroundColor: member.color }}
+                              className={`text-white text-[9px] font-semibold px-1.5 py-0.5 rounded truncate shadow-sm ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}
+                            >
+                              {task.title}
                             </div>
-                          ))}
-                        </div>
-                      ))}
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
 
-                      {draggedTaskObj && hoverSlot && hoverSlot.dateStr === dateStr && (
-                        <div 
-                          style={{
-                            top: `${(hoverSlot.targetHour - gridStartHour) * 80}px`,
-                            height: `${Math.max(32, (draggedTaskObj.duration || 1) * 80)}px`,
-                            left: '2px',
-                            right: '2px'
-                          }}
-                          className="absolute z-30 bg-blue-500/20 border-2 border-dashed border-blue-600 rounded p-1.5 shadow-lg pointer-events-none flex flex-col justify-between text-blue-950 font-bold backdrop-blur-[2px] animate-pulse">
-                          <div className="flex justify-between items-center text-[9px] font-bold">
-                            <span className="bg-blue-600 text-white px-1 py-0.5 rounded font-mono truncate">
-                              🎯 {formatTimeLabel(decimalToTimeString(hoverSlot.targetHour), decimalToTimeString(hoverSlot.targetHour + (draggedTaskObj.duration || 1)))}
-                            </span>
-                          </div>
-                          <span className="text-[10px] truncate text-blue-950 mt-0.5">{draggedTaskObj.title}</span>
-                        </div>
-                      )}
+              <div className="flex-1 relative overflow-y-auto flex" style={{ maxHeight: '550px' }}>
+                <div className="w-16 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
+                  {dynamicTimeSlots.map(hour => (
+                    <div key={hour} className="h-20 border-b border-gray-200 p-1 text-[10px] font-mono font-bold text-gray-400 text-right pr-2">
+                      {hour === 12 ? '12 PM' : hour > 12 ? `${hour - 12} PM` : hour === 0 ? '12 AM' : `${hour} AM`}
+                    </div>
+                  ))}
+                </div>
 
-                      {dayColTasks.map(task => {
-                        const layout = layouts[task.id] || { left: '0%', width: '100%', startPx: 0, heightPx: 80, isFlex: false };
-                        const member = getMemberConfig(task.assignees && task.assignees[0]);
-                        const isFlex = layout.isFlex;
+                <div className="flex-1 grid grid-cols-7 relative" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
+                  {daysOfWeek.map((dayName, idx) => {
+                    const weekStart = getWeekStart(currentDate);
+                    const cellDate = new Date(weekStart);
+                    cellDate.setDate(cellDate.getDate() + idx);
+                    const dateStr = formatDateKey(cellDate);
 
-                        return (
-                          <div
-                            key={`${task.id}-${dateStr}`}
-                            draggable={userRole === 'admin' && !resizingTaskId}
-                            onDragStart={(e) => handleDragStart(e, task.id, dateStr)}
-                            onDragEnd={handleDragEnd}
-                            onClick={() => handleOpenModal(task, dateStr)}
-                            style={{ 
-                              top: `${layout.startPx}px`, 
-                              height: `${layout.heightPx}px`, 
-                              left: layout.left, 
-                              width: layout.width, 
-                              backgroundColor: member.color 
-                            }}
-                            className={`absolute text-white rounded p-1.5 shadow ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 transition z-10 flex flex-col justify-between overflow-hidden ${task.isOverdue ? 'ring-2 ring-red-500' : ''} ${isFlex ? 'opacity-95' : ''}`}>
-                            
-                            {!isFlex && userRole === 'admin' && (
+                    const dayColTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, dayName, dateStr) && t.type === 'timed');
+                    const layouts = computeDynamicLayouts(dayColTasks);
+
+                    return (
+                      <div key={dayName} className="border-r border-gray-200 last:border-r-0 relative h-full">
+                        {dynamicTimeSlots.map(hour => (
+                          <div key={hour} className="h-20 border-b border-gray-200 flex flex-col">
+                            {minuteSubSlots.map(subOffset => (
                               <div 
-                                className="absolute top-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-t"
-                                onPointerDown={(e) => handleResizeStart(e, task, 'top')}
-                              />
-                            )}
-
-                            <div>
-                              <div className="flex justify-between items-center text-[10px] font-bold leading-tight">
-                                <span className="truncate">{task.title}</span>
-                                {task.isOverdue ? (
-                                  <span className="bg-red-600 px-0.5 rounded text-[8px] shrink-0">!</span>
-                                ) : (
-                                  isFlex && <span className="bg-black/30 px-0.5 rounded text-[7px] shrink-0">ALL-DAY</span>
-                                )}
+                                key={subOffset}
+                                onDragOver={(e) => handleSubSlotDragOver(e, dateStr, hour + subOffset, null)}
+                                onDrop={(e) => handleDropSlot(e, dateStr, hour + subOffset, null, false)}
+                                className="flex-1 hover:bg-blue-50/50 transition border-b border-dashed border-gray-100 last:border-b-0"
+                                title={`${dateStr} @ ${decimalToTimeString(hour + subOffset)}`}>
                               </div>
-                              <span className="text-[9px] opacity-80 font-mono block truncate">{task.timeLabel}</span>
-                            </div>
-                            <span className="text-[8px] bg-black/20 px-1 rounded truncate w-max mt-auto">{(task.assignees || []).join(', ')}</span>
-
-                            {!isFlex && userRole === 'admin' && (
-                              <div 
-                                className="absolute bottom-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-b"
-                                onPointerDown={(e) => handleResizeStart(e, task, 'bottom')}
-                              />
-                            )}
+                            ))}
                           </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
+                        ))}
+
+                        {draggedTaskObj && hoverSlot && hoverSlot.dateStr === dateStr && (
+                          <div 
+                            style={{
+                              top: `${(hoverSlot.targetHour - gridStartHour) * 80}px`,
+                              height: `${Math.max(32, (draggedTaskObj.duration || 1) * 80)}px`,
+                              left: '2px',
+                              right: '2px'
+                            }}
+                            className="absolute z-30 bg-blue-500/20 border-2 border-dashed border-blue-600 rounded p-1.5 shadow-lg pointer-events-none flex flex-col justify-between text-blue-950 font-bold backdrop-blur-[2px] animate-pulse">
+                            <div className="flex justify-between items-center text-[9px] font-bold">
+                              <span className="bg-blue-600 text-white px-1 py-0.5 rounded font-mono truncate">
+                                🎯 {formatTimeLabel(decimalToTimeString(hoverSlot.targetHour), decimalToTimeString(hoverSlot.targetHour + (draggedTaskObj.duration || 1)))}
+                              </span>
+                            </div>
+                            <span className="text-[10px] truncate text-blue-950 mt-0.5">{draggedTaskObj.title}</span>
+                          </div>
+                        )}
+
+                        {dayColTasks.map(task => {
+                          const layout = layouts[task.id] || { left: '0%', width: '100%', startPx: 0, heightPx: 80, isFlex: false };
+                          const member = getMemberConfig(task.assignees && task.assignees[0]);
+                          const isFlex = layout.isFlex;
+
+                          return (
+                            <div
+                              key={`${task.id}-${dateStr}`}
+                              draggable={userRole === 'admin' && !resizingTaskId}
+                              onDragStart={(e) => handleDragStart(e, task.id, dateStr)}
+                              onDragEnd={handleDragEnd}
+                              onClick={() => handleOpenModal(task, dateStr)}
+                              style={{ 
+                                top: `${layout.startPx}px`, 
+                                height: `${layout.heightPx}px`, 
+                                left: layout.left, 
+                                width: layout.width, 
+                                backgroundColor: member.color 
+                              }}
+                              className={`absolute text-white rounded p-1.5 shadow ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 transition z-10 flex flex-col justify-between overflow-hidden ${task.isOverdue ? 'ring-2 ring-red-500' : ''} ${isFlex ? 'opacity-95' : ''}`}>
+                              
+                              {!isFlex && userRole === 'admin' && (
+                                <div 
+                                  className="absolute top-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-t"
+                                  onPointerDown={(e) => handleResizeStart(e, task, 'top')}
+                                />
+                              )}
+
+                              <div>
+                                <div className="flex justify-between items-center text-[10px] font-bold leading-tight">
+                                  <span className="truncate">{task.title}</span>
+                                  {task.isOverdue ? (
+                                    <span className="bg-red-600 px-0.5 rounded text-[8px] shrink-0">!</span>
+                                  ) : (
+                                    isFlex && <span className="bg-black/30 px-0.5 rounded text-[7px] shrink-0">ALL-DAY</span>
+                                  )}
+                                </div>
+                                <span className="text-[9px] opacity-80 font-mono block truncate">{task.timeLabel}</span>
+                              </div>
+                              <span className="text-[8px] bg-black/20 px-1 rounded truncate w-max mt-auto">{(task.assignees || []).join(', ')}</span>
+
+                              {!isFlex && userRole === 'admin' && (
+                                <div 
+                                  className="absolute bottom-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-b"
+                                  onPointerDown={(e) => handleResizeStart(e, task, 'bottom')}
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>
@@ -2495,20 +2499,16 @@ export default function App() {
                 const dayOfWeekStr = daysOfWeek[cellDate.getDay()];
                 const isTodayCell = dateStr === formatDateKey(new Date());
 
-                const pendingDayTasks = isCurrentMonthCell 
-                  ? visibleTasks.filter(t => isTaskActiveOnDay(t, dayOfWeekStr, dateStr))
-                  : [];
-
-                const completedDayTasks = isCurrentMonthCell
-                  ? visibleTasks.filter(t => isTaskCompletedOnDay(t, dateStr))
-                  : [];
+                // FIX: Look up tasks for every day, regardless of whether it's in the current month or not.
+                const pendingDayTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, dayOfWeekStr, dateStr));
+                const completedDayTasks = visibleTasks.filter(t => isTaskCompletedOnDay(t, dateStr));
 
                 return (
                   <div 
                     key={i} 
                     onDragOver={handleDragOver}
                     onDrop={(e) => handleDropSlot(e, dateStr, null, null, false)}
-                    className={`p-1.5 flex flex-col transition hover:bg-blue-50/20 ${isCurrentMonthCell ? 'bg-white' : 'bg-gray-50/50 text-gray-300'}`}>
+                    className={`p-1.5 flex flex-col transition hover:bg-blue-50/20 ${isCurrentMonthCell ? 'bg-white' : 'bg-gray-100/50 text-gray-400'}`}>
                     <span className={`text-xs font-bold p-1 ${isTodayCell ? 'bg-[#A9B1A6] text-white rounded-full w-5 h-5 flex items-center justify-center' : 'text-gray-500'}`}>
                       {cellDate.getDate()}
                     </span>
@@ -2523,7 +2523,7 @@ export default function App() {
                             onDragEnd={handleDragEnd}
                             onClick={() => handleOpenModal(task, dateStr)}
                             style={{ backgroundColor: member.color }}
-                            className={`text-white text-[10px] font-semibold p-1 rounded truncate ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 shadow-2xs flex items-center justify-between ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}>
+                            className={`text-white text-[10px] font-semibold p-1 rounded truncate ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 shadow-2xs flex items-center justify-between ${task.isOverdue ? 'ring-2 ring-red-500' : ''} ${isCurrentMonthCell ? 'opacity-100' : 'opacity-40 grayscale'}`}>
                             <span className="truncate">{task.title}</span>
                             <div className="flex items-center gap-0.5">
                               {task.isOverdue && <span className="text-[8px] bg-red-600 px-0.5 rounded font-bold">!</span>}
@@ -2538,7 +2538,7 @@ export default function App() {
                         <div 
                           key={`completed-${task.id}-${dateStr}`}
                           onClick={() => handleOpenModal(task, dateStr)}
-                          className="bg-gray-200 text-gray-500 line-through text-[10px] font-semibold p-1 rounded truncate cursor-pointer opacity-75 flex items-center justify-between">
+                          className={`bg-gray-200 text-gray-500 line-through text-[10px] font-semibold p-1 rounded truncate cursor-pointer flex items-center justify-between ${isCurrentMonthCell ? 'opacity-75 hover:opacity-90' : 'opacity-30'}`}>
                           <span className="truncate">✓ {task.title}</span>
                         </div>
                       ))}
