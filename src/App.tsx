@@ -776,7 +776,7 @@ export default function App() {
     });
   };
 
-  const applyTaskMove = async (taskId, targetDate, targetHour, targetMemberName, updateSeries = false, sourceDateFromPrompt = null) => {
+  const applyTaskMove = async (taskId, targetDate, targetHour, targetMemberName, updateSeries = false, sourceDateFromPrompt = null, isAllDayDrop = false) => {
     const todayStr = formatDateKey(new Date());
     let dbPayloads = [];
 
@@ -784,20 +784,18 @@ export default function App() {
       const targetTask = prevTasks.find(t => t.id === taskId);
       if (!targetTask) return prevTasks;
 
-      const isFlex = targetTask.type === 'flexible' || targetTask.startHour === null || targetTask.startHour === undefined;
-      
-      let startDec = targetTask.startHour;
-      let dur = targetTask.duration || 1;
-      let sStr = targetTask.startTime;
-      let eStr = targetTask.endTime;
-      let label = targetTask.timeLabel;
-
-      if (!isFlex && targetHour !== null) {
-        startDec = targetHour;
-        sStr = decimalToTimeString(startDec);
-        eStr = decimalToTimeString(startDec + dur);
-        label = formatTimeLabel(sStr, eStr);
+      let isFlex = targetTask.type === 'flexible';
+      if (isAllDayDrop) {
+        isFlex = true;
+      } else if (targetHour !== null) {
+        isFlex = false;
       }
+      
+      let startDec = isFlex ? null : (targetHour !== null ? targetHour : (targetTask.startHour !== null ? targetTask.startHour : 9));
+      let dur = isFlex ? null : (targetTask.type === 'flexible' ? 1 : (targetTask.duration || 1));
+      let sStr = isFlex ? null : decimalToTimeString(startDec);
+      let eStr = isFlex ? null : decimalToTimeString(startDec + dur);
+      let label = isFlex ? 'All-Day' : formatTimeLabel(sStr, eStr);
 
       const effectiveSourceDate = sourceDateFromPrompt || targetTask.date;
 
@@ -851,7 +849,6 @@ export default function App() {
           ...targetTask,
           id: Date.now().toString(),
           date: targetDate,
-          seriesStartDate: targetDate, 
           activeDays: [targetDayName],
           assignees: targetMemberName ? [targetMemberName] : (targetTask.assignees || []),
           startHour: startDec,
@@ -911,7 +908,7 @@ export default function App() {
     setHoverSlot(null);
   };
 
-  const handleDropSlot = (e, targetDate, targetHour = null, targetMemberName = null) => {
+  const handleDropSlot = (e, targetDate, targetHour = null, targetMemberName = null, isAllDayDrop = false) => {
     if (userRole !== 'admin') return;
     e.preventDefault();
     
@@ -941,10 +938,11 @@ export default function App() {
         targetDate, 
         targetHour, 
         targetMemberName,
-        sourceDate: sourceDate || targetDate
+        sourceDate: sourceDate || targetDate,
+        isAllDayDrop
       });
     } else {
-      applyTaskMove(taskId, targetDate, targetHour, targetMemberName, false, sourceDate);
+      applyTaskMove(taskId, targetDate, targetHour, targetMemberName, false, sourceDate, isAllDayDrop);
     }
   };
 
@@ -2146,6 +2144,39 @@ export default function App() {
               </div>
             </div>
 
+            <div className="flex border-b border-gray-300 bg-gray-50/80 min-h-[40px] shrink-0">
+              <div className="w-20 py-2 text-center text-[10px] font-bold text-gray-500 border-r border-gray-300 flex items-center justify-center bg-gray-100">All-Day</div>
+              <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
+                {visibleMembers.map(member => {
+                  const dayDateStr = formatDateKey(currentDate);
+                  const allDayTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], dayDateStr) && t.assignees && t.assignees.includes(member.name) && t.type === 'flexible');
+                  
+                  return (
+                    <div 
+                      key={member.id} 
+                      className="p-1 border-r border-gray-300 last:border-r-0 flex flex-col gap-1 min-h-[40px]"
+                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                      onDrop={(e) => handleDropSlot(e, dayDateStr, null, member.name, true)}
+                    >
+                      {allDayTasks.map(task => (
+                        <div
+                          key={task.id}
+                          draggable={userRole === 'admin' && !resizingTaskId}
+                          onDragStart={(e) => handleDragStart(e, task.id, dayDateStr)}
+                          onDragEnd={handleDragEnd}
+                          onClick={() => handleOpenModal(task, dayDateStr)}
+                          style={{ backgroundColor: member.color }}
+                          className={`text-white text-[10px] font-semibold px-2 py-1 rounded truncate shadow-sm ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}
+                        >
+                          {task.title}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             <div className="flex-1 relative overflow-y-auto flex" style={{ maxHeight: '580px' }}>
               <div className="w-20 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
                 {dynamicTimeSlots.map(hour => (
@@ -2158,7 +2189,7 @@ export default function App() {
               <div className="flex-1 grid relative" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))`, height: `${dynamicTimeSlots.length * 80}px` }}>
                 {visibleMembers.map(member => {
                   const dayDateStr = formatDateKey(currentDate);
-                  const memberColTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], dayDateStr) && t.assignees && t.assignees.includes(member.name));
+                  const memberColTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], dayDateStr) && t.assignees && t.assignees.includes(member.name) && t.type === 'timed');
                   const layouts = computeDynamicLayouts(memberColTasks);
 
                   return (
@@ -2169,7 +2200,7 @@ export default function App() {
                             <div 
                               key={subOffset}
                               onDragOver={(e) => handleSubSlotDragOver(e, dayDateStr, hour + subOffset, member.name)}
-                              onDrop={(e) => handleDropSlot(e, dayDateStr, hour + subOffset, member.name)}
+                              onDrop={(e) => handleDropSlot(e, dayDateStr, hour + subOffset, member.name, false)}
                               className="flex-1 hover:bg-blue-50/50 transition border-b border-dashed border-gray-100 last:border-b-0"
                               title={`Schedule for ${decimalToTimeString(hour + subOffset)} - ${member.name}`}>
                             </div>
@@ -2283,6 +2314,46 @@ export default function App() {
               </div>
             </div>
 
+            <div className="flex border-b border-gray-300 bg-gray-50/80 min-h-[40px] shrink-0">
+              <div className="w-16 py-2 text-center text-[10px] font-bold text-gray-500 border-r border-gray-300 flex items-center justify-center bg-gray-100">All-Day</div>
+              <div className="flex-1 grid grid-cols-7">
+                {daysOfWeek.map((dayName, idx) => {
+                  const weekStart = getWeekStart(currentDate);
+                  const cellDate = new Date(weekStart);
+                  cellDate.setDate(cellDate.getDate() + idx);
+                  const dateStr = formatDateKey(cellDate);
+
+                  const allDayTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, dayName, dateStr) && t.type === 'flexible');
+
+                  return (
+                    <div 
+                      key={dayName} 
+                      className="p-1 border-r border-gray-300 last:border-r-0 flex flex-col gap-1 min-h-[40px]"
+                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                      onDrop={(e) => handleDropSlot(e, dateStr, null, null, true)}
+                    >
+                      {allDayTasks.map(task => {
+                        const member = getMemberConfig(task.assignees && task.assignees[0]);
+                        return (
+                          <div
+                            key={`${task.id}-${dateStr}`}
+                            draggable={userRole === 'admin' && !resizingTaskId}
+                            onDragStart={(e) => handleDragStart(e, task.id, dateStr)}
+                            onDragEnd={handleDragEnd}
+                            onClick={() => handleOpenModal(task, dateStr)}
+                            style={{ backgroundColor: member.color }}
+                            className={`text-white text-[9px] font-semibold px-1.5 py-0.5 rounded truncate shadow-sm ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}
+                          >
+                            {task.title}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             <div className="flex-1 relative overflow-y-auto flex" style={{ maxHeight: '550px' }}>
               <div className="w-16 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
                 {dynamicTimeSlots.map(hour => (
@@ -2299,7 +2370,7 @@ export default function App() {
                   cellDate.setDate(cellDate.getDate() + idx);
                   const dateStr = formatDateKey(cellDate);
 
-                  const dayColTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, dayName, dateStr));
+                  const dayColTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, dayName, dateStr) && t.type === 'timed');
                   const layouts = computeDynamicLayouts(dayColTasks);
 
                   return (
@@ -2310,7 +2381,7 @@ export default function App() {
                             <div 
                               key={subOffset}
                               onDragOver={(e) => handleSubSlotDragOver(e, dateStr, hour + subOffset, null)}
-                              onDrop={(e) => handleDropSlot(e, dateStr, hour + subOffset, null)}
+                              onDrop={(e) => handleDropSlot(e, dateStr, hour + subOffset, null, false)}
                               className="flex-1 hover:bg-blue-50/50 transition border-b border-dashed border-gray-100 last:border-b-0"
                               title={`${dateStr} @ ${decimalToTimeString(hour + subOffset)}`}>
                             </div>
@@ -2423,7 +2494,7 @@ export default function App() {
                   <div 
                     key={i} 
                     onDragOver={handleDragOver}
-                    onDrop={(e) => handleDropSlot(e, dateStr, null, null)}
+                    onDrop={(e) => handleDropSlot(e, dateStr, null, null, false)}
                     className={`p-1.5 flex flex-col transition hover:bg-blue-50/20 ${isCurrentMonthCell ? 'bg-white' : 'bg-gray-50/50 text-gray-300'}`}>
                     <span className={`text-xs font-bold p-1 ${isTodayCell ? 'bg-[#A9B1A6] text-white rounded-full w-5 h-5 flex items-center justify-center' : 'text-gray-500'}`}>
                       {cellDate.getDate()}
@@ -3186,14 +3257,14 @@ export default function App() {
 
               <div className="flex flex-col gap-2 mt-2">
                 <button 
-                  onClick={() => applyTaskMove(reschedulePrompt.task.id, reschedulePrompt.targetDate, reschedulePrompt.targetHour, reschedulePrompt.targetMemberName, false, reschedulePrompt.sourceDate)}
+                  onClick={() => applyTaskMove(reschedulePrompt.task.id, reschedulePrompt.targetDate, reschedulePrompt.targetHour, reschedulePrompt.targetMemberName, false, reschedulePrompt.sourceDate, reschedulePrompt.isAllDayDrop)}
                   className="bg-[#A9B1A6] text-white py-2.5 px-4 rounded text-xs font-bold hover:bg-gray-600 transition text-left flex justify-between items-center">
                   <span>Only This Occurrence</span>
                   <span className="text-[10px] opacity-80">(Creates standalone task)</span>
                 </button>
 
                 <button 
-                  onClick={() => applyTaskMove(reschedulePrompt.task.id, reschedulePrompt.targetDate, reschedulePrompt.targetHour, reschedulePrompt.targetMemberName, true, reschedulePrompt.sourceDate)}
+                  onClick={() => applyTaskMove(reschedulePrompt.task.id, reschedulePrompt.targetDate, reschedulePrompt.targetHour, reschedulePrompt.targetMemberName, true, reschedulePrompt.sourceDate, reschedulePrompt.isAllDayDrop)}
                   className="bg-[#333333] text-white py-2.5 px-4 rounded text-xs font-bold hover:bg-black transition text-left flex justify-between items-center">
                   <span>Entire Series / Future Tasks</span>
                   <span className="text-[10px] opacity-80">(Updates master rule)</span>
