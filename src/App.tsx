@@ -38,7 +38,7 @@ const compressImage = (file: File, maxWidth: number, maxHeight: number, quality:
             if (blob) {
               resolve(new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() }));
             } else {
-              resolve(file); // fallback to original if compression fails
+              resolve(file);
             }
           },
           'image/jpeg',
@@ -65,7 +65,6 @@ function urlBase64ToUint8Array(base64String: string) {
   return outputArray;
 }
 
-// HELPER: Subscribe current device browser to Native Web Push & save to Supabase
 const enableNativePush = async (userName: string) => {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     alert('Native Push notifications are not supported on this browser.');
@@ -104,7 +103,6 @@ const enableNativePush = async (userName: string) => {
   }
 };
 
-// HELPER: Send Lock-Screen Native Push Notification via Vercel Backend Route
 const sendNativePush = async ({ targetType, targetValue, title, message }) => {
   try {
     let query = supabase.from('profiles').select('push_subscription');
@@ -135,7 +133,6 @@ const sendNativePush = async ({ targetType, targetValue, title, message }) => {
   }
 };
 
-// --- SUPABASE DATABASE MAPPERS (camelCase <-> snake_case) ---
 const mapToDb = (t) => ({
   id: String(t.id),
   title: t.title || '',
@@ -219,9 +216,7 @@ export default function App() {
       setSession(session);
     });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
     });
 
@@ -235,7 +230,6 @@ export default function App() {
   const [teamMembers, setTeamMembers] = useState([]);
   const [activeEmployeeFilters, setActiveEmployeeFilters] = useState([]);
 
-  // LOCAL DEVICE PREFERENCES
   const [hiddenCompanies, setHiddenCompanies] = useState(() => JSON.parse(localStorage.getItem('hiddenCompanies') || '[]'));
   const [hiddenMembers, setHiddenMembers] = useState(() => JSON.parse(localStorage.getItem('hiddenMembers') || '[]'));
 
@@ -247,7 +241,6 @@ export default function App() {
     localStorage.setItem('hiddenMembers', JSON.stringify(hiddenMembers));
   }, [hiddenMembers]);
 
-  // SERVICE WORKER REGISTRATION
   useEffect(() => {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(console.error);
@@ -257,19 +250,15 @@ export default function App() {
   const [companies, setCompanies] = useState([]);
   const [activeCompanyFilters, setActiveCompanyFilters] = useState([]);
 
-  // FETCH LIVE DATA: TEAMS, PROFILES, AND NOW COMPANIES
   useEffect(() => {
     async function loadData() {
-      // Load Companies
       const { data: companyData, error: compErr } = await supabase.from('companies').select('*');
       if (companyData && !compErr) {
         const compNames = companyData.map(c => c.name);
         setCompanies(compNames);
-        // Only set active filters if they haven't been touched yet
         if (activeCompanyFilters.length === 0) setActiveCompanyFilters(compNames);
       }
 
-      // Load Team Profiles
       const { data: allProfiles, error: teamErr } = await supabase.from('profiles').select('*');
       if (allProfiles && !teamErr) {
         const mappedMembers = allProfiles.map(p => ({
@@ -284,7 +273,6 @@ export default function App() {
         if (activeEmployeeFilters.length === 0) setActiveEmployeeFilters(mappedMembers.map(m => m.name));
       }
 
-      // Set Current User
       if (session?.user?.id) {
         const { data: myProfile, error: profileErr } = await supabase
           .from('profiles')
@@ -314,13 +302,26 @@ export default function App() {
   };
 
   const [currentDate, setCurrentDate] = useState(new Date());
+  
+  // HCP SEARCH ENGINE STATE
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const searchRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (searchRef.current && !searchRef.current.contains(e.target)) {
+        setIsSearchFocused(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const notifyChannel = useRef(null);
 
-  // LIVE NETWORK BROADCASTING FOR BELL ICON
   useEffect(() => {
     notifyChannel.current = supabase.channel('app-notifications')
       .on('broadcast', { event: 'admin-alert' }, (payload) => {
@@ -335,7 +336,6 @@ export default function App() {
     }
   }, [userRole]);
 
-  // MASTER ADMIN ALERT TRIGGER
   const triggerAdminAlert = (bellText, type, pushTitle, pushMessage) => {
     sendNativePush({
       targetType: 'role',
@@ -416,7 +416,6 @@ export default function App() {
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const minuteSubSlots = [0, 0.25, 0.5, 0.75];
 
-  // LIVE DATABASE FETCHING WITH SESSION-GATED REALTIME SUBSCRIPTION
   const [tasks, setTasks] = useState([]);
   const [isDbLoading, setIsDbLoading] = useState(true);
 
@@ -723,7 +722,6 @@ export default function App() {
     };
   }, [tasks]);
 
-  // OVERDUE CHECKER
   useEffect(() => {
     const todayStr = formatDateKey(new Date());
 
@@ -1050,15 +1048,11 @@ export default function App() {
 
     const trimmed = newName.trim();
 
-    // Optimistic UI updates
     setCompanies(prev => prev.map(c => c === oldName ? trimmed : c));
     setActiveCompanyFilters(prev => prev.map(c => c === oldName ? trimmed : c));
     setTasks(prev => prev.map(t => t.company === oldName ? { ...t, company: trimmed } : t));
 
-    // Update Companies table
     await supabase.from('companies').update({ name: trimmed }).eq('name', oldName);
-    
-    // Update all tasks with old company name
     await supabase.from('tasks').update({ company: trimmed }).eq('company', oldName);
 
     setEditingCompany(null);
@@ -1070,18 +1064,15 @@ export default function App() {
       return alert('You must have at least one company in the system.');
     }
 
-    // Check if there are active tasks using this company to prevent orphaned tasks
     const tasksUsingCompany = tasks.filter(t => t.company === nameToDelete);
     if (tasksUsingCompany.length > 0) {
       const confirmDelete = window.confirm(`There are ${tasksUsingCompany.length} tasks associated with ${nameToDelete}. Deleting this company will leave those tasks without a valid company tag. Are you sure you want to proceed?`);
       if (!confirmDelete) return;
     }
 
-    // Optimistic UI Update
     setCompanies(prev => prev.filter(c => c !== nameToDelete));
     setActiveCompanyFilters(prev => prev.filter(c => c !== nameToDelete));
     
-    // Cloud Delete
     await supabase.from('companies').delete().eq('name', nameToDelete);
   };
 
@@ -1089,12 +1080,10 @@ export default function App() {
     const newName = newCompanyInput.trim();
     if (!newName || companies.includes(newName)) return;
 
-    // Optimistic UI Update
     setCompanies(prev => [...prev, newName]);
     setActiveCompanyFilters(prev => [...prev, newName]);
     setNewCompanyInput('');
 
-    // Cloud Insert
     const newId = crypto.randomUUID();
     await supabase.from('companies').insert({ id: newId, name: newName });
   };
@@ -1112,7 +1101,7 @@ export default function App() {
     setIsLongTerm(false);
     setRecurrenceType('once');
     setActiveDays([]);
-    setCadenceDays(7); // Default to 1 week
+    setCadenceDays(7);
     setChainedSteps([]);
     setRequiresPhoto(false);
     setRequiresComment(false);
@@ -1663,17 +1652,34 @@ export default function App() {
 
     const isCompanyMatch = activeCompanyFilters.includes(t.company);
 
-    const isSearchMatch = !searchQuery.trim() || 
-      (t.title && t.title.toLowerCase().includes(searchQuery.toLowerCase())) || 
-      (t.desc && t.desc.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (t.assignees && t.assignees.some(a => a && a.toLowerCase().includes(searchQuery.toLowerCase())));
-
-    return isAssigneeMatch && isCompanyMatch && isSearchMatch;
+    return isAssigneeMatch && isCompanyMatch;
   });
 
   const backlogTasks = tasks.filter(t => !t.isLongTerm && (!t.assignees || t.assignees.length === 0) && t.status !== 'completed' && activeCompanyFilters.includes(t.company) && !hiddenCompanies.includes(t.company));
   
   const longTermTasks = visibleTasks.filter(t => t.isLongTerm && t.status !== 'completed');
+
+  // HCP SEARCH CATEGORIZATION ENGINE
+  const searchResults = {
+    tasks: tasks.filter(t => 
+      searchQuery.trim() && !hiddenCompanies.includes(t.company) && (
+        t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        t.desc.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (t.comments && t.comments.some(c => c.toLowerCase().includes(searchQuery.toLowerCase())))
+      )
+    ).slice(0, 5),
+    companies: companies.filter(c => 
+      searchQuery.trim() && !hiddenCompanies.includes(c) && c.toLowerCase().includes(searchQuery.toLowerCase())
+    ),
+    members: teamMembers.filter(m => 
+      searchQuery.trim() && !hiddenMembers.includes(m.name) && (
+        m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        m.email.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    )
+  };
+
+  const hasSearchResults = searchResults.tasks.length > 0 || searchResults.companies.length > 0 || searchResults.members.length > 0;
 
   const isTaskActiveOnDay = (task, dayOfWeekStr, dateStr) => {
     if (!task) return false;
@@ -1688,7 +1694,6 @@ export default function App() {
       if (startDate && dateStr < startDate) return false;
       if (!task.activeDays || !task.activeDays.includes(dayOfWeekStr)) return false;
 
-      // Week interval logic: Ensure the task only shows up on the defined week cadence
       const intervalWeeks = Math.max(1, Math.round((task.cadenceDays || 7) / 7));
       if (intervalWeeks > 1 && startDate) {
         const parseDate = (ds) => {
@@ -1698,7 +1703,6 @@ export default function App() {
         const sDate = parseDate(startDate);
         const cDate = parseDate(dateStr);
 
-        // Find the Sunday (start of week) for both the origin start date and current date
         const sSunday = new Date(sDate);
         sSunday.setDate(sDate.getDate() - sDate.getDay());
 
@@ -1760,8 +1764,8 @@ export default function App() {
     <div className="min-h-screen bg-[#A9B1A6] p-4 sm:p-8 font-sans text-[#333333]">
       <div className="max-w-[95%] mx-auto bg-[#F4F3ED] p-6 rounded-lg shadow-sm min-h-[850px] flex flex-col relative">
         
-        {/* REAL USER SESSION HEADER */}
-        <div className="bg-[#333333] text-white px-4 py-2 rounded-md mb-4 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs shadow-md">
+        {/* REAL USER SESSION HEADER WITH HCP GLOBAL SEARCH */}
+        <div className="bg-[#333333] text-white px-4 py-2 rounded-md mb-4 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs shadow-md z-40 relative">
           <div className="flex items-center gap-2">
             <span className="font-bold text-gray-400 uppercase tracking-wider">User:</span>
             <span className="text-white font-semibold">{currentProfile?.name || session?.user?.email}</span>
@@ -1771,15 +1775,112 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
-            <input 
-              type="text" 
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search active & past tasks..." 
-              className="px-3 py-1 rounded bg-gray-800 text-white placeholder-gray-400 text-xs focus:outline-none focus:ring-1 focus:ring-[#A9B1A6] w-full sm:w-64" />
-            {searchQuery && (
-              <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-white font-bold">✕</button>
-            )}
+            
+            {/* HCP OVERLAY SEARCH INPUT & DROPDOWN */}
+            <div className="relative w-full sm:w-80" ref={searchRef}>
+              <div className="flex items-center bg-gray-800 rounded border border-gray-700 focus-within:border-[#A9B1A6] px-2.5 py-1">
+                <span className="text-gray-400 mr-2 text-xs">🔍</span>
+                <input 
+                  type="text" 
+                  value={searchQuery}
+                  onFocus={() => setIsSearchFocused(true)}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setIsSearchFocused(true);
+                  }}
+                  placeholder="Search jobs, companies, notes..." 
+                  className="bg-transparent text-white placeholder-gray-400 text-xs focus:outline-none w-full" 
+                />
+                {searchQuery && (
+                  <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-white font-bold text-xs ml-1">✕</button>
+                )}
+              </div>
+
+              {/* HCP STYLE OVERLAY DROPDOWN PANEL */}
+              {isSearchFocused && searchQuery.trim().length > 0 && (
+                <div className="absolute left-0 right-0 mt-2 bg-white rounded-lg shadow-2xl border border-gray-300 text-gray-800 z-50 overflow-hidden animate-fade-in max-h-96 overflow-y-auto">
+                  {hasSearchResults ? (
+                    <div className="flex flex-col">
+                      
+                      {/* TASKS SECTION */}
+                      {searchResults.tasks.length > 0 && (
+                        <div className="p-2 border-b border-gray-100">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 px-2 block mb-1">📋 Jobs & Tasks</span>
+                          {searchResults.tasks.map(task => (
+                            <div 
+                              key={task.id}
+                              onClick={() => {
+                                handleOpenModal(task, task.date || formatDateKey(new Date()));
+                                setIsSearchFocused(false);
+                              }}
+                              className="p-2 hover:bg-blue-50 rounded cursor-pointer transition flex items-center justify-between group"
+                            >
+                              <div className="min-w-0 pr-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-xs text-gray-900 group-hover:text-blue-600 truncate">{task.title}</span>
+                                  <span className="text-[9px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-bold shrink-0">{task.company}</span>
+                                </div>
+                                <p className="text-[10px] text-gray-500 truncate mt-0.5">{task.desc}</p>
+                              </div>
+                              <span className="text-[10px] font-mono text-gray-400 shrink-0">{task.date || 'Unscheduled'}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* COMPANIES SECTION */}
+                      {searchResults.companies.length > 0 && (
+                        <div className="p-2 border-b border-gray-100 bg-gray-50/50">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 px-2 block mb-1">🏢 Companies</span>
+                          {searchResults.companies.map(comp => (
+                            <div 
+                              key={comp}
+                              onClick={() => {
+                                setActiveCompanyFilters([comp]);
+                                setIsSearchFocused(false);
+                              }}
+                              className="p-1.5 hover:bg-gray-200/60 rounded cursor-pointer transition flex items-center justify-between text-xs font-bold text-gray-700"
+                            >
+                              <span>{comp}</span>
+                              <span className="text-[9px] text-blue-600 font-semibold">Filter Dashboard →</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* TEAM MEMBERS SECTION */}
+                      {searchResults.members.length > 0 && (
+                        <div className="p-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 px-2 block mb-1">👤 Team Members</span>
+                          {searchResults.members.map(member => (
+                            <div 
+                              key={member.id}
+                              onClick={() => {
+                                setActiveEmployeeFilters([member.name]);
+                                setIsSearchFocused(false);
+                              }}
+                              className="p-1.5 hover:bg-gray-100 rounded cursor-pointer transition flex items-center justify-between"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: member.color }}></span>
+                                <span className="font-bold text-xs text-gray-800">{member.name}</span>
+                              </div>
+                              <span className="text-[9px] text-gray-400">{member.email}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                    </div>
+                  ) : (
+                    <div className="p-4 text-center text-xs text-gray-400 italic">
+                      No results found for "{searchQuery}"
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <button 
               onClick={handleLogout} 
               className="px-3 py-1 font-bold text-white transition bg-red-600 rounded hover:bg-red-700 shrink-0"
@@ -2597,7 +2698,6 @@ export default function App() {
                 const dayOfWeekStr = daysOfWeek[cellDate.getDay()];
                 const isTodayCell = dateStr === formatDateKey(new Date());
 
-                // FIX: Look up tasks for every day, regardless of whether it's in the current month or not.
                 const pendingDayTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, dayOfWeekStr, dateStr));
                 const completedDayTasks = visibleTasks.filter(t => isTaskCompletedOnDay(t, dateStr));
 
@@ -2996,7 +3096,6 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* UNIVERSAL ATTACHMENTS & PROOF OF WORK */}
                   {!isCurrentInstanceCompleted && (
                     <div className="bg-white p-3 rounded border border-amber-300 flex justify-between items-center my-1">
                       <div className="flex flex-col">
@@ -3017,7 +3116,6 @@ export default function App() {
                             let file = e.target.files?.[0];
                             if (!file) return;
 
-                            // Apply compression if it's an image
                             if (file.type.startsWith('image/')) {
                               file = await compressImage(file, 1280, 1280, 0.7);
                             }
@@ -3428,7 +3526,6 @@ export default function App() {
                 <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
               </div>
 
-              {/* PUSH NOTIFICATION SETTINGS CARD */}
               <div className="bg-white p-4 rounded-lg border border-amber-300 flex justify-between items-center shadow-2xs">
                 <div>
                   <h4 className="font-bold text-xs uppercase tracking-wider text-amber-900">Device Push Alerts</h4>
@@ -3441,10 +3538,8 @@ export default function App() {
                 </button>
               </div>
 
-              {/* ADMIN ONLY CONTROLS */}
               {userRole === 'admin' && (
                 <>
-                  {/* NEW DASHBOARD VISIBILITY MODULE */}
                   <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3 shadow-2xs">
                     <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Dashboard Visibility (This Device)</h4>
                     <p className="text-[10px] text-gray-500">Uncheck items below to completely hide them from your personal dashboard filters and calendar views.</p>
