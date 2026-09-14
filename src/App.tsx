@@ -2672,10 +2672,6 @@ export default function App() {
                           />
                           <span className="text-xs font-semibold text-gray-600">weeks</span>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-gray-600">Generation Time:</span>
-                          <input type="time" value={generationTime} onChange={(e) => setGenerationTime(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-sm w-32 focus:outline-none" />
-                        </div>
                       </div>
                     </div>
                   )}
