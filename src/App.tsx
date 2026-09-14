@@ -233,6 +233,18 @@ export default function App() {
   const [teamMembers, setTeamMembers] = useState([]);
   const [activeEmployeeFilters, setActiveEmployeeFilters] = useState([]);
 
+  // LOCAL DEVICE PREFERENCES
+  const [hiddenCompanies, setHiddenCompanies] = useState(() => JSON.parse(localStorage.getItem('hiddenCompanies') || '[]'));
+  const [hiddenMembers, setHiddenMembers] = useState(() => JSON.parse(localStorage.getItem('hiddenMembers') || '[]'));
+
+  useEffect(() => {
+    localStorage.setItem('hiddenCompanies', JSON.stringify(hiddenCompanies));
+  }, [hiddenCompanies]);
+
+  useEffect(() => {
+    localStorage.setItem('hiddenMembers', JSON.stringify(hiddenMembers));
+  }, [hiddenMembers]);
+
   // SERVICE WORKER REGISTRATION
   useEffect(() => {
     if ('serviceWorker' in navigator) {
@@ -1582,14 +1594,16 @@ export default function App() {
   };
 
   const visibleMembers = userRole === 'admin' 
-    ? teamMembers.filter(m => activeEmployeeFilters.includes(m.name))
+    ? teamMembers.filter(m => activeEmployeeFilters.includes(m.name) && !hiddenMembers.includes(m.name))
     : teamMembers.filter(m => m.name === currentUserName);
 
   const visibleTasks = tasks.filter(t => {
     if (!t || !t.assignees) return false;
+    
+    if (hiddenCompanies.includes(t.company)) return false;
 
     const isAssigneeMatch = userRole === 'admin' 
-      ? (t.assignees.length === 0 || t.assignees.some(a => activeEmployeeFilters.includes(a)))
+      ? (t.assignees.length === 0 || t.assignees.some(a => activeEmployeeFilters.includes(a) && !hiddenMembers.includes(a)))
       : t.assignees.includes(currentUserName);
 
     const isCompanyMatch = activeCompanyFilters.includes(t.company);
@@ -1602,7 +1616,7 @@ export default function App() {
     return isAssigneeMatch && isCompanyMatch && isSearchMatch;
   });
 
-  const backlogTasks = tasks.filter(t => (!t.assignees || t.assignees.length === 0) && t.status !== 'completed' && activeCompanyFilters.includes(t.company));
+  const backlogTasks = tasks.filter(t => (!t.assignees || t.assignees.length === 0) && t.status !== 'completed' && activeCompanyFilters.includes(t.company) && !hiddenCompanies.includes(t.company));
 
   const isTaskActiveOnDay = (task, dayOfWeekStr, dateStr) => {
     if (!task) return false;
@@ -1799,7 +1813,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Companies:</span>
                 <div className="flex flex-wrap gap-1">
-                  {companies.map(comp => {
+                  {companies.filter(c => !hiddenCompanies.includes(c)).map(comp => {
                     const isActive = activeCompanyFilters.includes(comp);
                     return (
                       <button
@@ -1818,7 +1832,7 @@ export default function App() {
               <div className="flex items-center gap-2 border-l border-gray-200 pl-4">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Team:</span>
                 <div className="flex flex-wrap gap-1">
-                  {teamMembers.map(m => {
+                  {teamMembers.filter(m => !hiddenMembers.includes(m.name)).map(m => {
                     const isActive = activeEmployeeFilters.includes(m.name);
                     return (
                       <button
@@ -1901,7 +1915,7 @@ export default function App() {
                       </h2>
                     </div>
 
-                    {companies.filter(c => activeCompanyFilters.includes(c)).map(company => {
+                    {companies.filter(c => activeCompanyFilters.includes(c) && !hiddenCompanies.includes(c)).map(company => {
                       
                       let compWeekTasks = [];
                       let compWeekCompleted = [];
@@ -3325,6 +3339,49 @@ export default function App() {
               {/* ADMIN ONLY CONTROLS */}
               {userRole === 'admin' && (
                 <>
+                  {/* NEW DASHBOARD VISIBILITY MODULE */}
+                  <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3 shadow-2xs">
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Dashboard Visibility (This Device)</h4>
+                    <p className="text-[10px] text-gray-500">Uncheck items below to completely hide them from your personal dashboard filters and calendar views.</p>
+                    
+                    <div className="flex gap-6 mt-1">
+                      <div className="w-1/2 flex flex-col gap-2">
+                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Companies</span>
+                        {companies.map(comp => (
+                          <label key={comp} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                            <input 
+                              type="checkbox" 
+                              checked={!hiddenCompanies.includes(comp)} 
+                              onChange={(e) => {
+                                if (e.target.checked) setHiddenCompanies(prev => prev.filter(c => c !== comp));
+                                else setHiddenCompanies(prev => [...prev, comp]);
+                              }} 
+                              className="accent-[#A9B1A6]" 
+                            /> 
+                            {comp}
+                          </label>
+                        ))}
+                      </div>
+                      <div className="w-1/2 flex flex-col gap-2">
+                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Team Members</span>
+                        {teamMembers.map(m => (
+                          <label key={m.id} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                            <input 
+                              type="checkbox" 
+                              checked={!hiddenMembers.includes(m.name)} 
+                              onChange={(e) => {
+                                if (e.target.checked) setHiddenMembers(prev => prev.filter(n => n !== m.name));
+                                else setHiddenMembers(prev => [...prev, m.name]);
+                              }} 
+                              className="accent-[#A9B1A6]" 
+                            /> 
+                            {m.name}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="bg-white p-3 rounded-lg border border-gray-200">
                     <div className="flex justify-between items-center mb-2">
                       <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500">Active Team Members</h4>
