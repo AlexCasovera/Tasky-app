@@ -419,6 +419,13 @@ export default function App() {
   const [tasks, setTasks] = useState([]);
   const [isDbLoading, setIsDbLoading] = useState(true);
 
+  // DYNAMIC OVERDUE CALCULATOR (Ensures visual UI never reverts)
+  const isTaskPastDue = (task) => {
+    if (!task.date || task.date.trim() === '') return false;
+    const todayStr = formatDateKey(new Date());
+    return task.date < todayStr && task.status !== 'completed';
+  };
+
   useEffect(() => {
     if (!session) return;
 
@@ -430,6 +437,7 @@ export default function App() {
         const mapped = data.map(mapFromDb);
         setTasks(mapped);
 
+        // ANTI-ORPHANING FAILSAFE
         const missingCompanies = [...new Set(mapped.map(t => t.company).filter(c => c && !companies.includes(c)))];
         if (missingCompanies.length > 0) {
           setCompanies(prev => [...new Set([...prev, ...missingCompanies])]);
@@ -456,6 +464,37 @@ export default function App() {
       supabase.removeChannel(channel);
     };
   }, [session, companies]);
+
+  // SAFELY TRIGGER ADMIN ALERTS FOR OVERDUE TASKS
+  useEffect(() => {
+    if (tasks.length === 0) return;
+
+    const tasksToAlert = tasks.filter(t => isTaskPastDue(t) && !t.overdueNotified);
+
+    if (tasksToAlert.length > 0) {
+      tasksToAlert.forEach(async (task) => {
+        const assigneeLabel = task.assignees && task.assignees.length > 0 ? task.assignees.join(', ') : 'Unassigned';
+        
+        triggerAdminAlert(
+          `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was not completed by ${task.date}`,
+          'overdue',
+          '⚠️ Task Overdue Alert',
+          `"${task.title}" (${assigneeLabel}) was not completed by ${task.date}`
+        );
+
+        const { error } = await supabase.from('tasks').update({ is_overdue: true, overdue_notified: true }).eq('id', task.id);
+        if (error) console.error("Could not save overdue state to DB (Likely RLS blocking):", error);
+      });
+
+      // Update local state to prevent spam loops in this session
+      setTasks(prev => prev.map(p => {
+        if (tasksToAlert.some(t => t.id === p.id)) {
+          return { ...p, isOverdue: true, overdueNotified: true };
+        }
+        return p;
+      }));
+    }
+  }, [tasks.length]);
 
   const masterCompanyList = [...new Set([...companies, ...tasks.map(t => t.company).filter(Boolean)])];
 
@@ -730,49 +769,6 @@ export default function App() {
       window.removeEventListener('pointerup', handleUp);
     };
   }, [tasks]);
-
-  // OVERDUE CHECKER - Fixed race condition using tasks.length dependency
-  useEffect(() => {
-    if (tasks.length === 0) return;
-
-    const todayStr = formatDateKey(new Date());
-
-    setTasks(prevTasks => {
-      let changed = false;
-      const updated = prevTasks.map(task => {
-        const isPastDue = task.date && task.date.trim() !== '' && task.date < todayStr && task.status !== 'completed';
-
-        if (isPastDue && !task.overdueNotified) {
-          changed = true;
-          const assigneeLabel = task.assignees && task.assignees.length > 0 ? task.assignees.join(', ') : 'Unassigned';
-          
-          triggerAdminAlert(
-            `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was not completed by ${task.date}`,
-            'overdue',
-            '⚠️ Task Overdue Alert',
-            `"${task.title}" (${assigneeLabel}) was not completed by ${task.date}`
-          );
-
-          return { ...task, isOverdue: true, overdueNotified: true };
-        } else if (!isPastDue && task.isOverdue) {
-          changed = true;
-          return { ...task, isOverdue: false, overdueNotified: false };
-        }
-        return task;
-      });
-
-      if (changed) {
-        updated.forEach(t => {
-          if (t.isOverdue || t.overdueNotified) {
-            supabase.from('tasks').update({ is_overdue: t.isOverdue, overdue_notified: t.overdueNotified }).eq('id', t.id);
-          }
-        });
-        return updated;
-      }
-
-      return prevTasks;
-    });
-  }, [userRole, tasks.length]);
 
   const handleDragStart = (e, taskId, sourceDate = null) => {
     if (userRole !== 'admin') return;
@@ -1684,13 +1680,6 @@ export default function App() {
   
   const longTermTasks = visibleTasks.filter(t => t.isLongTerm && t.status !== 'completed');
 
-  // OVERDUE TASKS - DYNAMIC UI EVALUATION (Prevents race conditions)
-  const todayStringForOverdue = formatDateKey(new Date());
-  const overdueTasks = visibleTasks.filter(t => {
-    const isPastDue = t.date && t.date.trim() !== '' && t.date < todayStringForOverdue && t.status !== 'completed';
-    return isPastDue || (t.isOverdue && t.status !== 'completed');
-  });
-
   // HCP SEARCH CATEGORIZATION ENGINE
   const searchResults = {
     tasks: tasks.filter(t => 
@@ -2240,7 +2229,7 @@ export default function App() {
                                     <div 
                                       key={`${task.id}-${task.instanceDate}`}
                                       onClick={() => handleOpenModal(task, task.instanceDate)}
-                                      className={`bg-white p-3 rounded border-l-4 ${task.isOverdue ? 'border-red-600 bg-red-50/50 ring-1 ring-red-400' : style.border} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-50 transition gap-3`}>
+                                      className={`bg-white p-3 rounded border-l-4 ${isTaskPastDue(task) ? 'border-red-600 bg-red-50/50 ring-1 ring-red-400' : style.border} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-50 transition gap-3`}>
                                       
                                       <div className="flex items-start sm:items-center gap-3 sm:gap-4 w-full sm:w-2/3">
                                         <div className="flex flex-col items-center justify-center bg-gray-50 rounded px-2.5 py-1 min-w-[50px] border border-gray-200 shrink-0">
@@ -2253,7 +2242,8 @@ export default function App() {
                                         <div className="truncate pr-2 w-full">
                                           <div className="flex items-center gap-2 flex-wrap">
                                             <h3 className="font-bold text-sm truncate">{task.title}</h3>
-                                            {task.isOverdue && <span className="text-[9px] bg-red-600 text-white font-bold px-1.5 py-0.5 rounded animate-pulse shrink-0">OVERDUE</span>}
+                                            {task.company && <span className="text-[9px] bg-gray-200 text-gray-700 px-1 py-0.5 rounded">{task.company}</span>}
+                                            {isTaskPastDue(task) && <span className="text-[10px] bg-red-600 text-white font-bold px-1.5 py-0.5 rounded animate-pulse">OVERDUE</span>}
                                             {task.recurrenceType === 'completion' && <span className="text-[9px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded shrink-0">🔄</span>}
                                           </div>
                                           <p className="text-[11px] text-gray-500 truncate">{task.desc}</p>
@@ -2343,14 +2333,14 @@ export default function App() {
                             <div 
                               key={task.id}
                               onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                              className={`bg-white p-3 sm:p-4 rounded border-l-4 ${task.isOverdue ? 'border-red-600 bg-red-50/50 ring-1 ring-red-400' : style.border} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-50 transition gap-3 sm:gap-0`}>
+                              className={`bg-white p-3 sm:p-4 rounded border-l-4 ${isTaskPastDue(task) ? 'border-red-600 bg-red-50/50 ring-1 ring-red-400' : style.border} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-50 transition gap-3 sm:gap-0`}>
                               <div className="w-full sm:w-2/3 flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
                                 <span className="font-mono text-[10px] sm:text-sm font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200 shrink-0 self-start sm:self-auto">{task.timeLabel}</span>
                                 <div className="min-w-0 w-full">
                                   <div className="flex flex-wrap items-center gap-2">
                                     <h3 className="font-bold text-base sm:text-lg truncate">{task.title}</h3>
                                     <span className="text-[9px] bg-gray-200 text-gray-700 px-1 py-0.5 rounded">{task.company}</span>
-                                    {task.isOverdue && <span className="text-[10px] bg-red-600 text-white font-bold px-1.5 py-0.5 rounded animate-pulse">OVERDUE</span>}
+                                    {isTaskPastDue(task) && <span className="text-[10px] bg-red-600 text-white font-bold px-1.5 py-0.5 rounded animate-pulse">OVERDUE</span>}
                                     {task.recurrenceType === 'completion' && <span className="text-[10px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded">🔄 Interval</span>}
                                   </div>
                                   <p className="text-xs sm:text-sm text-gray-500 truncate">{task.desc}</p>
@@ -2452,7 +2442,7 @@ export default function App() {
                             onDragEnd={handleDragEnd}
                             onClick={() => handleOpenModal(task, dayDateStr)}
                             style={{ backgroundColor: member.color }}
-                            className={`text-white text-[10px] font-semibold px-2 py-1 rounded truncate shadow-sm ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}
+                            className={`text-white text-[10px] font-semibold px-2 py-1 rounded truncate shadow-sm ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition ${isTaskPastDue(task) ? 'ring-2 ring-red-500' : ''}`}
                           >
                             {task.title}
                           </div>
@@ -2533,7 +2523,7 @@ export default function App() {
                                 width: layout.width, 
                                 backgroundColor: member.color 
                               }}
-                              className={`absolute text-white rounded-md p-2 shadow-md border-l-4 ${task.isOverdue ? 'border-red-500 ring-2 ring-red-400' : 'border-black/20'} ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden ${isFlex ? 'opacity-95' : ''}`}>
+                              className={`absolute text-white rounded-md p-2 shadow-md border-l-4 ${isTaskPastDue(task) ? 'border-red-500 ring-2 ring-red-400' : 'border-black/20'} ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden ${isFlex ? 'opacity-95' : ''}`}>
                               
                               {!isFlex && userRole === 'admin' && (
                                 <div 
@@ -2547,7 +2537,7 @@ export default function App() {
                                   <h4 className="font-bold text-xs leading-tight drop-shadow-sm truncate">
                                     {task.title}
                                   </h4>
-                                  {task.isOverdue ? (
+                                  {isTaskPastDue(task) ? (
                                     <span className="bg-red-600 text-[8px] font-bold px-1 rounded shrink-0">OVERDUE</span>
                                   ) : (
                                     isFlex && <span className="bg-black/30 text-[8px] font-bold px-1 rounded shrink-0">ALL-DAY</span>
@@ -2630,7 +2620,7 @@ export default function App() {
                               onDragEnd={handleDragEnd}
                               onClick={() => handleOpenModal(task, dateStr)}
                               style={{ backgroundColor: member.color }}
-                              className={`text-white text-[9px] font-semibold px-1.5 py-0.5 rounded truncate shadow-sm ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition ${task.isOverdue ? 'ring-2 ring-red-500' : ''}`}
+                              className={`text-white text-[9px] font-semibold px-1.5 py-0.5 rounded truncate shadow-sm ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition ${isTaskPastDue(task) ? 'ring-2 ring-red-500' : ''}`}
                             >
                               {task.title}
                             </div>
@@ -2714,7 +2704,7 @@ export default function App() {
                                 width: layout.width, 
                                 backgroundColor: member.color 
                               }}
-                              className={`absolute text-white rounded p-1.5 shadow ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 transition z-10 flex flex-col justify-between overflow-hidden ${task.isOverdue ? 'ring-2 ring-red-500' : ''} ${isFlex ? 'opacity-95' : ''}`}>
+                              className={`absolute text-white rounded p-1.5 shadow ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 transition z-10 flex flex-col justify-between overflow-hidden ${isTaskPastDue(task) ? 'ring-2 ring-red-500' : ''} ${isFlex ? 'opacity-95' : ''}`}>
                               
                               {!isFlex && userRole === 'admin' && (
                                 <div 
@@ -2726,7 +2716,7 @@ export default function App() {
                               <div>
                                 <div className="flex justify-between items-center text-[10px] font-bold leading-tight">
                                   <span className="truncate">{task.title}</span>
-                                  {task.isOverdue ? (
+                                  {isTaskPastDue(task) ? (
                                     <span className="bg-red-600 px-0.5 rounded text-[8px] shrink-0">!</span>
                                   ) : (
                                     isFlex && <span className="bg-black/30 px-0.5 rounded text-[7px] shrink-0">ALL-DAY</span>
@@ -2795,10 +2785,10 @@ export default function App() {
                             onDragEnd={handleDragEnd}
                             onClick={() => handleOpenModal(task, dateStr)}
                             style={{ backgroundColor: member.color }}
-                            className={`text-white text-[10px] font-semibold p-1 rounded truncate ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 shadow-2xs flex items-center justify-between ${task.isOverdue ? 'ring-2 ring-red-500' : ''} ${isCurrentMonthCell ? 'opacity-100' : 'opacity-40 grayscale'}`}>
+                            className={`text-white text-[10px] font-semibold p-1 rounded truncate ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 shadow-2xs flex items-center justify-between ${isTaskPastDue(task) ? 'ring-2 ring-red-500' : ''} ${isCurrentMonthCell ? 'opacity-100' : 'opacity-40 grayscale'}`}>
                             <span className="truncate">{task.title}</span>
                             <div className="flex items-center gap-0.5">
-                              {task.isOverdue && <span className="text-[8px] bg-red-600 px-0.5 rounded font-bold">!</span>}
+                              {isTaskPastDue(task) && <span className="text-[8px] bg-red-600 px-0.5 rounded font-bold">!</span>}
                               {task.recurrenceType === 'completion' && <span className="text-[8px] bg-black/20 px-0.5 rounded">🔄</span>}
                               {task.recurrenceType === 'fixed' && <span className="text-[8px] bg-black/20 px-0.5 rounded font-mono">↻</span>}
                             </div>
@@ -2887,6 +2877,7 @@ export default function App() {
                           checked={isLongTerm} 
                           onChange={(e) => {
                             setIsLongTerm(e.target.checked);
+                            // SMART CLEAR logic
                             if (e.target.checked && taskDate === formatDateKey(new Date())) {
                               setTaskDate('');
                             } else if (!e.target.checked && taskDate === '') {
@@ -3077,7 +3068,7 @@ export default function App() {
                   <div className="flex items-center gap-2">
                     <h2 className="text-2xl font-serif font-bold">{selectedTask.title}</h2>
                     <span className="text-[10px] bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded font-bold">{selectedTask.company}</span>
-                    {selectedTask.isOverdue && <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded">OVERDUE</span>}
+                    {isTaskPastDue(selectedTask) && <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded">OVERDUE</span>}
                   </div>
                 </div>
                 <button onClick={() => setSelectedTask(null)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
@@ -3085,7 +3076,7 @@ export default function App() {
 
               {!isEditing ? (
                 <>
-                  {selectedTask.isOverdue && !isCurrentInstanceCompleted && (
+                  {isTaskPastDue(selectedTask) && !isCurrentInstanceCompleted && (
                     <div className="bg-red-50 border border-red-400 text-red-800 text-xs font-bold px-3 py-2 rounded mb-1 flex items-center gap-2">
                       <span>🚨</span> THIS TASK IS PAST DUE. Please complete the work or adjust the deadline.
                     </div>
