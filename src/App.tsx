@@ -1680,6 +1680,13 @@ export default function App() {
   
   const longTermTasks = visibleTasks.filter(t => t.isLongTerm && t.status !== 'completed');
 
+  // --- RESTORED MISSING VARIABLE ---
+  const todayStrUI = formatDateKey(new Date());
+  const overdueTasks = visibleTasks.filter(t => {
+    const isPastDue = t.date && t.date.trim() !== '' && t.date < todayStrUI && t.status !== 'completed';
+    return isPastDue || (t.isOverdue && t.status !== 'completed');
+  });
+
   // HCP SEARCH CATEGORIZATION ENGINE
   const searchResults = {
     tasks: tasks.filter(t => 
@@ -2877,7 +2884,6 @@ export default function App() {
                           checked={isLongTerm} 
                           onChange={(e) => {
                             setIsLongTerm(e.target.checked);
-                            // SMART CLEAR logic
                             if (e.target.checked && taskDate === formatDateKey(new Date())) {
                               setTaskDate('');
                             } else if (!e.target.checked && taskDate === '') {
