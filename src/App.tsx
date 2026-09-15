@@ -303,6 +303,7 @@ export default function App() {
 
   const [currentDate, setCurrentDate] = useState(new Date());
   
+  // HCP SEARCH ENGINE STATE
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const searchRef = useRef(null);
@@ -429,6 +430,7 @@ export default function App() {
         const mapped = data.map(mapFromDb);
         setTasks(mapped);
 
+        // ANTI-ORPHANING FAILSAFE
         const missingCompanies = [...new Set(mapped.map(t => t.company).filter(c => c && !companies.includes(c)))];
         if (missingCompanies.length > 0) {
           setCompanies(prev => [...new Set([...prev, ...missingCompanies])]);
@@ -1056,6 +1058,7 @@ export default function App() {
 
     const trimmed = newName.trim();
 
+    // OPTIMISTIC UI
     setCompanies(prev => prev.map(c => c === oldName ? trimmed : c));
     setActiveCompanyFilters(prev => prev.map(c => c === oldName ? trimmed : c));
     setTasks(prev => prev.map(t => t.company === oldName ? { ...t, company: trimmed } : t));
@@ -2046,8 +2049,8 @@ export default function App() {
           </div>
         )}
 
-        {/* 🚨 OVERDUE ALERT TRAY 🚨 */}
-        {overdueTasks.length > 0 && currentView !== 'create' && currentView !== 'completed' && (
+        {/* 🚨 EMPLOYEE OVERDUE ALERT TRAY 🚨 */}
+        {userRole === 'employee' && overdueTasks.length > 0 && currentView !== 'create' && currentView !== 'completed' && (
           <div className="bg-red-50 border-2 border-red-500 rounded-lg p-3 mb-4 shadow-sm animate-fade-in">
             <div className="flex justify-between items-center mb-2">
               <span className="text-xs font-bold uppercase tracking-wider text-red-800 flex items-center gap-2">
