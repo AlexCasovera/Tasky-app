@@ -430,7 +430,6 @@ export default function App() {
         const mapped = data.map(mapFromDb);
         setTasks(mapped);
 
-        // ANTI-ORPHANING FAILSAFE
         const missingCompanies = [...new Set(mapped.map(t => t.company).filter(c => c && !companies.includes(c)))];
         if (missingCompanies.length > 0) {
           setCompanies(prev => [...new Set([...prev, ...missingCompanies])]);
@@ -732,7 +731,10 @@ export default function App() {
     };
   }, [tasks]);
 
+  // OVERDUE CHECKER - Fixed race condition using tasks.length dependency
   useEffect(() => {
+    if (tasks.length === 0) return;
+
     const todayStr = formatDateKey(new Date());
 
     setTasks(prevTasks => {
@@ -744,14 +746,12 @@ export default function App() {
           changed = true;
           const assigneeLabel = task.assignees && task.assignees.length > 0 ? task.assignees.join(', ') : 'Unassigned';
           
-          if (userRole === 'admin') {
-            triggerAdminAlert(
-              `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was not completed by ${task.date}`,
-              'overdue',
-              '⚠️ Task Overdue Alert',
-              `"${task.title}" (${assigneeLabel}) was not completed by ${task.date}`
-            );
-          }
+          triggerAdminAlert(
+            `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was not completed by ${task.date}`,
+            'overdue',
+            '⚠️ Task Overdue Alert',
+            `"${task.title}" (${assigneeLabel}) was not completed by ${task.date}`
+          );
 
           return { ...task, isOverdue: true, overdueNotified: true };
         } else if (!isPastDue && task.isOverdue) {
@@ -767,11 +767,12 @@ export default function App() {
             supabase.from('tasks').update({ is_overdue: t.isOverdue, overdue_notified: t.overdueNotified }).eq('id', t.id);
           }
         });
+        return updated;
       }
 
-      return changed ? updated : prevTasks;
+      return prevTasks;
     });
-  }, [userRole]);
+  }, [userRole, tasks.length]);
 
   const handleDragStart = (e, taskId, sourceDate = null) => {
     if (userRole !== 'admin') return;
@@ -1683,8 +1684,12 @@ export default function App() {
   
   const longTermTasks = visibleTasks.filter(t => t.isLongTerm && t.status !== 'completed');
 
-  // OVERDUE TASKS - Red Alert Tray Generation
-  const overdueTasks = visibleTasks.filter(t => t.isOverdue && t.status !== 'completed');
+  // OVERDUE TASKS - DYNAMIC UI EVALUATION (Prevents race conditions)
+  const todayStringForOverdue = formatDateKey(new Date());
+  const overdueTasks = visibleTasks.filter(t => {
+    const isPastDue = t.date && t.date.trim() !== '' && t.date < todayStringForOverdue && t.status !== 'completed';
+    return isPastDue || (t.isOverdue && t.status !== 'completed');
+  });
 
   // HCP SEARCH CATEGORIZATION ENGINE
   const searchResults = {
