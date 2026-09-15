@@ -303,7 +303,6 @@ export default function App() {
 
   const [currentDate, setCurrentDate] = useState(new Date());
   
-  // HCP SEARCH ENGINE STATE
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const searchRef = useRef(null);
@@ -430,7 +429,6 @@ export default function App() {
         const mapped = data.map(mapFromDb);
         setTasks(mapped);
 
-        // ANTI-ORPHANING FAILSAFE
         const missingCompanies = [...new Set(mapped.map(t => t.company).filter(c => c && !companies.includes(c)))];
         if (missingCompanies.length > 0) {
           setCompanies(prev => [...new Set([...prev, ...missingCompanies])]);
@@ -1682,6 +1680,9 @@ export default function App() {
   
   const longTermTasks = visibleTasks.filter(t => t.isLongTerm && t.status !== 'completed');
 
+  // OVERDUE TASKS - Red Alert Tray Generation
+  const overdueTasks = visibleTasks.filter(t => t.isOverdue && t.status !== 'completed');
+
   // HCP SEARCH CATEGORIZATION ENGINE
   const searchResults = {
     tasks: tasks.filter(t => 
@@ -2042,6 +2043,44 @@ export default function App() {
               className="text-[11px] font-bold text-[#A9B1A6] hover:underline self-end md:self-center">
               Reset All Filters
             </button>
+          </div>
+        )}
+
+        {/* 🚨 OVERDUE ALERT TRAY 🚨 */}
+        {overdueTasks.length > 0 && currentView !== 'create' && currentView !== 'completed' && (
+          <div className="bg-red-50 border-2 border-red-500 rounded-lg p-3 mb-4 shadow-sm animate-fade-in">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-red-800 flex items-center gap-2">
+                🚨 Past Due Tasks ({overdueTasks.length} Action Required)
+              </span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {overdueTasks.map(task => (
+                <div 
+                  key={`overdue-${task.id}`}
+                  onClick={() => handleOpenModal(task, task.date)}
+                  className="bg-white px-3 py-2 rounded border border-red-300 text-xs font-bold text-gray-800 cursor-pointer hover:bg-red-100 transition shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-l-4 border-l-red-600">
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <span className="text-[10px] bg-red-100 text-red-800 px-1.5 py-0.5 rounded font-mono border border-red-200 shrink-0">Due: {task.date}</span>
+                    <span className="truncate text-sm">{task.title}</span>
+                    <span className="text-[9px] bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded shrink-0">{task.company}</span>
+                  </div>
+                  <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-200">{task.priority}</span>
+                    <div className="flex -space-x-1.5">
+                      {(task.assignees || []).map((a, idx) => {
+                        const m = getMemberConfig(a);
+                        return (
+                          <div key={idx} style={{ backgroundColor: m.color }} className="w-6 h-6 rounded-full border border-white flex items-center justify-center text-[9px] text-white shadow-sm font-bold">
+                            {m.initials}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -2840,7 +2879,6 @@ export default function App() {
                           checked={isLongTerm} 
                           onChange={(e) => {
                             setIsLongTerm(e.target.checked);
-                            // SMART CLEAR logic
                             if (e.target.checked && taskDate === formatDateKey(new Date())) {
                               setTaskDate('');
                             } else if (!e.target.checked && taskDate === '') {
@@ -3039,6 +3077,12 @@ export default function App() {
 
               {!isEditing ? (
                 <>
+                  {selectedTask.isOverdue && !isCurrentInstanceCompleted && (
+                    <div className="bg-red-50 border border-red-400 text-red-800 text-xs font-bold px-3 py-2 rounded mb-1 flex items-center gap-2">
+                      <span>🚨</span> THIS TASK IS PAST DUE. Please complete the work or adjust the deadline.
+                    </div>
+                  )}
+
                   {selectedTask.isLongTerm && (
                     <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold px-3 py-2 rounded mb-1 flex items-center gap-2">
                       <span>📌</span> This is a Long-Term Pipeline task pinned to the dashboard.
