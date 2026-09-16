@@ -230,6 +230,8 @@ export default function App() {
   const [teamMembers, setTeamMembers] = useState([]);
   const [activeEmployeeFilters, setActiveEmployeeFilters] = useState([]);
 
+  const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
+
   const [hiddenCompanies, setHiddenCompanies] = useState(() => JSON.parse(localStorage.getItem('hiddenCompanies') || '[]'));
   const [hiddenMembers, setHiddenMembers] = useState(() => JSON.parse(localStorage.getItem('hiddenMembers') || '[]'));
 
@@ -303,7 +305,6 @@ export default function App() {
 
   const [currentDate, setCurrentDate] = useState(new Date());
   
-  // HCP SEARCH ENGINE STATE
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const searchRef = useRef(null);
@@ -419,6 +420,14 @@ export default function App() {
   const [tasks, setTasks] = useState([]);
   const [isDbLoading, setIsDbLoading] = useState(true);
 
+  const formatDateKey = (d) => {
+    if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const isTaskPastDue = (task) => {
     if (!task.date || task.date.trim() === '') return false;
     const todayStr = formatDateKey(new Date());
@@ -436,7 +445,6 @@ export default function App() {
         const mapped = data.map(mapFromDb);
         setTasks(mapped);
 
-        // ANTI-ORPHANING FAILSAFE
         const missingCompanies = [...new Set(mapped.map(t => t.company).filter(c => c && !companies.includes(c)))];
         if (missingCompanies.length > 0) {
           setCompanies(prev => [...new Set([...prev, ...missingCompanies])]);
@@ -464,14 +472,17 @@ export default function App() {
     };
   }, [session, companies]);
 
-  // SAFELY TRIGGER ADMIN ALERTS FOR OVERDUE TASKS
   useEffect(() => {
     if (tasks.length === 0) return;
 
-    const tasksToAlert = tasks.filter(t => isTaskPastDue(t) && !t.overdueNotified);
+    const localNotified = JSON.parse(localStorage.getItem('localNotifiedTasks') || '[]');
+    const tasksToAlert = tasks.filter(t => isTaskPastDue(t) && !t.overdueNotified && !localNotified.includes(t.id));
 
     if (tasksToAlert.length > 0) {
+      const newlyNotifiedIds = [];
+      
       tasksToAlert.forEach(async (task) => {
+        newlyNotifiedIds.push(task.id);
         const assigneeLabel = task.assignees && task.assignees.length > 0 ? task.assignees.join(', ') : 'Unassigned';
         
         triggerAdminAlert(
@@ -485,7 +496,8 @@ export default function App() {
         if (error) console.error("Could not save overdue state to DB (Likely RLS blocking):", error);
       });
 
-      // Update local state to prevent spam loops in this session
+      localStorage.setItem('localNotifiedTasks', JSON.stringify([...localNotified, ...newlyNotifiedIds]));
+
       setTasks(prev => prev.map(p => {
         if (tasksToAlert.some(t => t.id === p.id)) {
           return { ...p, isOverdue: true, overdueNotified: true };
@@ -497,15 +509,6 @@ export default function App() {
 
   const masterCompanyList = [...new Set([...companies, ...tasks.map(t => t.company).filter(Boolean)])];
 
-  const formatDateKey = (d) => {
-    if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  // REAL-TIME AUDIT TIMESTAMP GENERATOR
   const getCurrentTimestamp = () => {
     const now = new Date();
     return now.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) + ' @ ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -812,7 +815,6 @@ export default function App() {
     const todayStr = formatDateKey(new Date());
     let dbPayloads = [];
     
-    // TIMELINE INJECTION: Document the reschedule
     const moveNote = `📅 Rescheduled to ${targetDate} by ${currentUserName} [${getCurrentTimestamp()}]`;
 
     setTasks(prevTasks => {
@@ -860,7 +862,7 @@ export default function App() {
           exceptionDates: [],
           isOverdue: targetDate && targetDate.trim() !== '' && targetDate < todayStr,
           overdueNotified: targetDate && targetDate.trim() !== '' && targetDate < todayStr,
-          comments: [...(targetTask.comments || []), moveNote] // Inject note
+          comments: [...(targetTask.comments || []), moveNote]
         };
 
         return prevTasks.map(t => {
@@ -896,7 +898,7 @@ export default function App() {
           exceptionDates: [],
           completedDates: [],
           endDate: null,
-          comments: [...(targetTask.comments || []), moveNote] // Inject note
+          comments: [...(targetTask.comments || []), moveNote]
         };
 
         return prevTasks.map(t => {
@@ -925,7 +927,7 @@ export default function App() {
             type: isFlex ? 'flexible' : 'timed',
             isOverdue: newIsOverdue,
             overdueNotified: newIsOverdue,
-            comments: [...(t.comments || []), moveNote] // Inject note
+            comments: [...(t.comments || []), moveNote] 
           };
           dbPayloads.push({ action: 'update', payload: updatedStandard });
           return updatedStandard;
@@ -1066,7 +1068,6 @@ export default function App() {
 
     const trimmed = newName.trim();
 
-    // OPTIMISTIC UI
     setCompanies(prev => prev.map(c => c === oldName ? trimmed : c));
     setActiveCompanyFilters(prev => prev.map(c => c === oldName ? trimmed : c));
     setTasks(prev => prev.map(t => t.company === oldName ? { ...t, company: trimmed } : t));
@@ -1225,7 +1226,7 @@ export default function App() {
       notifyOnDeadlineChange,
       notifyOnTaskCreated,
       isLongTerm,
-      comments: [`📌 Task Generated by ${currentUserName} [${getCurrentTimestamp()}]`] // Timeline genesis event
+      comments: [`📌 Task Generated by ${currentUserName} [${getCurrentTimestamp()}]`] 
     };
 
     setTasks([newTask, ...tasks]);
@@ -1296,7 +1297,6 @@ export default function App() {
     
     const isStillOverdue = taskDate && taskDate.trim() !== '' && taskDate < todayStr && selectedTask.status !== 'completed';
 
-    // TIMELINE INJECTION: Document full edit modification
     const editNote = `✏️ Task details modified by ${currentUserName} [${getCurrentTimestamp()}]`;
 
     const updatedTask = {
@@ -1327,7 +1327,7 @@ export default function App() {
       isOverdue: isStillOverdue,
       overdueNotified: isStillOverdue,
       isLongTerm,
-      comments: [...(selectedTask.comments || []), editNote] // Inject note
+      comments: [...(selectedTask.comments || []), editNote] 
     };
 
     setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t));
@@ -1377,7 +1377,6 @@ export default function App() {
   const handlePostOpenComment = async (id) => {
     if (!openCommentInput.trim()) return;
     
-    // TIMELINE INJECTION: Corrected real-time timestamp generator
     const commentText = `💬 ${currentUserName} [${getCurrentTimestamp()}]: ${openCommentInput}`;
     
     setTasks(tasks.map(t => t.id === id ? { ...t, comments: [...(t.comments || []), commentText] } : t));
@@ -1402,7 +1401,7 @@ export default function App() {
   };
 
   const handleInitiateCompletion = () => {
-    const hasAttachments = selectedTask.comments && selectedTask.comments.some(c => c.includes('📎 File Attached'));
+    const hasAttachments = selectedTask.comments && selectedTask.comments.some(c => c.includes('📎 File Attached') || c.includes('📎 Proof Attached'));
     
     if (selectedTask.requiresPhoto && !photoUploaded && !hasAttachments) {
       return alert('Mandatory proof attachment required before completing this task.');
@@ -1435,18 +1434,15 @@ export default function App() {
 
     let updatedTasks = tasks.map(t => {
       if (t.id === selectedTask.id) {
-        // TIMELINE INJECTION: Document the completion
         const completionNote = `✅ Marked Complete by ${currentUserName} [${getCurrentTimestamp()}]`;
         const newComments = noteText 
           ? [...(t.comments || []), noteText, completionNote] 
           : [...(t.comments || []), completionNote];
 
         if (t.recurrenceType === 'once') {
-          // NEW LOGIC: Stamp the exact date of completion so it appears correctly in the Completed view
-          const updatedCompletedDates = [...new Set([...(t.completedDates || []), todayStrForCompletion])];
-          return { ...t, status: 'completed', isOverdue: false, completedDates: updatedCompletedDates, comments: newComments };
+          // OVERWRITES the array with exactly today's date for accurate completion view rendering
+          return { ...t, status: 'completed', isOverdue: false, completedDates: [todayStrForCompletion], comments: newComments };
         } else {
-          // For recurring tasks, we keep selectedInstanceDate to hide the correct calendar slot
           const updatedCompletedDates = [...new Set([...(t.completedDates || []), selectedInstanceDate])];
           return { ...t, completedDates: updatedCompletedDates, isOverdue: false, comments: newComments };
         }
@@ -1595,7 +1591,6 @@ export default function App() {
   const handleAppendNote = async (id) => {
     if (!additionalNote.trim()) return;
 
-    // TIMELINE INJECTION: Note appended after completion
     const noteText = `💬 ${currentUserName} (Follow-up) [${getCurrentTimestamp()}]: ${additionalNote}`;
     setTasks(tasks.map(t => t.id === id ? { ...t, comments: [...(t.comments || []), noteText] } : t));
     
@@ -1610,7 +1605,6 @@ export default function App() {
   };
 
   const handleReopenTask = async (id) => {
-    // TIMELINE INJECTION: Document reopening
     const reopenNote = `⏪ Task reopened by ${currentUserName} [${getCurrentTimestamp()}]`;
 
     const updated = tasks.map(t => {
@@ -1712,13 +1706,10 @@ export default function App() {
 
   const backlogTasks = tasks.filter(t => !t.isLongTerm && (!t.assignees || t.assignees.length === 0) && t.status !== 'completed' && activeCompanyFilters.includes(t.company) && !hiddenCompanies.includes(t.company));
   
-  const longTermTasks = visibleTasks.filter(t => t.isLongTerm && t.status !== 'completed');
+  // DYNAMIC TRAY LOGIC
+  const longTermTasks = visibleTasks.filter(t => t.isLongTerm && t.status !== 'completed' && (userRole === 'admin' || !isTaskPastDue(t)));
 
-  const todayStringForOverdue = formatDateKey(new Date());
-  const overdueTasks = visibleTasks.filter(t => {
-    const isPastDue = t.date && t.date.trim() !== '' && t.date < todayStringForOverdue && t.status !== 'completed';
-    return isPastDue || (t.isOverdue && t.status !== 'completed');
-  });
+  const overdueTasks = visibleTasks.filter(t => isTaskPastDue(t));
 
   const searchResults = {
     tasks: tasks.filter(t => 
@@ -1781,19 +1772,17 @@ export default function App() {
   };
 
   const isTaskCompletedOnDay = (task, dateStr) => {
-    if (!task) return false;
+    if (!task || task.status !== 'completed') return false;
     
     // 1. Check the explicit completed dates array first
     if (task.completedDates && task.completedDates.length > 0) {
-      if (task.completedDates.includes(dateStr)) return true;
-      // If it's a one-time task and has a logged completion date, ONLY render on that precise date.
-      if (task.recurrenceType === 'once') return false; 
+      if (task.recurrenceType === 'once') {
+         return task.completedDates[0] === dateStr; 
+      }
+      return task.completedDates.includes(dateStr);
     }
-    
-    // 2. Fallback for older legacy tasks completed before the update
-    if (task.status === 'completed' && task.date === dateStr) return true;
-    
-    return false;
+    // Legacy fallback
+    return task.date === dateStr;
   };
 
   const isCurrentInstanceCompleted = selectedTask && (
@@ -2139,20 +2128,23 @@ export default function App() {
               </span>
             </div>
             <div className="flex flex-wrap gap-2">
-              {longTermTasks.map(task => (
-                <div 
-                  key={`lt-${task.id}`}
-                  draggable={userRole === 'admin' && !resizingTaskId}
-                  onDragStart={(e) => handleDragStart(e, task.id, task.date)}
-                  onDragEnd={handleDragEnd}
-                  onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                  className="bg-white px-3 py-1.5 rounded border border-blue-200 text-xs font-bold text-gray-800 cursor-grab active:cursor-grabbing hover:bg-blue-100 transition shadow-2xs flex items-center gap-2">
-                  <span>{task.title}</span>
-                  <span className="text-[9px] bg-gray-200 text-gray-700 px-1 py-0.5 rounded">{task.company}</span>
-                  {task.date && <span className="text-[10px] bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded border border-blue-200">Due: {task.date}</span>}
-                  {(!task.assignees || task.assignees.length === 0) && <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">Unassigned</span>}
-                </div>
-              ))}
+              {longTermTasks.map(task => {
+                const isOverdue = isTaskPastDue(task);
+                return (
+                  <div 
+                    key={`lt-${task.id}`}
+                    draggable={userRole === 'admin' && !resizingTaskId}
+                    onDragStart={(e) => handleDragStart(e, task.id, task.date)}
+                    onDragEnd={handleDragEnd}
+                    onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
+                    className={`bg-white px-3 py-1.5 rounded border text-xs font-bold transition shadow-2xs flex items-center gap-2 ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${isOverdue ? 'border-red-500 ring-1 ring-red-400 bg-red-50 text-red-900 hover:bg-red-100' : 'border-blue-200 text-gray-800 hover:bg-blue-100'}`}>
+                    <span>{task.title}</span>
+                    <span className="text-[9px] bg-gray-200 text-gray-700 px-1 py-0.5 rounded">{task.company}</span>
+                    {task.date && <span className={`text-[10px] px-1.5 py-0.5 rounded border ${isOverdue ? 'bg-red-100 text-red-800 border-red-200' : 'bg-blue-100 text-blue-800 border-blue-200'}`}>Due: {task.date}</span>}
+                    {(!task.assignees || task.assignees.length === 0) && <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">Unassigned</span>}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -2344,7 +2336,7 @@ export default function App() {
                                         <span className="text-[10px] text-gray-500">Assigned to: {(task.assignees || []).join(', ')}</span>
                                       </div>
                                     </div>
-                                    <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full border border-green-300 self-end sm:self-auto shrink-0">
+                                    <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-300 self-end sm:self-auto shrink-0">
                                       ✓ Completed
                                     </span>
                                   </div>
@@ -2926,7 +2918,6 @@ export default function App() {
                           checked={isLongTerm} 
                           onChange={(e) => {
                             setIsLongTerm(e.target.checked);
-                            // SMART CLEAR logic
                             if (e.target.checked && taskDate === formatDateKey(new Date())) {
                               setTaskDate('');
                             } else if (!e.target.checked && taskDate === '') {
@@ -3131,7 +3122,7 @@ export default function App() {
                     </div>
                   )}
 
-                  {selectedTask.isLongTerm && (
+                  {selectedTask.isLongTerm && !isTaskPastDue(selectedTask) && (
                     <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold px-3 py-2 rounded mb-1 flex items-center gap-2">
                       <span>📌</span> This is a Long-Term Pipeline task pinned to the dashboard.
                     </div>
