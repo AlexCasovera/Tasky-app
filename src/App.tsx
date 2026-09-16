@@ -180,7 +180,6 @@ const mapToDb = (t) => ({
 });
 
 const mapFromDb = (r) => {
-  // AUTO-MIGRATOR: Convert existing older priorities to 'Standard'
   let mappedPriority = r.priority || 'Standard';
   if (mappedPriority === 'Medium' || mappedPriority === 'Low' || mappedPriority === 'Routine') {
     mappedPriority = 'Standard';
@@ -404,7 +403,7 @@ export default function App() {
   const [taskDesc, setTaskDesc] = useState('');
   const [taskCompany, setTaskCompany] = useState(''); 
   const [selectedAssignees, setSelectedAssignees] = useState([]);
-  const [taskPriority, setTaskPriority] = useState('Standard'); // CHANGED: Default is now Standard (Green)
+  const [taskPriority, setTaskPriority] = useState('Standard'); 
   const [taskDate, setTaskDate] = useState('');
   const [hasSpecificTime, setHasSpecificTime] = useState(false); 
   const [startTime, setStartTime] = useState('13:00');
@@ -427,6 +426,7 @@ export default function App() {
   
   const [openCommentInput, setExecutionComment] = useState('');
   const [photoUploaded, setPhotoUploaded] = useState(false);
+  const [isDraggingFile, setIsDraggingFile] = useState(false); // FOR DRAG/DROP
   const [additionalNote, setAdditionalNote] = useState('');
 
   const [draggedTaskId, setDraggedTaskId] = useState(null);
@@ -1372,6 +1372,7 @@ export default function App() {
     setExecutionComment('');
     setPhotoUploaded(false);
     setAdditionalNote('');
+    setIsDraggingFile(false); // Reset drag state when modal opens
 
     setTaskTitle(task.title);
     setTaskDesc(task.desc);
@@ -1490,7 +1491,7 @@ export default function App() {
   const handlePostOpenComment = async (id) => {
     if (!openCommentInput.trim()) return;
     
-    const commentText = `💬 ${currentUserName} [${getCurrentTimestamp()}]: ${openCommentInput}`;
+    const commentText = `💬 ${currentUserName} [${getCurrentTimestamp()}]:\n${openCommentInput}`;
     
     setTasks(tasks.map(t => t.id === id ? { ...t, comments: [...(t.comments || []), commentText] } : t));
     setSelectedTask(prev => ({ ...prev, comments: [...(prev.comments || []), commentText] }));
@@ -1511,6 +1512,50 @@ export default function App() {
     }
 
     setExecutionComment('');
+  };
+
+  const handleFileUpload = async (file) => {
+    if (!file) return;
+
+    // Apply compression if it's an image
+    if (file.type.startsWith('image/')) {
+      file = await compressImage(file, 1280, 1280, 0.7);
+    }
+
+    const fileExt = file.name.split('.').pop() || 'jpg';
+    const fileName = `${selectedTask.id}-${Date.now()}.${fileExt}`;
+
+    const { error: uploadErr } = await supabase.storage
+      .from('task-proofs')
+      .upload(fileName, file);
+
+    if (uploadErr) {
+      alert(`Upload failed: ${uploadErr.message}`);
+      return;
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('task-proofs')
+      .getPublicUrl(fileName);
+
+    const fileNote = `📎 File Attached by ${currentUserName} [${getCurrentTimestamp()}] (${file.name}):\n${publicUrl}`;
+    const updatedComments = [...(selectedTask.comments || []), fileNote];
+    const updatedTask = { ...selectedTask, comments: updatedComments };
+
+    setSelectedTask(updatedTask);
+    setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t));
+    setPhotoUploaded(true);
+
+    await supabase.from('tasks').update(mapToDb(updatedTask)).eq('id', selectedTask.id);
+
+    if (userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
+      triggerAdminAlert(
+        `📎 File Uploaded for "${selectedTask.title}" by ${currentUserName}`,
+        'photo',
+        '📎 Proof File Uploaded',
+        `${currentUserName} attached ${file.name} to "${selectedTask.title}"`
+      );
+    }
   };
 
   const handleInitiateCompletion = () => {
@@ -1534,7 +1579,7 @@ export default function App() {
 
   const executeCompletion = async (withFollowUp) => {
     const noteText = openCommentInput.trim() 
-      ? `💬 ${currentUserName} [${getCurrentTimestamp()}]: ${openCommentInput}`
+      ? `💬 ${currentUserName} [${getCurrentTimestamp()}]:\n${openCommentInput}`
       : null;
 
     if (withFollowUp && completionPrompt) {
@@ -1705,7 +1750,7 @@ export default function App() {
   const handleAppendNote = async (id) => {
     if (!additionalNote.trim()) return;
 
-    const noteText = `💬 ${currentUserName} (Follow-up) [${getCurrentTimestamp()}]: ${additionalNote}`;
+    const noteText = `💬 ${currentUserName} (Follow-up) [${getCurrentTimestamp()}]:\n${additionalNote}`;
     setTasks(tasks.map(t => t.id === id ? { ...t, comments: [...(t.comments || []), noteText] } : t));
     
     const target = tasks.find(t => t.id === id);
@@ -1745,7 +1790,7 @@ export default function App() {
 
     if (!hasUrl) {
       return (
-        <div key={index} className="text-xs text-gray-700 bg-gray-50 p-1.5 rounded border border-gray-200 shadow-2xs">
+        <div key={index} className="text-xs text-gray-700 bg-gray-50 p-1.5 rounded border border-gray-200 shadow-2xs whitespace-pre-wrap">
           {commentText}
         </div>
       );
@@ -1757,7 +1802,7 @@ export default function App() {
     const isImage = /\.(jpg|jpeg|png|webp|gif)($|\?)/i.test(url);
 
     return (
-      <div key={index} className="text-xs text-gray-700 bg-gray-50 p-2 rounded border border-gray-200 shadow-2xs flex flex-col gap-1.5">
+      <div key={index} className="text-xs text-gray-700 bg-gray-50 p-2 rounded border border-gray-200 shadow-2xs flex flex-col gap-1.5 whitespace-pre-wrap">
         <div className="flex items-center justify-between flex-wrap gap-1">
           <span className="font-semibold">{textBeforeUrl}</span>
           <a
@@ -2318,7 +2363,7 @@ export default function App() {
                               compWeekTasks.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
                             }
                             if (isTaskCompletedOnDay(t, wd.dateStr)) {
-                              compWeekCompleted.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dateStr });
+                              compWeekCompleted.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
                             }
                           });
                         }
@@ -2672,7 +2717,6 @@ export default function App() {
 
                         {memberColTasks.map(task => {
                           const layout = layouts[task.id] || { left: '0%', width: '100%', startPx: 0, heightPx: 80, isFlex: false };
-                          const member = getMemberConfig(task.assignees && task.assignees[0]);
                           const isFlex = layout.isFlex;
 
                           return (
@@ -3346,16 +3390,17 @@ export default function App() {
 
                     {!isCurrentInstanceCompleted && (
                       <div className="flex gap-2">
-                        <input 
-                          type="text" 
+                        <textarea 
+                          rows={2}
                           value={openCommentInput}
                           onChange={(e) => setExecutionComment(e.target.value)}
                           placeholder="Type an update or comment..." 
-                          className="flex-1 p-2 text-xs border border-gray-200 rounded focus:outline-none" />
+                          className="flex-1 p-2 text-xs border border-gray-200 rounded focus:outline-none resize-y min-h-[40px]" 
+                        />
                         <button 
                           type="button"
                           onClick={() => handlePostOpenComment(selectedTask.id)}
-                          className="bg-[#333333] text-white px-3 py-1 rounded text-xs font-bold hover:bg-black transition">
+                          className="bg-[#333333] text-white px-3 py-1 rounded text-xs font-bold hover:bg-black transition self-end">
                           Post Note
                         </button>
                       </div>
@@ -3364,64 +3409,41 @@ export default function App() {
 
                   {/* UNIVERSAL ATTACHMENTS & Proof OF WORK */}
                   {!isCurrentInstanceCompleted && (
-                    <div className="bg-white p-3 rounded border border-amber-300 flex justify-between items-center my-1">
+                    <div 
+                      className={`bg-white p-3 rounded border border-dashed transition flex justify-between items-center my-1 relative ${isDraggingFile ? 'border-blue-500 bg-blue-50' : 'border-amber-300'}`}
+                      onDragOver={(e) => { e.preventDefault(); setIsDraggingFile(true); }}
+                      onDragLeave={() => setIsDraggingFile(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDraggingFile(false);
+                        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                          handleFileUpload(e.dataTransfer.files[0]);
+                        }
+                      }}
+                    >
+                      {isDraggingFile && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-blue-50/90 z-10 rounded">
+                          <span className="text-blue-700 font-bold text-sm pointer-events-none">Drop file here to upload</span>
+                        </div>
+                      )}
+                      
                       <div className="flex flex-col">
                         <span className="text-xs font-semibold text-amber-800 flex items-center gap-1">
                           📎 Attachments & Proof of Work
                           {selectedTask.requiresPhoto && <span className="text-red-600 font-bold ml-1">(Required)</span>}
                         </span>
-                        <span className="text-[10px] text-gray-500">Upload images, PDFs, spreadsheets, or documents</span>
+                        <span className="text-[10px] text-gray-500">Upload or drag and drop images, PDFs, spreadsheets, etc.</span>
                       </div>
                       
-                      <label className="text-xs font-bold px-3 py-1 rounded bg-amber-100 text-amber-800 hover:bg-amber-200 cursor-pointer transition">
+                      <label className="text-xs font-bold px-3 py-1 rounded bg-amber-100 text-amber-800 hover:bg-amber-200 cursor-pointer transition z-20">
                         + Attach File
                         <input 
                           type="file" 
                           accept="*/*" 
                           className="hidden" 
-                          onChange={async (e) => {
-                            let file = e.target.files?.[0];
-                            if (!file) return;
-
-                            // Apply compression if it's an image
-                            if (file.type.startsWith('image/')) {
-                              file = await compressImage(file, 1280, 1280, 0.7);
-                            }
-
-                            const fileExt = file.name.split('.').pop() || 'jpg';
-                            const fileName = `${selectedTask.id}-${Date.now()}.${fileExt}`;
-
-                            const { error: uploadErr } = await supabase.storage
-                              .from('task-proofs')
-                              .upload(fileName, file);
-
-                            if (uploadErr) {
-                              alert(`Upload failed: ${uploadErr.message}`);
-                              return;
-                            }
-
-                            const { data: { publicUrl } } = supabase.storage
-                              .from('task-proofs')
-                              .getPublicUrl(fileName);
-
-                            // TIMELINE INJECTION
-                            const fileNote = `📎 File Attached by ${currentUserName} [${getCurrentTimestamp()}] (${file.name}): ${publicUrl}`;
-                            const updatedComments = [...(selectedTask.comments || []), fileNote];
-                            const updatedTask = { ...selectedTask, comments: updatedComments };
-
-                            setSelectedTask(updatedTask);
-                            setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t));
-                            setPhotoUploaded(true);
-
-                            await supabase.from('tasks').update(mapToDb(updatedTask)).eq('id', selectedTask.id);
-
-                            if (userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
-                              triggerAdminAlert(
-                                `📎 File Uploaded for "${selectedTask.title}" by ${currentUserName}`,
-                                'photo',
-                                '📎 Proof File Uploaded',
-                                `${currentUserName} attached ${file.name} to "${selectedTask.title}"`
-                              );
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files.length > 0) {
+                              handleFileUpload(e.target.files[0]);
                             }
                           }}
                         />
