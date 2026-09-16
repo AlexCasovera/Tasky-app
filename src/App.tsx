@@ -230,8 +230,6 @@ export default function App() {
   const [teamMembers, setTeamMembers] = useState([]);
   const [activeEmployeeFilters, setActiveEmployeeFilters] = useState([]);
 
-  const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
-
   const [hiddenCompanies, setHiddenCompanies] = useState(() => JSON.parse(localStorage.getItem('hiddenCompanies') || '[]'));
   const [hiddenMembers, setHiddenMembers] = useState(() => JSON.parse(localStorage.getItem('hiddenMembers') || '[]'));
 
@@ -421,7 +419,6 @@ export default function App() {
   const [tasks, setTasks] = useState([]);
   const [isDbLoading, setIsDbLoading] = useState(true);
 
-  // DYNAMIC OVERDUE CALCULATOR (Ensures visual UI never reverts)
   const isTaskPastDue = (task) => {
     if (!task.date || task.date.trim() === '') return false;
     const todayStr = formatDateKey(new Date());
@@ -1375,6 +1372,8 @@ export default function App() {
     setSelectedTask(null);
   };
 
+  const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
+
   const handlePostOpenComment = async (id) => {
     if (!openCommentInput.trim()) return;
     
@@ -1432,6 +1431,8 @@ export default function App() {
       }
     }
 
+    const todayStrForCompletion = formatDateKey(new Date());
+
     let updatedTasks = tasks.map(t => {
       if (t.id === selectedTask.id) {
         // TIMELINE INJECTION: Document the completion
@@ -1441,9 +1442,12 @@ export default function App() {
           : [...(t.comments || []), completionNote];
 
         if (t.recurrenceType === 'once') {
-          return { ...t, status: 'completed', isOverdue: false, comments: newComments };
+          // NEW LOGIC: Stamp the exact date of completion so it appears correctly in the Completed view
+          const updatedCompletedDates = [...new Set([...(t.completedDates || []), todayStrForCompletion])];
+          return { ...t, status: 'completed', isOverdue: false, completedDates: updatedCompletedDates, comments: newComments };
         } else {
-          const updatedCompletedDates = [...(t.completedDates || []), selectedInstanceDate];
+          // For recurring tasks, we keep selectedInstanceDate to hide the correct calendar slot
+          const updatedCompletedDates = [...new Set([...(t.completedDates || []), selectedInstanceDate])];
           return { ...t, completedDates: updatedCompletedDates, isOverdue: false, comments: newComments };
         }
       }
@@ -1611,7 +1615,9 @@ export default function App() {
 
     const updated = tasks.map(t => {
       if (t.id === id) {
-        if (t.recurrenceType === 'once') return { ...t, status: 'pending', comments: [...(t.comments || []), reopenNote] };
+        if (t.recurrenceType === 'once') {
+          return { ...t, status: 'pending', completedDates: [], comments: [...(t.comments || []), reopenNote] };
+        }
         return { ...t, completedDates: (t.completedDates || []).filter(d => d !== selectedInstanceDate), comments: [...(t.comments || []), reopenNote] };
       }
       return t;
@@ -1708,14 +1714,12 @@ export default function App() {
   
   const longTermTasks = visibleTasks.filter(t => t.isLongTerm && t.status !== 'completed');
 
-  // OVERDUE TASKS - DYNAMIC UI EVALUATION (Prevents race conditions)
   const todayStringForOverdue = formatDateKey(new Date());
   const overdueTasks = visibleTasks.filter(t => {
     const isPastDue = t.date && t.date.trim() !== '' && t.date < todayStringForOverdue && t.status !== 'completed';
     return isPastDue || (t.isOverdue && t.status !== 'completed');
   });
 
-  // HCP SEARCH CATEGORIZATION ENGINE
   const searchResults = {
     tasks: tasks.filter(t => 
       searchQuery.trim() && !hiddenCompanies.includes(t.company) && (
@@ -1778,8 +1782,18 @@ export default function App() {
 
   const isTaskCompletedOnDay = (task, dateStr) => {
     if (!task) return false;
+    
+    // 1. Check the explicit completed dates array first
+    if (task.completedDates && task.completedDates.length > 0) {
+      if (task.completedDates.includes(dateStr)) return true;
+      // If it's a one-time task and has a logged completion date, ONLY render on that precise date.
+      if (task.recurrenceType === 'once') return false; 
+    }
+    
+    // 2. Fallback for older legacy tasks completed before the update
     if (task.status === 'completed' && task.date === dateStr) return true;
-    return task.completedDates && task.completedDates.includes(dateStr);
+    
+    return false;
   };
 
   const isCurrentInstanceCompleted = selectedTask && (
@@ -2912,6 +2926,7 @@ export default function App() {
                           checked={isLongTerm} 
                           onChange={(e) => {
                             setIsLongTerm(e.target.checked);
+                            // SMART CLEAR logic
                             if (e.target.checked && taskDate === formatDateKey(new Date())) {
                               setTaskDate('');
                             } else if (!e.target.checked && taskDate === '') {
