@@ -420,6 +420,8 @@ export default function App() {
   const [tasks, setTasks] = useState([]);
   const [isDbLoading, setIsDbLoading] = useState(true);
 
+  // --- TIME ENGINE REFACTOR ---
+
   const formatDateKey = (d) => {
     if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
     const year = d.getFullYear();
@@ -428,11 +430,102 @@ export default function App() {
     return `${year}-${month}-${day}`;
   };
 
+  const isTaskScheduledOnDay = (task, dayOfWeekStr, dateStr) => {
+    if (!task) return false;
+    if (task.endDate && dateStr > task.endDate) return false;
+
+    if (task.recurrenceType === 'fixed') {
+      const startDate = task.date;
+      if (startDate && dateStr < startDate) return false;
+      if (!task.activeDays || !task.activeDays.includes(dayOfWeekStr)) return false;
+
+      const intervalWeeks = Math.max(1, Math.round((task.cadenceDays || 7) / 7));
+      if (intervalWeeks > 1 && startDate) {
+        const parseDate = (ds) => {
+          const [y, m, d] = ds.split('-').map(Number);
+          return new Date(y, m - 1, d);
+        };
+        const sDate = parseDate(startDate);
+        const cDate = parseDate(dateStr);
+
+        const sSunday = new Date(sDate);
+        sSunday.setDate(sDate.getDate() - sDate.getDay());
+
+        const cSunday = new Date(cDate);
+        cSunday.setDate(cDate.getDate() - cDate.getDay());
+
+        const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+        const weeksDiff = Math.round((cSunday.getTime() - sSunday.getTime()) / msPerWeek);
+
+        if (weeksDiff % intervalWeeks !== 0) return false;
+      }
+
+      return true;
+    }
+    return task.date === dateStr;
+  };
+
+  const getMissedDate = (task) => {
+    if (task.recurrenceType === 'once' || task.recurrenceType === 'completion') return task.date;
+    if (task.recurrenceType === 'fixed') {
+       const maxLookback = Math.max(7, task.cadenceDays || 7);
+       for (let i = 1; i <= maxLookback; i++) {
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          const checkDateStr = formatDateKey(d);
+          const dayOfWeekStr = daysOfWeek[d.getDay()];
+          if (isTaskScheduledOnDay(task, dayOfWeekStr, checkDateStr)) {
+             return checkDateStr;
+          }
+       }
+    }
+    return task.date;
+  };
+
   const isTaskPastDue = (task) => {
     if (!task.date || task.date.trim() === '') return false;
+    if (task.status === 'completed') return false;
     const todayStr = formatDateKey(new Date());
-    return task.date < todayStr && task.status !== 'completed';
+
+    if (task.recurrenceType === 'once' || task.recurrenceType === 'completion') {
+      return task.date < todayStr;
+    }
+
+    if (task.recurrenceType === 'fixed') {
+       const missedDate = getMissedDate(task);
+       if (missedDate && missedDate < todayStr) {
+         if (task.completedDates && task.completedDates.includes(missedDate)) return false;
+         if (task.exceptionDates && task.exceptionDates.includes(missedDate)) return false;
+         return true;
+       }
+       return false;
+    }
+    return false;
   };
+
+  const isTaskActiveOnDay = (task, dayOfWeekStr, dateStr) => {
+    if (!task) return false;
+    if (task.status === 'completed') return false;
+    if (task.completedDates && task.completedDates.includes(dateStr)) return false;
+    if (task.exceptionDates && task.exceptionDates.includes(dateStr)) return false; 
+    
+    return isTaskScheduledOnDay(task, dayOfWeekStr, dateStr);
+  };
+
+  const isTaskCompletedOnDay = (task, dateStr) => {
+    if (!task) return false;
+    
+    if (task.completedDates && task.completedDates.length > 0) {
+      if (task.recurrenceType === 'once') {
+         return task.completedDates[0] === dateStr; 
+      }
+      return task.completedDates.includes(dateStr);
+    }
+    
+    return task.status === 'completed' && task.date === dateStr;
+  };
+
+  // ------------------------------
 
   useEffect(() => {
     if (!session) return;
@@ -484,12 +577,13 @@ export default function App() {
       tasksToAlert.forEach(async (task) => {
         newlyNotifiedIds.push(task.id);
         const assigneeLabel = task.assignees && task.assignees.length > 0 ? task.assignees.join(', ') : 'Unassigned';
+        const alertDate = getMissedDate(task);
         
         triggerAdminAlert(
-          `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was not completed by ${task.date}`,
+          `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was not completed by ${alertDate}`,
           'overdue',
           '⚠️ Task Overdue Alert',
-          `"${task.title}" (${assigneeLabel}) was not completed by ${task.date}`
+          `"${task.title}" (${assigneeLabel}) was not completed by ${alertDate}`
         );
 
         const { error } = await supabase.from('tasks').update({ is_overdue: true, overdue_notified: true }).eq('id', task.id);
@@ -860,8 +954,8 @@ export default function App() {
           type: isFlex ? 'flexible' : 'timed',
           recurrenceType: 'once',
           exceptionDates: [],
-          isOverdue: targetDate && targetDate.trim() !== '' && targetDate < todayStr,
-          overdueNotified: targetDate && targetDate.trim() !== '' && targetDate < todayStr,
+          isOverdue: false, 
+          overdueNotified: false,
           comments: [...(targetTask.comments || []), moveNote] 
         };
 
@@ -914,7 +1008,6 @@ export default function App() {
 
       return prevTasks.map(t => {
         if (t.id === taskId) {
-          const newIsOverdue = targetDate && targetDate.trim() !== '' && targetDate < todayStr && t.status !== 'completed';
           const updatedStandard = {
             ...t,
             date: targetDate,
@@ -925,8 +1018,8 @@ export default function App() {
             endTime: eStr,
             timeLabel: label,
             type: isFlex ? 'flexible' : 'timed',
-            isOverdue: newIsOverdue,
-            overdueNotified: newIsOverdue,
+            isOverdue: false, 
+            overdueNotified: false,
             comments: [...(t.comments || []), moveNote] 
           };
           dbPayloads.push({ action: 'update', payload: updatedStandard });
@@ -1295,7 +1388,8 @@ export default function App() {
     const dur = Math.max(0.5, endDec - startDec);
     const todayStr = formatDateKey(new Date());
     
-    const isStillOverdue = taskDate && taskDate.trim() !== '' && taskDate < todayStr && selectedTask.status !== 'completed';
+    // Only flag one-time tasks as newly overdue on edit
+    const isStillOverdue = taskDate && taskDate.trim() !== '' && taskDate < todayStr && selectedTask.status !== 'completed' && recurrenceType === 'once';
 
     const editNote = `✏️ Task details modified by ${currentUserName} [${getCurrentTimestamp()}]`;
 
@@ -1736,57 +1830,27 @@ export default function App() {
 
   const hasSearchResults = searchResults.tasks.length > 0 || searchResults.companies.length > 0 || searchResults.members.length > 0;
 
+  // --- CORE TIME ENGINE REFACTOR ---
   const isTaskActiveOnDay = (task, dayOfWeekStr, dateStr) => {
     if (!task) return false;
+    if (task.status === 'completed') return false;
     if (task.completedDates && task.completedDates.includes(dateStr)) return false;
     if (task.exceptionDates && task.exceptionDates.includes(dateStr)) return false; 
-    if (task.status === 'completed') return false;
-
-    if (task.endDate && dateStr > task.endDate) return false;
-
-    if (task.recurrenceType === 'fixed') {
-      const startDate = task.date;
-      if (startDate && dateStr < startDate) return false;
-      if (!task.activeDays || !task.activeDays.includes(dayOfWeekStr)) return false;
-
-      const intervalWeeks = Math.max(1, Math.round((task.cadenceDays || 7) / 7));
-      if (intervalWeeks > 1 && startDate) {
-        const parseDate = (ds) => {
-          const [y, m, d] = ds.split('-').map(Number);
-          return new Date(y, m - 1, d);
-        };
-        const sDate = parseDate(startDate);
-        const cDate = parseDate(dateStr);
-
-        const sSunday = new Date(sDate);
-        sSunday.setDate(sDate.getDate() - sDate.getDay());
-
-        const cSunday = new Date(cDate);
-        cSunday.setDate(cDate.getDate() - cDate.getDay());
-
-        const msPerWeek = 7 * 24 * 60 * 60 * 1000;
-        const weeksDiff = Math.round((cSunday.getTime() - sSunday.getTime()) / msPerWeek);
-
-        if (weeksDiff % intervalWeeks !== 0) return false;
-      }
-
-      return true;
-    }
-    return task.date === dateStr;
+    
+    return isTaskScheduledOnDay(task, dayOfWeekStr, dateStr);
   };
 
   const isTaskCompletedOnDay = (task, dateStr) => {
-    if (!task || task.status !== 'completed') return false;
+    if (!task) return false;
     
-    // 1. Check the explicit completed dates array first
     if (task.completedDates && task.completedDates.length > 0) {
       if (task.recurrenceType === 'once') {
          return task.completedDates[0] === dateStr; 
       }
       return task.completedDates.includes(dateStr);
     }
-    // Legacy fallback
-    return task.date === dateStr;
+    
+    return task.status === 'completed' && task.date === dateStr;
   };
 
   const isCurrentInstanceCompleted = selectedTask && (
@@ -2094,31 +2158,34 @@ export default function App() {
               </span>
             </div>
             <div className="flex flex-col gap-2">
-              {overdueTasks.map(task => (
-                <div 
-                  key={`overdue-${task.id}`}
-                  onClick={() => handleOpenModal(task, task.date)}
-                  className="bg-white px-3 py-2 rounded border border-red-300 text-xs font-bold text-gray-800 cursor-pointer hover:bg-red-100 transition shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-l-4 border-l-red-600">
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
-                    <span className="text-[10px] bg-red-100 text-red-800 px-1.5 py-0.5 rounded font-mono border border-red-200 shrink-0">Due: {task.date}</span>
-                    <span className="truncate text-sm">{task.title}</span>
-                    <span className="text-[9px] bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded shrink-0">{task.company}</span>
-                  </div>
-                  <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-200">{task.priority}</span>
-                    <div className="flex -space-x-1.5">
-                      {(task.assignees || []).map((a, idx) => {
-                        const m = getMemberConfig(a);
-                        return (
-                          <div key={idx} style={{ backgroundColor: m.color }} className="w-6 h-6 rounded-full border border-white flex items-center justify-center text-[9px] text-white shadow-sm font-bold">
-                            {m.initials}
-                          </div>
-                        );
-                      })}
+              {overdueTasks.map(task => {
+                const missedDate = getMissedDate(task);
+                return (
+                  <div 
+                    key={`overdue-${task.id}`}
+                    onClick={() => handleOpenModal(task, missedDate)}
+                    className="bg-white px-3 py-2 rounded border border-red-300 text-xs font-bold text-gray-800 cursor-pointer hover:bg-red-100 transition shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-l-4 border-l-red-600">
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <span className="text-[10px] bg-red-100 text-red-800 px-1.5 py-0.5 rounded font-mono border border-red-200 shrink-0">Due: {missedDate}</span>
+                      <span className="truncate text-sm">{task.title}</span>
+                      <span className="text-[9px] bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded shrink-0">{task.company}</span>
+                    </div>
+                    <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-200">{task.priority}</span>
+                      <div className="flex -space-x-1.5">
+                        {(task.assignees || []).map((a, idx) => {
+                          const m = getMemberConfig(a);
+                          return (
+                            <div key={idx} style={{ backgroundColor: m.color }} className="w-6 h-6 rounded-full border border-white flex items-center justify-center text-[9px] text-white shadow-sm font-bold">
+                              {m.initials}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -2219,7 +2286,7 @@ export default function App() {
                               compWeekTasks.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
                             }
                             if (isTaskCompletedOnDay(t, wd.dateStr)) {
-                              compWeekCompleted.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dateStr });
+                              compWeekCompleted.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
                             }
                           });
                         }
