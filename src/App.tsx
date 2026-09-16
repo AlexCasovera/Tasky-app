@@ -180,7 +180,6 @@ const mapToDb = (t) => ({
 });
 
 const mapFromDb = (r) => {
-  // AUTO-MIGRATOR: Convert all existing 'Medium' and 'Low' tasks to 'Routine'
   let mappedPriority = r.priority || 'Routine';
   if (mappedPriority === 'Medium' || mappedPriority === 'Low') {
     mappedPriority = 'Routine';
@@ -397,7 +396,7 @@ export default function App() {
   const [taskDesc, setTaskDesc] = useState('');
   const [taskCompany, setTaskCompany] = useState(''); 
   const [selectedAssignees, setSelectedAssignees] = useState([]);
-  const [taskPriority, setTaskPriority] = useState('Routine');
+  const [taskPriority, setTaskPriority] = useState('Routine'); 
   const [taskDate, setTaskDate] = useState('');
   const [hasSpecificTime, setHasSpecificTime] = useState(false); 
   const [startTime, setStartTime] = useState('13:00');
@@ -974,8 +973,8 @@ export default function App() {
           type: isFlex ? 'flexible' : 'timed',
           recurrenceType: 'once',
           exceptionDates: [],
-          isOverdue: targetDate && targetDate.trim() !== '' && targetDate < todayStr,
-          overdueNotified: targetDate && targetDate.trim() !== '' && targetDate < todayStr,
+          isOverdue: Boolean(targetDate && targetDate.trim() !== '' && targetDate < todayStr), 
+          overdueNotified: Boolean(targetDate && targetDate.trim() !== '' && targetDate < todayStr),
           comments: [...(targetTask.comments || []), moveNote] 
         };
 
@@ -1028,7 +1027,7 @@ export default function App() {
 
       return prevTasks.map(t => {
         if (t.id === taskId) {
-          const newIsOverdue = targetDate && targetDate.trim() !== '' && targetDate < todayStr && t.status !== 'completed';
+          const newIsOverdue = Boolean(targetDate && targetDate.trim() !== '' && targetDate < todayStr && t.status !== 'completed');
           const updatedStandard = {
             ...t,
             date: targetDate,
@@ -1234,7 +1233,7 @@ export default function App() {
     setTaskDesc('');
     setTaskCompany(''); 
     setSelectedAssignees([]);
-    setTaskPriority('Routine'); // Default Priority is now Green
+    setTaskPriority('Routine'); 
     setTaskDate(formatDateKey(currentDate));
     setHasSpecificTime(false); 
     setStartTime('09:00');
@@ -1361,7 +1360,7 @@ export default function App() {
     });
 
     resetForm();
-    setCurrentView(previousView);
+    setCurrentView(previousView === 'create' ? 'list' : previousView);
   };
 
   const handleOpenModal = (task, instanceDateStr) => {
@@ -1409,8 +1408,8 @@ export default function App() {
     const dur = Math.max(0.5, endDec - startDec);
     const todayStr = formatDateKey(new Date());
     
-    // Only flag one-time tasks as newly overdue on edit
-    const isStillOverdue = taskDate && taskDate.trim() !== '' && taskDate < todayStr && selectedTask.status !== 'completed' && recurrenceType === 'once';
+    // SAFE BOOLEAN CONVERSION - Prevents DB rejection if date is empty
+    const isStillOverdue = Boolean(taskDate && taskDate.trim() !== '' && taskDate < todayStr && selectedTask.status !== 'completed' && recurrenceType === 'once');
 
     const editNote = `✏️ Task details modified by ${currentUserName} [${getCurrentTimestamp()}]`;
 
@@ -1794,13 +1793,11 @@ export default function App() {
   const getPriorityStyle = (priority) => {
     switch (priority) {
       case 'High': return { border: 'border-red-500', badge: 'bg-red-100 text-red-800' };
-      // Green is now the default "Routine"
       case 'Routine':
       default: return { border: 'border-emerald-500', badge: 'bg-emerald-100 text-emerald-800' };
     }
   };
 
-  // DYNAMIC TRAFFIC LIGHT RENDERER
   const renderPriorityPill = (task, instanceDateStr) => {
     const isPastDue = isTaskPastDue(task);
     const isDueToday = !isPastDue && isTaskDueToday(task, instanceDateStr);
@@ -2072,7 +2069,7 @@ export default function App() {
               ⚙️
             </button>
 
-            {userRole === 'admin' && (
+            {userRole === 'admin' && currentView !== 'create' && (
               <button onClick={handleOpenCreateView} className="bg-[#5B7049] text-white px-4 py-2 rounded text-xs font-bold shadow-sm hover:bg-[#465638] transition">
                 + New Task
               </button>
@@ -2943,7 +2940,7 @@ export default function App() {
           <div className="flex flex-col h-full animate-fade-in">
             <div className="flex justify-between items-center mb-6 border-b border-gray-300 pb-4">
               <h1 className="text-3xl font-serif font-bold">Task Builder</h1>
-              <button onClick={() => setCurrentView(previousView)} className="text-gray-500 hover:text-gray-800 font-semibold text-sm">✕ Cancel</button>
+              <button onClick={() => setCurrentView(previousView === 'create' ? 'list' : previousView)} className="text-gray-500 hover:text-gray-800 font-semibold text-sm">✕ Cancel</button>
             </div>
 
             <div className="flex gap-8 h-full">
