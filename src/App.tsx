@@ -146,7 +146,7 @@ const mapToDb = (t) => ({
   start_hour: t.startHour ?? null,
   duration: t.duration ?? null,
   time_label: t.timeLabel || 'All-Day',
-  priority: t.priority || 'Routine',
+  priority: t.priority || 'Standard',
   type: t.type || 'flexible',
   status: t.status || 'pending',
   requires_photo: t.requiresPhoto ?? false,
@@ -172,9 +172,10 @@ const mapToDb = (t) => ({
 });
 
 const mapFromDb = (r) => {
-  let mappedPriority = r.priority || 'Routine';
-  if (mappedPriority === 'Medium' || mappedPriority === 'Low') {
-    mappedPriority = 'Routine';
+  // AUTO-MIGRATOR: Convert existing older priorities to 'Standard'
+  let mappedPriority = r.priority || 'Standard';
+  if (mappedPriority === 'Medium' || mappedPriority === 'Low' || mappedPriority === 'Routine') {
+    mappedPriority = 'Standard';
   }
 
   return {
@@ -395,7 +396,7 @@ export default function App() {
   const [taskDesc, setTaskDesc] = useState('');
   const [taskCompany, setTaskCompany] = useState(''); 
   const [selectedAssignees, setSelectedAssignees] = useState([]);
-  const [taskPriority, setTaskPriority] = useState('Routine');
+  const [taskPriority, setTaskPriority] = useState('Standard'); // NOW STANDARD
   const [taskDate, setTaskDate] = useState('');
   const [hasSpecificTime, setHasSpecificTime] = useState(false); 
   const [startTime, setStartTime] = useState('13:00');
@@ -543,6 +544,8 @@ export default function App() {
     
     return task.status === 'completed' && task.date === dateStr;
   };
+
+  // ------------------------------
 
   useEffect(() => {
     if (!session) return;
@@ -1231,7 +1234,7 @@ export default function App() {
     setTaskDesc('');
     setTaskCompany(''); 
     setSelectedAssignees([]);
-    setTaskPriority('Routine'); 
+    setTaskPriority('Standard'); 
     setTaskDate(formatDateKey(currentDate));
     setHasSpecificTime(false); 
     setStartTime('09:00');
@@ -1251,7 +1254,7 @@ export default function App() {
   };
 
   const handleAddChainedStep = () => {
-    setChainedSteps([...chainedSteps, { title: '', desc: '', relativeDays: 1, assignee: 'Same as Parent', priority: 'Routine', requiresPhoto: false, requiresComment: false }]);
+    setChainedSteps([...chainedSteps, { title: '', desc: '', relativeDays: 1, assignee: 'Same as Parent', priority: 'Standard', requiresPhoto: false, requiresComment: false }]);
   };
 
   const handleUpdateChainedStep = (index, field, value) => {
@@ -1406,6 +1409,7 @@ export default function App() {
     const dur = Math.max(0.5, endDec - startDec);
     const todayStr = formatDateKey(new Date());
     
+    // Only flag one-time tasks as newly overdue on edit
     const isStillOverdue = Boolean(taskDate && taskDate.trim() !== '' && taskDate < todayStr && selectedTask.status !== 'completed' && recurrenceType === 'once');
 
     const editNote = `✏️ Task details modified by ${currentUserName} [${getCurrentTimestamp()}]`;
@@ -1585,7 +1589,7 @@ export default function App() {
         startHour: null,
         duration: null,
         timeLabel: 'All-Day',
-        priority: selectedTask.priority || 'Routine',
+        priority: selectedTask.priority || 'Standard',
         requiresPhoto: false,
         requiresComment: false,
         allowAssigneeDeadlineChange: false,
@@ -1656,7 +1660,7 @@ export default function App() {
         startHour: 9,
         duration: 1,
         timeLabel: '09:00 AM - 10:00 AM',
-        priority: nextStep.priority || 'Routine',
+        priority: nextStep.priority || 'Standard',
         requiresPhoto: nextStep.requiresPhoto || false,
         requiresComment: nextStep.requiresComment || false,
         allowAssigneeDeadlineChange: false,
@@ -1790,12 +1794,11 @@ export default function App() {
   const getPriorityStyle = (priority) => {
     switch (priority) {
       case 'High': return { border: 'border-red-500', badge: 'bg-red-100 text-red-800' };
-      case 'Routine':
+      case 'Standard':
       default: return { border: 'border-emerald-500', badge: 'bg-emerald-100 text-emerald-800' };
     }
   };
 
-  // DYNAMIC TRAFFIC LIGHT RENDERER
   const renderPriorityPill = (task, instanceDateStr) => {
     const isPastDue = isTaskPastDue(task);
     const isDueToday = !isPastDue && isTaskDueToday(task, instanceDateStr);
@@ -2038,7 +2041,7 @@ export default function App() {
               </button>
 
               {isNotifOpen && (
-                <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl border border-gray-300 z-50 p-3 animate-fade-in">
+                <div className="absolute -left-[4px] sm:left-auto sm:right-0 mt-2 w-72 sm:w-80 bg-white rounded-lg shadow-xl border border-gray-300 z-50 p-3 animate-fade-in">
                   <div className="flex justify-between items-center border-b pb-2 mb-2">
                     <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700">Notification Center ({userRole.toUpperCase()})</h4>
                     <button onClick={markAllNotifsRead} className="text-[10px] text-blue-600 font-bold hover:underline">Mark all read</button>
@@ -2293,7 +2296,7 @@ export default function App() {
                         }
                       });
 
-                      const priorityScore = { High: 1, Routine: 2, Medium: 3, Low: 4 };
+                      const priorityScore = { High: 1, Standard: 2 };
                       compWeekTasks.sort((a, b) => {
                         if (a.instanceDate !== b.instanceDate) return a.instanceDate.localeCompare(b.instanceDate);
                         return (priorityScore[a.priority] || 5) - (priorityScore[b.priority] || 5);
@@ -3039,7 +3042,7 @@ export default function App() {
                     <label className="block text-sm font-bold text-gray-700 mb-1">Priority Level</label>
                     <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)} className="w-full px-4 py-2 rounded border border-gray-300 bg-white text-sm">
                       <option value="High">High (Red)</option>
-                      <option value="Routine">Routine (Green)</option>
+                      <option value="Standard">Standard (Green)</option>
                     </select>
                   </div>
                 </div>
@@ -3432,7 +3435,7 @@ export default function App() {
                         <label className="block font-bold mb-1 text-gray-700">Priority Level</label>
                         <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)} className="w-full p-2 border rounded bg-white">
                           <option value="High">High (Red)</option>
-                          <option value="Routine">Routine (Green)</option>
+                          <option value="Standard">Standard (Green)</option>
                         </select>
                       </div>
                     </div>
