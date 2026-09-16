@@ -133,14 +133,6 @@ const sendNativePush = async ({ targetType, targetValue, title, message }) => {
   }
 };
 
-const formatDateKey = (d) => {
-  if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
 const mapToDb = (t) => ({
   id: String(t.id),
   title: t.title || '',
@@ -244,6 +236,13 @@ export default function App() {
   const [currentProfile, setCurrentProfile] = useState<any>(null);
   const [teamMembers, setTeamMembers] = useState([]);
   const [activeEmployeeFilters, setActiveEmployeeFilters] = useState([]);
+
+  // --- DYNAMIC LIST SCOPE ---
+  const [listScope, setListScope] = useState('day');
+
+  useEffect(() => {
+    setListScope(userRole === 'admin' ? 'week' : 'day');
+  }, [userRole]);
 
   const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
 
@@ -396,7 +395,7 @@ export default function App() {
   const [taskDesc, setTaskDesc] = useState('');
   const [taskCompany, setTaskCompany] = useState(''); 
   const [selectedAssignees, setSelectedAssignees] = useState([]);
-  const [taskPriority, setTaskPriority] = useState('Routine'); 
+  const [taskPriority, setTaskPriority] = useState('Routine');
   const [taskDate, setTaskDate] = useState('');
   const [hasSpecificTime, setHasSpecificTime] = useState(false); 
   const [startTime, setStartTime] = useState('13:00');
@@ -435,13 +434,14 @@ export default function App() {
   const [tasks, setTasks] = useState([]);
   const [isDbLoading, setIsDbLoading] = useState(true);
 
-  // --- RE-SCOPED DERIVED VARIABLES ---
-  const isCurrentInstanceCompleted = selectedTask && (
-    selectedTask.status === 'completed' || 
-    (selectedTask.completedDates && selectedTask.completedDates.includes(selectedInstanceDate))
-  );
+  const formatDateKey = (d) => {
+    if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
 
-  // --- CORE TIME ENGINE ---
   const isTaskScheduledOnDay = (task, dayOfWeekStr, dateStr) => {
     if (!task) return false;
     if (task.endDate && dateStr > task.endDate) return false;
@@ -544,8 +544,6 @@ export default function App() {
     return task.status === 'completed' && task.date === dateStr;
   };
 
-  // ------------------------------
-
   useEffect(() => {
     if (!session) return;
 
@@ -637,9 +635,9 @@ export default function App() {
 
   const handlePrevDate = () => {
     const d = new Date(currentDate);
-    if (currentView === 'day' || ((currentView === 'list' || currentView === 'completed') && userRole !== 'admin')) {
+    if (currentView === 'day' || ((currentView === 'list' || currentView === 'completed') && listScope === 'day')) {
       d.setDate(d.getDate() - 1);
-    } else if (currentView === 'week' || ((currentView === 'list' || currentView === 'completed') && userRole === 'admin')) {
+    } else if (currentView === 'week' || ((currentView === 'list' || currentView === 'completed') && listScope === 'week')) {
       d.setDate(d.getDate() - 7);
     } else if (currentView === 'month') {
       d.setMonth(d.getMonth() - 1);
@@ -649,9 +647,9 @@ export default function App() {
 
   const handleNextDate = () => {
     const d = new Date(currentDate);
-    if (currentView === 'day' || ((currentView === 'list' || currentView === 'completed') && userRole !== 'admin')) {
+    if (currentView === 'day' || ((currentView === 'list' || currentView === 'completed') && listScope === 'day')) {
       d.setDate(d.getDate() + 1);
-    } else if (currentView === 'week' || ((currentView === 'list' || currentView === 'completed') && userRole === 'admin')) {
+    } else if (currentView === 'week' || ((currentView === 'list' || currentView === 'completed') && listScope === 'week')) {
       d.setDate(d.getDate() + 7);
     } else if (currentView === 'month') {
       d.setMonth(d.getMonth() + 1);
@@ -674,11 +672,11 @@ export default function App() {
     const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-    if (currentView === 'day' || ((currentView === 'list' || currentView === 'completed') && userRole !== 'admin')) {
+    if (currentView === 'day' || ((currentView === 'list' || currentView === 'completed') && listScope === 'day')) {
       return `${dayNames[currentDate.getDay()]}, ${monthNames[currentDate.getMonth()]} ${currentDate.getDate()}, ${currentDate.getFullYear()}`;
     }
 
-    if (currentView === 'week' || ((currentView === 'list' || currentView === 'completed') && userRole === 'admin')) {
+    if (currentView === 'week' || ((currentView === 'list' || currentView === 'completed') && listScope === 'week')) {
       let start = new Date(currentDate);
       if (currentView === 'list' || currentView === 'completed') {
         const day = start.getDay();
@@ -1253,7 +1251,7 @@ export default function App() {
   };
 
   const handleAddChainedStep = () => {
-    setChainedSteps([...chainedSteps, { title: '', desc: '', relativeDays: 1, assignee: 'Same as Parent', priority: 'Medium', requiresPhoto: false, requiresComment: false }]);
+    setChainedSteps([...chainedSteps, { title: '', desc: '', relativeDays: 1, assignee: 'Same as Parent', priority: 'Routine', requiresPhoto: false, requiresComment: false }]);
   };
 
   const handleUpdateChainedStep = (index, field, value) => {
@@ -1408,7 +1406,6 @@ export default function App() {
     const dur = Math.max(0.5, endDec - startDec);
     const todayStr = formatDateKey(new Date());
     
-    // SAFE BOOLEAN CONVERSION - Prevents DB rejection if date is empty
     const isStillOverdue = Boolean(taskDate && taskDate.trim() !== '' && taskDate < todayStr && selectedTask.status !== 'completed' && recurrenceType === 'once');
 
     const editNote = `✏️ Task details modified by ${currentUserName} [${getCurrentTimestamp()}]`;
@@ -1798,6 +1795,7 @@ export default function App() {
     }
   };
 
+  // DYNAMIC TRAFFIC LIGHT RENDERER
   const renderPriorityPill = (task, instanceDateStr) => {
     const isPastDue = isTaskPastDue(task);
     const isDueToday = !isPastDue && isTaskDueToday(task, instanceDateStr);
@@ -2078,7 +2076,7 @@ export default function App() {
         </div>
 
         {/* TEAM MEMBER & COMPANY FILTER BAR */}
-        {userRole === 'admin' && currentView !== 'create' && (
+        {currentView !== 'create' && (
           <div className="bg-white p-3 rounded-lg border border-gray-200 mb-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-2xs">
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-2">
@@ -2100,31 +2098,33 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 border-l border-gray-200 pl-4">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Team:</span>
-                <div className="flex flex-wrap gap-1">
-                  {teamMembers.filter(m => !hiddenMembers.includes(m.name)).map(m => {
-                    const isActive = activeEmployeeFilters.includes(m.name);
-                    return (
-                      <button
-                        key={m.id}
-                        onClick={() => toggleEmployeeFilter(m.name)}
-                        className={`text-xs px-2.5 py-1 rounded-full font-bold border transition flex items-center gap-1.5 ${
-                          isActive ? 'bg-white shadow-2xs border-gray-300 text-gray-800' : 'bg-gray-100 text-gray-400 border-gray-200 line-through'
-                        }`}>
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: m.color }}></span>
-                        {m.name}
-                      </button>
-                    );
-                  })}
+              {userRole === 'admin' && (
+                <div className="flex items-center gap-2 border-l border-gray-200 pl-4">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Team:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {teamMembers.filter(m => !hiddenMembers.includes(m.name)).map(m => {
+                      const isActive = activeEmployeeFilters.includes(m.name);
+                      return (
+                        <button
+                          key={m.id}
+                          onClick={() => toggleEmployeeFilter(m.name)}
+                          className={`text-xs px-2.5 py-1 rounded-full font-bold border transition flex items-center gap-1.5 ${
+                            isActive ? 'bg-white shadow-2xs border-gray-300 text-gray-800' : 'bg-gray-100 text-gray-400 border-gray-200 line-through'
+                          }`}>
+                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: m.color }}></span>
+                          {m.name}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             <button 
               onClick={() => {
                 setActiveCompanyFilters([...masterCompanyList]);
-                setActiveEmployeeFilters(teamMembers.map(m => m.name));
+                if (userRole === 'admin') setActiveEmployeeFilters(teamMembers.map(m => m.name));
               }} 
               className="text-[11px] font-bold text-[#A9B1A6] hover:underline self-end md:self-center">
               Reset All Filters
@@ -2204,7 +2204,7 @@ export default function App() {
         )}
 
         {/* UNASSIGNED BACKLOG TRAY */}
-        {userRole === 'admin' && backlogTasks.length > 0 && currentView !== 'create' && currentView !== 'list' && currentView !== 'completed' && (
+        {userRole === 'admin' && backlogTasks.length > 0 && currentView !== 'create' && currentView !== 'completed' && (currentView !== 'list' || listScope === 'day') && (
           <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-4">
             <div className="flex justify-between items-center mb-2">
               <span className="text-xs font-bold uppercase tracking-wider text-amber-900 flex items-center gap-2">
@@ -2234,7 +2234,32 @@ export default function App() {
         {(currentView === 'list' || currentView === 'completed') && (
           <div className="flex-col flex gap-6 overflow-y-auto pr-2">
             
-            {userRole === 'admin' ? (
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${currentView === 'completed' ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500">
+                  {listScope === 'week' 
+                    ? (currentView === 'completed' ? 'Completed Tasks Overview' : 'Weekly Overview') 
+                    : (currentView === 'completed' ? `Completed on ${getHeaderTitle()}` : `Tasks for ${getHeaderTitle()}`)
+                  }
+                </h2>
+              </div>
+              
+              <div className="bg-gray-200 p-0.5 rounded flex items-center border border-gray-300 shadow-inner">
+                <button 
+                  onClick={() => setListScope('day')}
+                  className={`px-3 py-1 text-[10px] font-bold rounded transition ${listScope === 'day' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                  1-Day
+                </button>
+                <button 
+                  onClick={() => setListScope('week')}
+                  className={`px-3 py-1 text-[10px] font-bold rounded transition ${listScope === 'week' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                  7-Day
+                </button>
+              </div>
+            </div>
+
+            {listScope === 'week' ? (
               (() => {
                 const start = new Date(currentDate);
                 const day = start.getDay();
@@ -2250,13 +2275,6 @@ export default function App() {
 
                 return (
                   <>
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className={`w-2 h-2 rounded-full ${currentView === 'completed' ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                      <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500">
-                        {currentView === 'completed' ? 'Completed Tasks Overview' : 'Weekly Overview'}
-                      </h2>
-                    </div>
-
                     {masterCompanyList.filter(c => activeCompanyFilters.includes(c) && !hiddenCompanies.includes(c)).map(company => {
                       
                       let compWeekTasks = [];
@@ -2293,7 +2311,7 @@ export default function App() {
                           
                           {currentView === 'list' && (
                             <>
-                              {compBacklog.length > 0 && (
+                              {userRole === 'admin' && compBacklog.length > 0 && (
                                 <div className="bg-amber-50 border border-amber-300 rounded-lg p-3">
                                   <div className="flex justify-between items-center mb-2">
                                     <span className="text-[10px] font-bold uppercase tracking-wider text-amber-900 flex items-center gap-2">
@@ -2377,7 +2395,7 @@ export default function App() {
                                   );
                                 })}
                                 
-                                {compWeekTasks.length === 0 && compBacklog.length === 0 && (
+                                {compWeekTasks.length === 0 && (userRole !== 'admin' || compBacklog.length === 0) && (
                                   <div className="bg-white p-6 rounded text-center border border-dashed border-gray-300">
                                     <p className="text-sm text-gray-500 font-bold">No active tasks scheduled for {company} this week.</p>
                                   </div>
@@ -2424,13 +2442,6 @@ export default function App() {
               })()
             ) : (
               <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <span className={`w-2 h-2 rounded-full ${currentView === 'completed' ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                  <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500">
-                    {currentView === 'completed' ? `Completed on ${getHeaderTitle()}` : `Tasks for ${getHeaderTitle()}`}
-                  </h2>
-                </div>
-
                 {currentView === 'list' && (
                   <div className="flex flex-col gap-3">
                     {visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate))).length > 0 ? (
