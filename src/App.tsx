@@ -185,7 +185,7 @@ const mapToDb = (t) => {
     completed_dates: t.completedDates || [],
     exception_dates: t.exceptionDates || [],
     is_overdue: t.is_overdue ?? false,
-    overdue_notified: t.overdue_notified ?? false,
+    overdue_notified: t.overdueNotified ?? false,
     is_long_term: t.is_long_term ?? false
   };
 };
@@ -375,7 +375,7 @@ export default function App() {
   }, [userRole, currentUserName]);
 
   // --- UNIFIED NOTIFICATION DISPATCHER ---
-  const dispatchNotification = (targetType, targetValue, type, bellText, pushTitle, pushMessage) => {
+  const dispatchNotification = (targetType, targetValue, type, bellText, pushTitle, pushMessage, taskId = null, taskDate = null) => {
     if (pushTitle && pushMessage) {
       sendNativePush({
         targetType,
@@ -395,6 +395,8 @@ export default function App() {
           type, 
           targetType, 
           targetValue, 
+          taskId,
+          taskDate,
           read: false, 
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
         }
@@ -631,7 +633,9 @@ export default function App() {
           'overdue',
           `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was not completed by ${alertDate}`,
           '⚠️ Task Overdue Alert',
-          `"${task.title}" (${assigneeLabel}) was not completed by ${alertDate}`
+          `"${task.title}" (${assigneeLabel}) was not completed by ${alertDate}`,
+          task.id,
+          alertDate
         );
 
         const { error } = await supabase.from('tasks').update({ is_overdue: true, overdue_notified: true }).eq('id', task.id);
@@ -902,7 +906,9 @@ export default function App() {
               'resize',
               `⏱️ Schedule Modified: Duration changed for "${resizedTask.title}"`,
               '⏱️ Schedule Modified',
-              `Task duration modified for "${resizedTask.title}"`
+              `Task duration modified for "${resizedTask.title}"`,
+              resizedTask.id,
+              resizedTask.date
             );
           });
         }
@@ -985,7 +991,9 @@ export default function App() {
           'schedule',
           `📅 Rescheduled: "${targetTask.title}" moved to ${targetDate}`,
           '📅 Schedule Updated',
-          `"${targetTask.title}" has been moved to ${targetDate}`
+          `"${targetTask.title}" has been moved to ${targetDate}`,
+          targetTask.id,
+          targetDate
         );
       });
 
@@ -1387,7 +1395,9 @@ export default function App() {
         'new_task',
         `📋 New Task: "${taskTitle}" (${taskCompany})`,
         '📋 New Task Assigned',
-        `You have been assigned: "${taskTitle}" (${taskCompany})`
+        `You have been assigned: "${taskTitle}" (${taskCompany})`,
+        newTask.id,
+        newTask.date
       );
     });
 
@@ -1491,7 +1501,9 @@ export default function App() {
         'update',
         `✏️ Updated: "${taskTitle}" details modified by Admin`,
         '✏️ Task Updated by Admin',
-        `Details updated for "${taskTitle}"`
+        `Details updated for "${taskTitle}"`,
+        updatedTask.id,
+        updatedTask.date
       );
     });
 
@@ -1514,7 +1526,9 @@ export default function App() {
           'delete',
           `🗑️ Cancelled: "${taskToDelete.title}" removed from queue`,
           '🗑️ Task Cancelled',
-          `"${taskToDelete.title}" was removed from your queue.`
+          `"${taskToDelete.title}" was removed from your queue.`,
+          null,
+          null
         );
       });
     }
@@ -1544,7 +1558,9 @@ export default function App() {
           'comment',
           `💬 New Note on "${selectedTask.title}" by ${currentUserName}`,
           '💬 New Execution Note',
-          `${currentUserName} commented on "${selectedTask.title}"`
+          `${currentUserName} commented on "${selectedTask.title}"`,
+          selectedTask.id,
+          selectedInstanceDate
         );
       }
     } else {
@@ -1555,7 +1571,9 @@ export default function App() {
           'comment',
           `💬 Admin Update: New note on "${selectedTask.title}"`,
           '💬 Task Update',
-          `Admin ${currentUserName} added a note to "${selectedTask.title}"`
+          `Admin ${currentUserName} added a note to "${selectedTask.title}"`,
+          selectedTask.id,
+          selectedInstanceDate
         );
       });
     }
@@ -1604,7 +1622,9 @@ export default function App() {
           'photo',
           `📎 File Uploaded for "${selectedTask.title}" by ${currentUserName}`,
           '📎 Proof File Uploaded',
-          `${currentUserName} attached ${file.name} to "${selectedTask.title}"`
+          `${currentUserName} attached ${file.name} to "${selectedTask.title}"`,
+          selectedTask.id,
+          selectedInstanceDate
         );
       }
     } else {
@@ -1615,7 +1635,9 @@ export default function App() {
           'photo',
           `📎 Admin Upload: File added to "${selectedTask.title}"`,
           '📎 File Attached',
-          `Admin ${currentUserName} attached ${file.name} to "${selectedTask.title}"`
+          `Admin ${currentUserName} attached ${file.name} to "${selectedTask.title}"`,
+          selectedTask.id,
+          selectedInstanceDate
         );
       });
     }
@@ -1679,7 +1701,9 @@ export default function App() {
         'completion',
         `✓ Task Completed: "${selectedTask.title}" by ${currentUserName}`,
         '✓ Task Completed',
-        `"${selectedTask.title}" marked complete by ${currentUserName}`
+        `"${selectedTask.title}" marked complete by ${currentUserName}`,
+        selectedTask.id,
+        selectedInstanceDate
       );
     }
 
@@ -1730,7 +1754,9 @@ export default function App() {
           'subtask',
           `➕ New Sub Task Spawned: "${completionPrompt.title}"`,
           '➕ Sub Task Spawned',
-          `${currentUserName} created follow-up task: "${completionPrompt.title}"`
+          `${currentUserName} created follow-up task: "${completionPrompt.title}"`,
+          newAdHocTask.id,
+          targetDate
         );
       }
 
@@ -1834,7 +1860,9 @@ export default function App() {
           'comment',
           `💬 Follow-up Note on "${selectedTask.title}" by ${currentUserName}`,
           '💬 New Execution Note',
-          `${currentUserName} added a follow-up note to "${selectedTask.title}"`
+          `${currentUserName} added a follow-up note to "${selectedTask.title}"`,
+          selectedTask.id,
+          selectedInstanceDate
         );
       }
     } else {
@@ -1845,7 +1873,9 @@ export default function App() {
           'comment',
           `💬 Admin Update: Follow-up note on "${selectedTask.title}"`,
           '💬 Task Update',
-          `Admin ${currentUserName} added a follow-up note to "${selectedTask.title}"`
+          `Admin ${currentUserName} added a follow-up note to "${selectedTask.title}"`,
+          selectedTask.id,
+          selectedInstanceDate
         );
       });
     }
@@ -1873,6 +1903,23 @@ export default function App() {
       await supabase.from('tasks').update(mapToDb(target)).eq('id', id);
     }
     setSelectedTask(null);
+  };
+
+  // --- NOTIFICATION CLICK HANDLER ---
+  const handleNotificationClick = (notif) => {
+    setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
+    
+    if (notif.taskId) {
+      const targetTask = tasks.find(t => t.id === notif.taskId);
+      if (targetTask) {
+        handleOpenModal(targetTask, notif.taskDate || targetTask.date);
+        setIsNotifOpen(false);
+      } else {
+        alert("This task could not be found or may have been deleted.");
+      }
+    } else {
+       setIsNotifOpen(false);
+    }
   };
 
   const renderComment = (commentText, index) => {
@@ -2198,11 +2245,19 @@ export default function App() {
                   </div>
                   <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
                     {notifications.map(n => (
-                      <div key={n.id} className={`p-2 rounded text-xs border ${n.read ? 'bg-gray-50 border-gray-100 text-gray-500' : 'bg-blue-50/80 border-blue-200 text-gray-900 font-bold'}`}>
-                        <div className="flex justify-between items-start gap-1">
-                          <span>{n.text}</span>
-                          <span className="text-[9px] text-gray-400 shrink-0">{n.time}</span>
+                      <div 
+                        key={n.id} 
+                        onClick={() => handleNotificationClick(n)}
+                        className={`p-2 rounded text-xs border cursor-pointer hover:brightness-95 transition ${n.read ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-blue-50 border-blue-200 text-blue-900 shadow-2xs font-bold'}`}>
+                        <div className="flex justify-between items-start gap-2">
+                          <span className="leading-tight">{n.text}</span>
+                          <span className={`text-[9px] shrink-0 ${n.read ? 'text-gray-400' : 'text-blue-500 font-bold'}`}>{n.time}</span>
                         </div>
+                        {n.taskId && (
+                          <div className="mt-1 text-[9px] text-gray-400 font-bold uppercase">
+                            Click to View ↗
+                          </div>
+                        )}
                       </div>
                     ))}
                     {notifications.length === 0 && (
@@ -3419,7 +3474,9 @@ export default function App() {
                                 'deadline',
                                 `📅 Employee Rescheduled: "${selectedTask.title}" deadline changed to ${newDate}`,
                                 '📅 Employee Changed Deadline',
-                                `${currentUserName} moved deadline for "${selectedTask.title}" to ${newDate}`
+                                `${currentUserName} moved deadline for "${selectedTask.title}" to ${newDate}`,
+                                selectedTask.id,
+                                newDate
                               );
                             }
                           }} 
