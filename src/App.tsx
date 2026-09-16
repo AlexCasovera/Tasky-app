@@ -305,6 +305,7 @@ export default function App() {
 
   const [currentDate, setCurrentDate] = useState(new Date());
   
+  // HCP SEARCH ENGINE STATE
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const searchRef = useRef(null);
@@ -428,6 +429,7 @@ export default function App() {
     return `${year}-${month}-${day}`;
   };
 
+  // DYNAMIC OVERDUE CALCULATOR (Ensures visual UI never reverts)
   const isTaskPastDue = (task) => {
     if (!task.date || task.date.trim() === '') return false;
     const todayStr = formatDateKey(new Date());
@@ -472,6 +474,7 @@ export default function App() {
     };
   }, [session, companies]);
 
+  // SAFELY TRIGGER ADMIN ALERTS FOR OVERDUE TASKS (Prevents refresh spam)
   useEffect(() => {
     if (tasks.length === 0) return;
 
@@ -509,6 +512,7 @@ export default function App() {
 
   const masterCompanyList = [...new Set([...companies, ...tasks.map(t => t.company).filter(Boolean)])];
 
+  // REAL-TIME AUDIT TIMESTAMP GENERATOR
   const getCurrentTimestamp = () => {
     const now = new Date();
     return now.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) + ' @ ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -862,7 +866,7 @@ export default function App() {
           exceptionDates: [],
           isOverdue: targetDate && targetDate.trim() !== '' && targetDate < todayStr,
           overdueNotified: targetDate && targetDate.trim() !== '' && targetDate < todayStr,
-          comments: [...(targetTask.comments || []), moveNote]
+          comments: [...(targetTask.comments || []), moveNote] 
         };
 
         return prevTasks.map(t => {
@@ -1068,6 +1072,7 @@ export default function App() {
 
     const trimmed = newName.trim();
 
+    // OPTIMISTIC UI
     setCompanies(prev => prev.map(c => c === oldName ? trimmed : c));
     setActiveCompanyFilters(prev => prev.map(c => c === oldName ? trimmed : c));
     setTasks(prev => prev.map(t => t.company === oldName ? { ...t, company: trimmed } : t));
@@ -1372,8 +1377,6 @@ export default function App() {
     setSelectedTask(null);
   };
 
-  const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
-
   const handlePostOpenComment = async (id) => {
     if (!openCommentInput.trim()) return;
     
@@ -1440,7 +1443,6 @@ export default function App() {
           : [...(t.comments || []), completionNote];
 
         if (t.recurrenceType === 'once') {
-          // OVERWRITES the array with exactly today's date for accurate completion view rendering
           return { ...t, status: 'completed', isOverdue: false, completedDates: [todayStrForCompletion], comments: newComments };
         } else {
           const updatedCompletedDates = [...new Set([...(t.completedDates || []), selectedInstanceDate])];
@@ -1701,7 +1703,12 @@ export default function App() {
 
     const isCompanyMatch = activeCompanyFilters.includes(t.company);
 
-    return isAssigneeMatch && isCompanyMatch;
+    const isSearchMatch = !searchQuery.trim() || 
+      (t.title && t.title.toLowerCase().includes(searchQuery.toLowerCase())) || 
+      (t.desc && t.desc.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (t.assignees && t.assignees.some(a => a && a.toLowerCase().includes(searchQuery.toLowerCase())));
+
+    return isAssigneeMatch && isCompanyMatch && isSearchMatch;
   });
 
   const backlogTasks = tasks.filter(t => !t.isLongTerm && (!t.assignees || t.assignees.length === 0) && t.status !== 'completed' && activeCompanyFilters.includes(t.company) && !hiddenCompanies.includes(t.company));
@@ -2336,7 +2343,7 @@ export default function App() {
                                         <span className="text-[10px] text-gray-500">Assigned to: {(task.assignees || []).join(', ')}</span>
                                       </div>
                                     </div>
-                                    <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-300 self-end sm:self-auto shrink-0">
+                                    <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full border border-green-300 self-end sm:self-auto shrink-0">
                                       ✓ Completed
                                     </span>
                                   </div>
@@ -2918,6 +2925,7 @@ export default function App() {
                           checked={isLongTerm} 
                           onChange={(e) => {
                             setIsLongTerm(e.target.checked);
+                            // SMART CLEAR logic
                             if (e.target.checked && taskDate === formatDateKey(new Date())) {
                               setTaskDate('');
                             } else if (!e.target.checked && taskDate === '') {
