@@ -133,6 +133,14 @@ const sendNativePush = async ({ targetType, targetValue, title, message }) => {
   }
 };
 
+const formatDateKey = (d) => {
+  if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const mapToDb = (t) => ({
   id: String(t.id),
   title: t.title || '',
@@ -146,7 +154,7 @@ const mapToDb = (t) => ({
   start_hour: t.startHour ?? null,
   duration: t.duration ?? null,
   time_label: t.timeLabel || 'All-Day',
-  priority: t.priority || 'Low',
+  priority: t.priority || 'Routine',
   type: t.type || 'flexible',
   status: t.status || 'pending',
   requires_photo: t.requiresPhoto ?? false,
@@ -171,42 +179,50 @@ const mapToDb = (t) => ({
   is_long_term: t.isLongTerm ?? false
 });
 
-const mapFromDb = (r) => ({
-  id: String(r.id),
-  title: r.title || '',
-  desc: r.description || '',
-  company: r.company || '',
-  assignees: r.assignees || [],
-  date: r.date || r.date_scheduled || '',
-  startTime: r.start_time,
-  endTime: r.end_time,
-  startHour: r.start_hour ? Number(r.start_hour) : null,
-  duration: r.duration ? Number(r.duration) : null,
-  timeLabel: r.time_label || 'All-Day',
-  priority: r.priority || 'Low',
-  type: r.type || 'flexible',
-  status: r.status || 'pending',
-  requiresPhoto: r.requires_photo ?? false,
-  requiresComment: r.requires_comment ?? false,
-  allowAssigneeDeadlineChange: r.allow_deadline_change ?? false,
-  recurrenceType: r.recurrence_type || 'once',
-  activeDays: r.active_days || [],
-  cadenceDays: r.cadence_days ?? 14,
-  notifyOnComplete: r.notify_on_complete ?? true,
-  notifyOnComment: r.notify_on_comment ?? true,
-  notifyOnDeadlineChange: r.notify_on_deadline_change ?? true,
-  notifyOnTaskCreated: r.notify_on_task_created ?? true,
-  parentTaskId: r.parent_task_id,
-  parentTaskTitle: r.parent_task_title,
-  parentInstanceDate: r.parent_instance_date,
-  comments: r.comments || [],
-  chainedSteps: r.chained_steps || [],
-  completedDates: r.completed_dates || [],
-  exceptionDates: r.exception_dates || [],
-  isOverdue: r.is_overdue ?? false,
-  overdueNotified: r.overdue_notified ?? false,
-  isLongTerm: r.is_long_term ?? false
-});
+const mapFromDb = (r) => {
+  // AUTO-MIGRATOR: Convert all existing 'Medium' and 'Low' tasks to 'Routine'
+  let mappedPriority = r.priority || 'Routine';
+  if (mappedPriority === 'Medium' || mappedPriority === 'Low') {
+    mappedPriority = 'Routine';
+  }
+
+  return {
+    id: String(r.id),
+    title: r.title || '',
+    desc: r.description || '',
+    company: r.company || '',
+    assignees: r.assignees || [],
+    date: r.date || r.date_scheduled || '',
+    startTime: r.start_time,
+    endTime: r.end_time,
+    startHour: r.start_hour ? Number(r.start_hour) : null,
+    duration: r.duration ? Number(r.duration) : null,
+    timeLabel: r.time_label || 'All-Day',
+    priority: mappedPriority,
+    type: r.type || 'flexible',
+    status: r.status || 'pending',
+    requiresPhoto: r.requires_photo ?? false,
+    requiresComment: r.requires_comment ?? false,
+    allowAssigneeDeadlineChange: r.allow_deadline_change ?? false,
+    recurrenceType: r.recurrence_type || 'once',
+    activeDays: r.active_days || [],
+    cadenceDays: r.cadence_days ?? 14,
+    notifyOnComplete: r.notify_on_complete ?? true,
+    notifyOnComment: r.notify_on_comment ?? true,
+    notifyOnDeadlineChange: r.notify_on_deadline_change ?? true,
+    notifyOnTaskCreated: r.notify_on_task_created ?? true,
+    parentTaskId: r.parent_task_id,
+    parentTaskTitle: r.parent_task_title,
+    parentInstanceDate: r.parent_instance_date,
+    comments: r.comments || [],
+    chainedSteps: r.chained_steps || [],
+    completedDates: r.completed_dates || [],
+    exceptionDates: r.exception_dates || [],
+    isOverdue: r.is_overdue ?? false,
+    overdueNotified: r.overdue_notified ?? false,
+    isLongTerm: r.is_long_term ?? false
+  };
+};
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
@@ -381,7 +397,7 @@ export default function App() {
   const [taskDesc, setTaskDesc] = useState('');
   const [taskCompany, setTaskCompany] = useState(''); 
   const [selectedAssignees, setSelectedAssignees] = useState([]);
-  const [taskPriority, setTaskPriority] = useState('Low'); // CHANGED: Default is now Low (Green)
+  const [taskPriority, setTaskPriority] = useState('Routine');
   const [taskDate, setTaskDate] = useState('');
   const [hasSpecificTime, setHasSpecificTime] = useState(false); 
   const [startTime, setStartTime] = useState('13:00');
@@ -420,16 +436,13 @@ export default function App() {
   const [tasks, setTasks] = useState([]);
   const [isDbLoading, setIsDbLoading] = useState(true);
 
-  // --- TIME ENGINE REFACTOR ---
+  // --- RE-SCOPED DERIVED VARIABLES ---
+  const isCurrentInstanceCompleted = selectedTask && (
+    selectedTask.status === 'completed' || 
+    (selectedTask.completedDates && selectedTask.completedDates.includes(selectedInstanceDate))
+  );
 
-  const formatDateKey = (d) => {
-    if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
+  // --- CORE TIME ENGINE ---
   const isTaskScheduledOnDay = (task, dayOfWeekStr, dateStr) => {
     if (!task) return false;
     if (task.endDate && dateStr > task.endDate) return false;
@@ -503,7 +516,6 @@ export default function App() {
     return false;
   };
 
-  // ADDED: Traffic Light Helper - Checks if task is due exactly today
   const isTaskDueToday = (task, instanceDateStr = null) => {
     if (!task || task.status === 'completed') return false;
     const todayStr = formatDateKey(new Date());
@@ -962,8 +974,8 @@ export default function App() {
           type: isFlex ? 'flexible' : 'timed',
           recurrenceType: 'once',
           exceptionDates: [],
-          isOverdue: false, 
-          overdueNotified: false,
+          isOverdue: targetDate && targetDate.trim() !== '' && targetDate < todayStr,
+          overdueNotified: targetDate && targetDate.trim() !== '' && targetDate < todayStr,
           comments: [...(targetTask.comments || []), moveNote] 
         };
 
@@ -1016,6 +1028,7 @@ export default function App() {
 
       return prevTasks.map(t => {
         if (t.id === taskId) {
+          const newIsOverdue = targetDate && targetDate.trim() !== '' && targetDate < todayStr && t.status !== 'completed';
           const updatedStandard = {
             ...t,
             date: targetDate,
@@ -1026,8 +1039,8 @@ export default function App() {
             endTime: eStr,
             timeLabel: label,
             type: isFlex ? 'flexible' : 'timed',
-            isOverdue: false, 
-            overdueNotified: false,
+            isOverdue: newIsOverdue,
+            overdueNotified: newIsOverdue,
             comments: [...(t.comments || []), moveNote] 
           };
           dbPayloads.push({ action: 'update', payload: updatedStandard });
@@ -1221,7 +1234,7 @@ export default function App() {
     setTaskDesc('');
     setTaskCompany(''); 
     setSelectedAssignees([]);
-    setTaskPriority('Low'); // CHANGED: Default is now Low (Green)
+    setTaskPriority('Routine'); // Default Priority is now Green
     setTaskDate(formatDateKey(currentDate));
     setHasSpecificTime(false); 
     setStartTime('09:00');
@@ -1576,7 +1589,7 @@ export default function App() {
         startHour: null,
         duration: null,
         timeLabel: 'All-Day',
-        priority: selectedTask.priority || 'Medium',
+        priority: selectedTask.priority || 'Routine',
         requiresPhoto: false,
         requiresComment: false,
         allowAssigneeDeadlineChange: false,
@@ -1647,7 +1660,7 @@ export default function App() {
         startHour: 9,
         duration: 1,
         timeLabel: '09:00 AM - 10:00 AM',
-        priority: nextStep.priority || 'Medium',
+        priority: nextStep.priority || 'Routine',
         requiresPhoto: nextStep.requiresPhoto || false,
         requiresComment: nextStep.requiresComment || false,
         allowAssigneeDeadlineChange: false,
@@ -1781,10 +1794,26 @@ export default function App() {
   const getPriorityStyle = (priority) => {
     switch (priority) {
       case 'High': return { border: 'border-red-500', badge: 'bg-red-100 text-red-800' };
-      case 'Medium': return { border: 'border-amber-400', badge: 'bg-amber-100 text-amber-800' };
-      case 'Low': return { border: 'border-emerald-500', badge: 'bg-emerald-100 text-emerald-800' };
-      default: return { border: 'border-[#A9B1A6]', badge: 'bg-gray-100 text-gray-700' };
+      // Green is now the default "Routine"
+      case 'Routine':
+      default: return { border: 'border-emerald-500', badge: 'bg-emerald-100 text-emerald-800' };
     }
+  };
+
+  // DYNAMIC TRAFFIC LIGHT RENDERER
+  const renderPriorityPill = (task, instanceDateStr) => {
+    const isPastDue = isTaskPastDue(task);
+    const isDueToday = !isPastDue && isTaskDueToday(task, instanceDateStr);
+    
+    if (isPastDue) {
+      return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-200 animate-pulse uppercase">Overdue</span>;
+    }
+    if (isDueToday) {
+      return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 shadow-sm uppercase">Due Today</span>;
+    }
+    
+    const style = getPriorityStyle(task.priority);
+    return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${style.badge} uppercase`}>{task.priority}</span>;
   };
 
   const visibleMembers = userRole === 'admin' 
@@ -2128,7 +2157,7 @@ export default function App() {
                       <span className="text-[9px] bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded shrink-0">{task.company}</span>
                     </div>
                     <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-200">{task.priority}</span>
+                      {renderPriorityPill(task, missedDate)}
                       <div className="flex -space-x-1.5">
                         {(task.assignees || []).map((a, idx) => {
                           const m = getMemberConfig(a);
@@ -2249,7 +2278,7 @@ export default function App() {
                         }
                       });
 
-                      const priorityScore = { High: 1, Medium: 2, Low: 3, Routine: 4 };
+                      const priorityScore = { High: 1, Routine: 2, Medium: 3, Low: 4 };
                       compWeekTasks.sort((a, b) => {
                         if (a.instanceDate !== b.instanceDate) return a.instanceDate.localeCompare(b.instanceDate);
                         return (priorityScore[a.priority] || 5) - (priorityScore[b.priority] || 5);
@@ -2304,6 +2333,7 @@ export default function App() {
                                     bgClass = "bg-red-50/50";
                                   } else if (isDueToday) {
                                     borderClass = "border-amber-500 ring-1 ring-amber-400";
+                                    bgClass = "bg-amber-50/20";
                                   }
 
                                   return (
@@ -2331,13 +2361,8 @@ export default function App() {
                                       </div>
 
                                       <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100 mt-1 sm:mt-0">
-                                        {isPastDue ? (
-                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-200 animate-pulse">OVERDUE</span>
-                                        ) : isDueToday ? (
-                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 shadow-sm">Due Today</span>
-                                        ) : (
-                                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${style.badge}`}>{task.priority}</span>
-                                        )}
+                                        
+                                        {renderPriorityPill(task, task.instanceDate)}
 
                                         <div className="flex -space-x-1.5">
                                           {(task.assignees || []).map((a, idx) => {
@@ -2426,6 +2451,7 @@ export default function App() {
                             bgClass = "bg-red-50/50";
                           } else if (isDueToday) {
                             borderClass = "border-amber-500 ring-1 ring-amber-400";
+                            bgClass = "bg-amber-50/20";
                           }
 
                           return (
@@ -2446,13 +2472,7 @@ export default function App() {
                               </div>
                               <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto pt-3 sm:pt-0 border-t sm:border-t-0 border-gray-100 mt-1 sm:mt-0">
                                 
-                                {isPastDue ? (
-                                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-red-100 text-red-800 border border-red-200 animate-pulse">OVERDUE</span>
-                                ) : isDueToday ? (
-                                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300 shadow-sm">Due Today</span>
-                                ) : (
-                                  <span className={`text-xs font-semibold px-3 py-1 rounded-full ${style.badge}`}>{task.priority}</span>
-                                )}
+                                {renderPriorityPill(task, formatDateKey(currentDate))}
 
                                 <div className="flex -space-x-2">
                                   {(task.assignees || []).map((a, idx) => {
@@ -3011,9 +3031,7 @@ export default function App() {
                     <label className="block text-sm font-bold text-gray-700 mb-1">Priority Level</label>
                     <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)} className="w-full px-4 py-2 rounded border border-gray-300 bg-white text-sm">
                       <option value="High">High (Red)</option>
-                      <option value="Medium">Medium (Orange)</option>
-                      <option value="Low">Low (Green)</option>
-                      <option value="Routine">Routine (Gray)</option>
+                      <option value="Routine">Routine (Green)</option>
                     </select>
                   </div>
                 </div>
@@ -3406,9 +3424,7 @@ export default function App() {
                         <label className="block font-bold mb-1 text-gray-700">Priority Level</label>
                         <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)} className="w-full p-2 border rounded bg-white">
                           <option value="High">High (Red)</option>
-                          <option value="Medium">Medium (Orange)</option>
-                          <option value="Low">Low (Green)</option>
-                          <option value="Routine">Routine (Gray)</option>
+                          <option value="Routine">Routine (Green)</option>
                         </select>
                       </div>
                     </div>
