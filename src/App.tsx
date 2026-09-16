@@ -133,6 +133,14 @@ const sendNativePush = async ({ targetType, targetValue, title, message }) => {
   }
 };
 
+const formatDateKey = (d) => {
+  if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const mapToDb = (t) => ({
   id: String(t.id),
   title: t.title || '',
@@ -396,7 +404,7 @@ export default function App() {
   const [taskDesc, setTaskDesc] = useState('');
   const [taskCompany, setTaskCompany] = useState(''); 
   const [selectedAssignees, setSelectedAssignees] = useState([]);
-  const [taskPriority, setTaskPriority] = useState('Standard'); // NOW STANDARD
+  const [taskPriority, setTaskPriority] = useState('Standard'); // CHANGED: Default is now Standard (Green)
   const [taskDate, setTaskDate] = useState('');
   const [hasSpecificTime, setHasSpecificTime] = useState(false); 
   const [startTime, setStartTime] = useState('13:00');
@@ -435,14 +443,7 @@ export default function App() {
   const [tasks, setTasks] = useState([]);
   const [isDbLoading, setIsDbLoading] = useState(true);
 
-  const formatDateKey = (d) => {
-    if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
+  // --- CORE TIME ENGINE & HELPERS ---
   const isTaskScheduledOnDay = (task, dayOfWeekStr, dateStr) => {
     if (!task) return false;
     if (task.endDate && dateStr > task.endDate) return false;
@@ -1409,7 +1410,6 @@ export default function App() {
     const dur = Math.max(0.5, endDec - startDec);
     const todayStr = formatDateKey(new Date());
     
-    // Only flag one-time tasks as newly overdue on edit
     const isStillOverdue = Boolean(taskDate && taskDate.trim() !== '' && taskDate < todayStr && selectedTask.status !== 'completed' && recurrenceType === 'once');
 
     const editNote = `✏️ Task details modified by ${currentUserName} [${getCurrentTimestamp()}]`;
@@ -1814,6 +1814,17 @@ export default function App() {
     return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${style.badge} uppercase`}>{task.priority}</span>;
   };
 
+  // --- RE-SCOPED DERIVED VARIABLES ---
+  const isCurrentInstanceCompleted = selectedTask && (
+    selectedTask.status === 'completed' || 
+    (selectedTask.completedDates && selectedTask.completedDates.includes(selectedInstanceDate))
+  );
+
+  const draggedTaskObj = draggedTaskId ? tasks.find(t => t.id === draggedTaskId) : null;
+
+  let gridStartHour = 6;
+  let gridEndHour = 20;
+
   const visibleMembers = userRole === 'admin' 
     ? teamMembers.filter(m => activeEmployeeFilters.includes(m.name) && !hiddenMembers.includes(m.name))
     : teamMembers.filter(m => m.name === currentUserName);
@@ -1839,7 +1850,6 @@ export default function App() {
 
   const backlogTasks = tasks.filter(t => !t.isLongTerm && (!t.assignees || t.assignees.length === 0) && t.status !== 'completed' && activeCompanyFilters.includes(t.company) && !hiddenCompanies.includes(t.company));
   
-  // DYNAMIC TRAY LOGIC
   const longTermTasks = visibleTasks.filter(t => t.isLongTerm && t.status !== 'completed' && (userRole === 'admin' || !isTaskPastDue(t)));
 
   const overdueTasks = visibleTasks.filter(t => isTaskPastDue(t));
@@ -1864,6 +1874,24 @@ export default function App() {
   };
 
   const hasSearchResults = searchResults.tasks.length > 0 || searchResults.companies.length > 0 || searchResults.members.length > 0;
+
+  const viewTasks = currentView === 'day' 
+    ? visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)))
+    : currentView === 'week'
+    ? visibleTasks.filter(t => t.type === 'timed' && t.startHour !== null) 
+    : [];
+
+  viewTasks.forEach(t => {
+    if (t.type === 'timed' && t.startHour !== null) {
+      if (t.startHour < gridStartHour) gridStartHour = Math.floor(t.startHour);
+      if (t.startHour + (t.duration || 1) > gridEndHour + 1) gridEndHour = Math.ceil(t.startHour + (t.duration || 1)) - 1;
+    }
+  });
+
+  if (gridStartHour < 0) gridStartHour = 0;
+  if (gridEndHour > 23) gridEndHour = 23;
+
+  const dynamicTimeSlots = Array.from({ length: gridEndHour - gridStartHour + 1 }, (_, i) => gridStartHour + i);
 
   if (!session) {
     return <Auth />
@@ -2290,7 +2318,7 @@ export default function App() {
                               compWeekTasks.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
                             }
                             if (isTaskCompletedOnDay(t, wd.dateStr)) {
-                              compWeekCompleted.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
+                              compWeekCompleted.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dateStr });
                             }
                           });
                         }
@@ -2644,6 +2672,7 @@ export default function App() {
 
                         {memberColTasks.map(task => {
                           const layout = layouts[task.id] || { left: '0%', width: '100%', startPx: 0, heightPx: 80, isFlex: false };
+                          const member = getMemberConfig(task.assignees && task.assignees[0]);
                           const isFlex = layout.isFlex;
 
                           return (
