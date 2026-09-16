@@ -954,8 +954,8 @@ export default function App() {
           type: isFlex ? 'flexible' : 'timed',
           recurrenceType: 'once',
           exceptionDates: [],
-          isOverdue: false, 
-          overdueNotified: false,
+          isOverdue: targetDate && targetDate.trim() !== '' && targetDate < todayStr,
+          overdueNotified: targetDate && targetDate.trim() !== '' && targetDate < todayStr,
           comments: [...(targetTask.comments || []), moveNote] 
         };
 
@@ -1008,6 +1008,7 @@ export default function App() {
 
       return prevTasks.map(t => {
         if (t.id === taskId) {
+          const newIsOverdue = targetDate && targetDate.trim() !== '' && targetDate < todayStr && t.status !== 'completed';
           const updatedStandard = {
             ...t,
             date: targetDate,
@@ -1018,8 +1019,8 @@ export default function App() {
             endTime: eStr,
             timeLabel: label,
             type: isFlex ? 'flexible' : 'timed',
-            isOverdue: false, 
-            overdueNotified: false,
+            isOverdue: newIsOverdue,
+            overdueNotified: newIsOverdue,
             comments: [...(t.comments || []), moveNote] 
           };
           dbPayloads.push({ action: 'update', payload: updatedStandard });
@@ -1829,57 +1830,6 @@ export default function App() {
   };
 
   const hasSearchResults = searchResults.tasks.length > 0 || searchResults.companies.length > 0 || searchResults.members.length > 0;
-
-  // --- CORE TIME ENGINE REFACTOR ---
-  const isTaskActiveOnDay = (task, dayOfWeekStr, dateStr) => {
-    if (!task) return false;
-    if (task.status === 'completed') return false;
-    if (task.completedDates && task.completedDates.includes(dateStr)) return false;
-    if (task.exceptionDates && task.exceptionDates.includes(dateStr)) return false; 
-    
-    return isTaskScheduledOnDay(task, dayOfWeekStr, dateStr);
-  };
-
-  const isTaskCompletedOnDay = (task, dateStr) => {
-    if (!task) return false;
-    
-    if (task.completedDates && task.completedDates.length > 0) {
-      if (task.recurrenceType === 'once') {
-         return task.completedDates[0] === dateStr; 
-      }
-      return task.completedDates.includes(dateStr);
-    }
-    
-    return task.status === 'completed' && task.date === dateStr;
-  };
-
-  const isCurrentInstanceCompleted = selectedTask && (
-    selectedTask.status === 'completed' || 
-    (selectedTask.completedDates && selectedTask.completedDates.includes(selectedInstanceDate))
-  );
-
-  const draggedTaskObj = draggedTaskId ? tasks.find(t => t.id === draggedTaskId) : null;
-
-  let gridStartHour = 6;
-  let gridEndHour = 20;
-  
-  const viewTasks = currentView === 'day' 
-    ? visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)))
-    : currentView === 'week'
-    ? visibleTasks.filter(t => t.type === 'timed' && t.startHour !== null) 
-    : [];
-
-  viewTasks.forEach(t => {
-    if (t.type === 'timed' && t.startHour !== null) {
-      if (t.startHour < gridStartHour) gridStartHour = Math.floor(t.startHour);
-      if (t.startHour + (t.duration || 1) > gridEndHour + 1) gridEndHour = Math.ceil(t.startHour + (t.duration || 1)) - 1;
-    }
-  });
-
-  if (gridStartHour < 0) gridStartHour = 0;
-  if (gridEndHour > 23) gridEndHour = 23;
-
-  const dynamicTimeSlots = Array.from({ length: gridEndHour - gridStartHour + 1 }, (_, i) => gridStartHour + i);
 
   if (!session) {
     return <Auth />
@@ -3310,7 +3260,7 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* UNIVERSAL ATTACHMENTS & PROOF OF WORK */}
+                  {/* UNIVERSAL ATTACHMENTS & Proof OF WORK */}
                   {!isCurrentInstanceCompleted && (
                     <div className="bg-white p-3 rounded border border-amber-300 flex justify-between items-center my-1">
                       <div className="flex flex-col">
