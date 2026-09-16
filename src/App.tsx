@@ -141,45 +141,54 @@ const formatDateKey = (d) => {
   return `${year}-${month}-${day}`;
 };
 
-const mapToDb = (t) => ({
-  id: String(t.id),
-  title: t.title || '',
-  description: t.desc || '',
-  company: t.company || '',
-  assignees: t.assignees || [],
-  date: t.date || null,
-  date_scheduled: t.date || null,
-  start_time: t.startTime || null,
-  end_time: t.endTime || null,
-  start_hour: t.startHour ?? null,
-  duration: t.duration ?? null,
-  time_label: t.timeLabel || 'All-Day',
-  priority: t.priority || 'Standard',
-  type: t.type || 'flexible',
-  status: t.status || 'pending',
-  requires_photo: t.requiresPhoto ?? false,
-  requires_comment: t.requiresComment ?? false,
-  allow_deadline_change: t.allowAssigneeDeadlineChange ?? false,
-  recurrence_type: t.recurrenceType || 'once',
-  active_days: t.activeDays || [],
-  cadence_days: t.cadenceDays ?? 14,
-  notify_on_complete: t.notifyOnComplete ?? true,
-  notify_on_comment: t.notifyOnComment ?? true,
-  notify_on_deadline_change: t.notifyOnDeadlineChange ?? true,
-  notify_on_task_created: t.notifyOnTaskCreated ?? true,
-  parent_task_id: t.parentTaskId ? String(t.parentTaskId) : null,
-  parent_task_title: t.parentTaskTitle || null,
-  parent_instance_date: t.parentInstanceDate || null,
-  comments: t.comments || [],
-  chained_steps: t.chainedSteps || [],
-  completed_dates: t.completedDates || [],
-  exception_dates: t.exceptionDates || [],
-  is_overdue: t.isOverdue ?? false,
-  overdue_notified: t.overdueNotified ?? false,
-  is_long_term: t.isLongTerm ?? false
-});
+const mapToDb = (t) => {
+  // TRANSLATE UI 'Standard' -> DB allowed 'Routine' to satisfy Supabase CHECK constraint
+  let dbPriority = t.priority || 'Routine';
+  if (dbPriority === 'Standard') {
+    dbPriority = 'Routine';
+  }
+
+  return {
+    id: String(t.id),
+    title: t.title || '',
+    description: t.desc || '',
+    company: t.company || '',
+    assignees: t.assignees || [],
+    date: t.date || null,
+    date_scheduled: t.date || null,
+    start_time: t.startTime || null,
+    end_time: t.endTime || null,
+    start_hour: t.startHour ?? null,
+    duration: t.duration ?? null,
+    time_label: t.timeLabel || 'All-Day',
+    priority: dbPriority,
+    type: t.type || 'flexible',
+    status: t.status || 'pending',
+    requires_photo: t.requiresPhoto ?? false,
+    requires_comment: t.requiresComment ?? false,
+    allow_deadline_change: t.allowAssigneeDeadlineChange ?? false,
+    recurrence_type: t.recurrenceType || 'once',
+    active_days: t.activeDays || [],
+    cadence_days: t.cadenceDays ?? 14,
+    notify_on_complete: t.notifyOnComplete ?? true,
+    notify_on_comment: t.notifyOnComment ?? true,
+    notify_on_deadline_change: t.notifyOnDeadlineChange ?? true,
+    notify_on_task_created: t.notifyOnTaskCreated ?? true,
+    parent_task_id: t.parentTaskId ? String(t.parentTaskId) : null,
+    parent_task_title: t.parentTaskTitle || null,
+    parent_instance_date: t.parentInstanceDate || null,
+    comments: t.comments || [],
+    chained_steps: t.chainedSteps || [],
+    completed_dates: t.completedDates || [],
+    exception_dates: t.exceptionDates || [],
+    is_overdue: t.isOverdue ?? false,
+    overdue_notified: t.overdueNotified ?? false,
+    is_long_term: t.isLongTerm ?? false
+  };
+};
 
 const mapFromDb = (r) => {
+  // TRANSLATE DB 'Routine' / 'Medium' / 'Low' -> UI 'Standard'
   let mappedPriority = r.priority || 'Standard';
   if (mappedPriority === 'Medium' || mappedPriority === 'Low' || mappedPriority === 'Routine') {
     mappedPriority = 'Standard';
@@ -426,7 +435,7 @@ export default function App() {
   
   const [openCommentInput, setExecutionComment] = useState('');
   const [photoUploaded, setPhotoUploaded] = useState(false);
-  const [isDraggingFile, setIsDraggingFile] = useState(false); // FOR DRAG/DROP
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [additionalNote, setAdditionalNote] = useState('');
 
   const [draggedTaskId, setDraggedTaskId] = useState(null);
@@ -545,8 +554,6 @@ export default function App() {
     
     return task.status === 'completed' && task.date === dateStr;
   };
-
-  // ------------------------------
 
   useEffect(() => {
     if (!session) return;
@@ -1372,7 +1379,7 @@ export default function App() {
     setExecutionComment('');
     setPhotoUploaded(false);
     setAdditionalNote('');
-    setIsDraggingFile(false); // Reset drag state when modal opens
+    setIsDraggingFile(false);
 
     setTaskTitle(task.title);
     setTaskDesc(task.desc);
@@ -1517,7 +1524,6 @@ export default function App() {
   const handleFileUpload = async (file) => {
     if (!file) return;
 
-    // Apply compression if it's an image
     if (file.type.startsWith('image/')) {
       file = await compressImage(file, 1280, 1280, 0.7);
     }
@@ -1859,17 +1865,6 @@ export default function App() {
     return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${style.badge} uppercase`}>{task.priority}</span>;
   };
 
-  // --- RE-SCOPED DERIVED VARIABLES ---
-  const isCurrentInstanceCompleted = selectedTask && (
-    selectedTask.status === 'completed' || 
-    (selectedTask.completedDates && selectedTask.completedDates.includes(selectedInstanceDate))
-  );
-
-  const draggedTaskObj = draggedTaskId ? tasks.find(t => t.id === draggedTaskId) : null;
-
-  let gridStartHour = 6;
-  let gridEndHour = 20;
-
   const visibleMembers = userRole === 'admin' 
     ? teamMembers.filter(m => activeEmployeeFilters.includes(m.name) && !hiddenMembers.includes(m.name))
     : teamMembers.filter(m => m.name === currentUserName);
@@ -1925,6 +1920,9 @@ export default function App() {
     : currentView === 'week'
     ? visibleTasks.filter(t => t.type === 'timed' && t.startHour !== null) 
     : [];
+
+  let gridStartHour = 6;
+  let gridEndHour = 20;
 
   viewTasks.forEach(t => {
     if (t.type === 'timed' && t.startHour !== null) {
@@ -2363,7 +2361,7 @@ export default function App() {
                               compWeekTasks.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
                             }
                             if (isTaskCompletedOnDay(t, wd.dateStr)) {
-                              compWeekCompleted.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
+                              compWeekCompleted.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dateStr });
                             }
                           });
                         }
@@ -2498,7 +2496,7 @@ export default function App() {
                                         <span className="text-[10px] text-gray-500">Assigned to: {(task.assignees || []).join(', ')}</span>
                                       </div>
                                     </div>
-                                    <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full border border-green-300 self-end sm:self-auto shrink-0">
+                                    <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-300 self-end sm:self-auto shrink-0">
                                       ✓ Completed
                                     </span>
                                   </div>
