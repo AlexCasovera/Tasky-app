@@ -142,7 +142,6 @@ const formatDateKey = (d) => {
 };
 
 const mapToDb = (t) => {
-  // TRANSLATE UI 'Standard' -> DB allowed 'Routine' to satisfy Supabase CHECK constraint
   let dbPriority = t.priority || 'Routine';
   if (dbPriority === 'Standard') {
     dbPriority = 'Routine';
@@ -188,7 +187,6 @@ const mapToDb = (t) => {
 };
 
 const mapFromDb = (r) => {
-  // TRANSLATE DB 'Routine' / 'Medium' / 'Low' -> UI 'Standard'
   let mappedPriority = r.priority || 'Standard';
   if (mappedPriority === 'Medium' || mappedPriority === 'Low' || mappedPriority === 'Routine') {
     mappedPriority = 'Standard';
@@ -253,15 +251,11 @@ export default function App() {
   const [currentProfile, setCurrentProfile] = useState<any>(null);
   const [teamMembers, setTeamMembers] = useState([]);
   const [activeEmployeeFilters, setActiveEmployeeFilters] = useState([]);
-
-  // --- DYNAMIC LIST SCOPE ---
   const [listScope, setListScope] = useState('day');
 
   useEffect(() => {
     setListScope(userRole === 'admin' ? 'week' : 'day');
   }, [userRole]);
-
-  const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
 
   const [hiddenCompanies, setHiddenCompanies] = useState(() => JSON.parse(localStorage.getItem('hiddenCompanies') || '[]'));
   const [hiddenMembers, setHiddenMembers] = useState(() => JSON.parse(localStorage.getItem('hiddenMembers') || '[]'));
@@ -335,7 +329,6 @@ export default function App() {
   };
 
   const [currentDate, setCurrentDate] = useState(new Date());
-  
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const searchRef = useRef(null);
@@ -392,11 +385,9 @@ export default function App() {
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingMemberId, setEditingMemberId] = useState(null);
-
   const [newCompanyInput, setNewCompanyInput] = useState('');
   const [editingCompany, setEditingCompany] = useState<string | null>(null);
   const [editingCompanyInput, setEditingCompanyInput] = useState('');
-
   const [memberName, setMemberName] = useState('');
   const [memberEmail, setMemberEmail] = useState('');
   const [memberPassword, setMemberPassword] = useState('');
@@ -446,13 +437,26 @@ export default function App() {
   const resizeStateRef = useRef(null);
   const [completionPrompt, setCompletionPrompt] = useState(null);
 
-  const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const minuteSubSlots = [0, 0.25, 0.5, 0.75];
-
   const [tasks, setTasks] = useState([]);
   const [isDbLoading, setIsDbLoading] = useState(true);
 
-  // --- CORE TIME ENGINE & HELPERS ---
+  // --- CORE DERIVED VARIABLES ---
+  const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
+  
+  const isCurrentInstanceCompleted = selectedTask && (
+    selectedTask.status === 'completed' || 
+    (selectedTask.completedDates && selectedTask.completedDates.includes(selectedInstanceDate))
+  );
+
+  const draggedTaskObj = draggedTaskId ? tasks.find(t => t.id === draggedTaskId) : null;
+
+  let gridStartHour = 6;
+  let gridEndHour = 20;
+
+  const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const minuteSubSlots = [0, 0.25, 0.5, 0.75];
+
+  // --- CORE TIME ENGINE ---
   const isTaskScheduledOnDay = (task, dayOfWeekStr, dateStr) => {
     if (!task) return false;
     if (task.endDate && dateStr > task.endDate) return false;
@@ -1921,9 +1925,6 @@ export default function App() {
     ? visibleTasks.filter(t => t.type === 'timed' && t.startHour !== null) 
     : [];
 
-  let gridStartHour = 6;
-  let gridEndHour = 20;
-
   viewTasks.forEach(t => {
     if (t.type === 'timed' && t.startHour !== null) {
       if (t.startHour < gridStartHour) gridStartHour = Math.floor(t.startHour);
@@ -2361,7 +2362,7 @@ export default function App() {
                               compWeekTasks.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
                             }
                             if (isTaskCompletedOnDay(t, wd.dateStr)) {
-                              compWeekCompleted.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dateStr });
+                              compWeekCompleted.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
                             }
                           });
                         }
@@ -2496,7 +2497,7 @@ export default function App() {
                                         <span className="text-[10px] text-gray-500">Assigned to: {(task.assignees || []).join(', ')}</span>
                                       </div>
                                     </div>
-                                    <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-300 self-end sm:self-auto shrink-0">
+                                    <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full border border-green-300 self-end sm:self-auto shrink-0">
                                       ✓ Completed
                                     </span>
                                   </div>
