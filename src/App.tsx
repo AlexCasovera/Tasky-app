@@ -459,6 +459,9 @@ export default function App() {
   const [tasks, setTasks] = useState([]);
   const [isDbLoading, setIsDbLoading] = useState(true);
 
+  let gridStartHour = 6;
+  let gridEndHour = 20;
+
   // --- CORE DERIVED VARIABLES ---
   const isCurrentInstanceCompleted = selectedTask && (
     selectedTask.status === 'completed' || 
@@ -1533,15 +1536,28 @@ export default function App() {
       await supabase.from('tasks').update({ comments: updatedComments }).eq('id', id);
     }
 
-    if (userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
-      dispatchNotification(
-        'role',
-        'admin',
-        'comment',
-        `💬 New Note on "${selectedTask.title}" by ${currentUserName}`,
-        '💬 New Execution Note',
-        `${currentUserName} commented on "${selectedTask.title}"`
-      );
+    if (userRole === 'employee') {
+      if (selectedTask?.notifyOnComment !== false) {
+        dispatchNotification(
+          'role',
+          'admin',
+          'comment',
+          `💬 New Note on "${selectedTask.title}" by ${currentUserName}`,
+          '💬 New Execution Note',
+          `${currentUserName} commented on "${selectedTask.title}"`
+        );
+      }
+    } else {
+      (selectedTask.assignees || []).forEach(assigneeName => {
+        dispatchNotification(
+          'userName',
+          assigneeName,
+          'comment',
+          `💬 Admin Update: New note on "${selectedTask.title}"`,
+          '💬 Task Update',
+          `Admin ${currentUserName} added a note to "${selectedTask.title}"`
+        );
+      });
     }
 
     setExecutionComment('');
@@ -1580,15 +1596,28 @@ export default function App() {
 
     await supabase.from('tasks').update(mapToDb(updatedTask)).eq('id', selectedTask.id);
 
-    if (userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
-      dispatchNotification(
-        'role',
-        'admin',
-        'photo',
-        `📎 File Uploaded for "${selectedTask.title}" by ${currentUserName}`,
-        '📎 Proof File Uploaded',
-        `${currentUserName} attached ${file.name} to "${selectedTask.title}"`
-      );
+    if (userRole === 'employee') {
+      if (selectedTask?.notifyOnComment !== false) {
+        dispatchNotification(
+          'role',
+          'admin',
+          'photo',
+          `📎 File Uploaded for "${selectedTask.title}" by ${currentUserName}`,
+          '📎 Proof File Uploaded',
+          `${currentUserName} attached ${file.name} to "${selectedTask.title}"`
+        );
+      }
+    } else {
+      (selectedTask.assignees || []).forEach(assigneeName => {
+        dispatchNotification(
+          'userName',
+          assigneeName,
+          'photo',
+          `📎 Admin Upload: File added to "${selectedTask.title}"`,
+          '📎 File Attached',
+          `Admin ${currentUserName} attached ${file.name} to "${selectedTask.title}"`
+        );
+      });
     }
   };
 
@@ -1797,6 +1826,30 @@ export default function App() {
       await supabase.from('tasks').update({ comments: updatedComments }).eq('id', id);
     }
 
+    if (userRole === 'employee') {
+      if (selectedTask?.notifyOnComment !== false) {
+        dispatchNotification(
+          'role',
+          'admin',
+          'comment',
+          `💬 Follow-up Note on "${selectedTask.title}" by ${currentUserName}`,
+          '💬 New Execution Note',
+          `${currentUserName} added a follow-up note to "${selectedTask.title}"`
+        );
+      }
+    } else {
+      (selectedTask.assignees || []).forEach(assigneeName => {
+        dispatchNotification(
+          'userName',
+          assigneeName,
+          'comment',
+          `💬 Admin Update: Follow-up note on "${selectedTask.title}"`,
+          '💬 Task Update',
+          `Admin ${currentUserName} added a follow-up note to "${selectedTask.title}"`
+        );
+      });
+    }
+
     setAdditionalNote('');
     setSelectedTask(prev => ({ ...prev, comments: [...(prev.comments || []), noteText] }));
   };
@@ -1949,9 +2002,6 @@ export default function App() {
     : currentView === 'week'
     ? visibleTasks.filter(t => t.type === 'timed' && t.startHour !== null) 
     : [];
-
-  let gridStartHour = 6;
-  let gridEndHour = 20;
 
   viewTasks.forEach(t => {
     if (t.type === 'timed' && t.startHour !== null) {
