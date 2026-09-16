@@ -180,7 +180,7 @@ const mapToDb = (t) => {
     chained_steps: t.chainedSteps || [],
     completed_dates: t.completedDates || [],
     exception_dates: t.exceptionDates || [],
-    is_overdue: t.isOverdue ?? false,
+    is_overdue: t.is_overdue ?? false,
     overdue_notified: t.overdueNotified ?? false,
     is_long_term: t.isLongTerm ?? false
   };
@@ -257,6 +257,8 @@ export default function App() {
     setListScope(userRole === 'admin' ? 'week' : 'day');
   }, [userRole]);
 
+  const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
+
   const [hiddenCompanies, setHiddenCompanies] = useState(() => JSON.parse(localStorage.getItem('hiddenCompanies') || '[]'));
   const [hiddenMembers, setHiddenMembers] = useState(() => JSON.parse(localStorage.getItem('hiddenMembers') || '[]'));
 
@@ -329,6 +331,7 @@ export default function App() {
   };
 
   const [currentDate, setCurrentDate] = useState(new Date());
+  
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const searchRef = useRef(null);
@@ -348,39 +351,51 @@ export default function App() {
   const notifyChannel = useRef(null);
 
   useEffect(() => {
-    notifyChannel.current = supabase.channel('app-notifications')
-      .on('broadcast', { event: 'admin-alert' }, (payload) => {
-        if (userRole === 'admin') {
-          setNotifications(prev => [payload.payload, ...prev]);
+    const channel = supabase.channel('app-notifications')
+      .on('broadcast', { event: 'app-alert' }, ({ payload }) => {
+        const isForMe = 
+          (payload.targetType === 'role' && payload.targetValue === userRole) || 
+          (payload.targetType === 'userName' && payload.targetValue === currentUserName);
+          
+        if (isForMe) {
+          setNotifications(prev => [payload, ...prev]);
         }
       })
       .subscribe();
 
+    notifyChannel.current = channel;
+
     return () => {
-      supabase.removeChannel(notifyChannel.current);
+      supabase.removeChannel(channel);
     }
-  }, [userRole]);
+  }, [userRole, currentUserName]);
 
-  const triggerAdminAlert = (bellText, type, pushTitle, pushMessage) => {
-    sendNativePush({
-      targetType: 'role',
-      targetValue: 'admin',
-      title: pushTitle,
-      message: pushMessage
-    });
+  // --- UNIFIED NOTIFICATION DISPATCHER ---
+  const dispatchNotification = (targetType, targetValue, type, bellText, pushTitle, pushMessage) => {
+    if (pushTitle && pushMessage) {
+      sendNativePush({
+        targetType,
+        targetValue,
+        title: pushTitle,
+        message: pushMessage
+      });
+    }
 
-    notifyChannel.current?.send({
-      type: 'broadcast',
-      event: 'admin-alert',
-      payload: { 
-        id: Date.now() + Math.random(), 
-        text: bellText, 
-        type, 
-        recipientRole: 'admin', 
-        read: false, 
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-      }
-    });
+    if (bellText) {
+      notifyChannel.current?.send({
+        type: 'broadcast',
+        event: 'app-alert',
+        payload: { 
+          id: Date.now() + Math.random(), 
+          text: bellText, 
+          type, 
+          targetType, 
+          targetValue, 
+          read: false, 
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+        }
+      });
+    }
   };
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -441,8 +456,6 @@ export default function App() {
   const [isDbLoading, setIsDbLoading] = useState(true);
 
   // --- CORE DERIVED VARIABLES ---
-  const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
-  
   const isCurrentInstanceCompleted = selectedTask && (
     selectedTask.status === 'completed' || 
     (selectedTask.completedDates && selectedTask.completedDates.includes(selectedInstanceDate))
@@ -559,6 +572,8 @@ export default function App() {
     return task.status === 'completed' && task.date === dateStr;
   };
 
+  // ------------------------------
+
   useEffect(() => {
     if (!session) return;
 
@@ -611,9 +626,11 @@ export default function App() {
         const assigneeLabel = task.assignees && task.assignees.length > 0 ? task.assignees.join(', ') : 'Unassigned';
         const alertDate = getMissedDate(task);
         
-        triggerAdminAlert(
-          `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was not completed by ${alertDate}`,
+        dispatchNotification(
+          'role',
+          'admin',
           'overdue',
+          `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was not completed by ${alertDate}`,
           '⚠️ Task Overdue Alert',
           `"${task.title}" (${assigneeLabel}) was not completed by ${alertDate}`
         );
@@ -883,12 +900,14 @@ export default function App() {
           await supabase.from('tasks').update(mapToDb(resizedTask)).eq('id', resizedTask.id);
 
           (resizedTask.assignees || []).forEach(assigneeName => {
-            sendNativePush({
-              targetType: 'userName',
-              targetValue: assigneeName,
-              title: '⏱️ Schedule Modified',
-              message: `Task duration modified for "${resizedTask.title}"`
-            });
+            dispatchNotification(
+              'userName',
+              assigneeName,
+              'resize',
+              `⏱️ Schedule Modified: Duration changed for "${resizedTask.title}"`,
+              '⏱️ Schedule Modified',
+              `Task duration modified for "${resizedTask.title}"`
+            );
           });
         }
         resizeStateRef.current = null;
@@ -964,12 +983,14 @@ export default function App() {
 
       const notifyUsers = targetMemberName ? [targetMemberName] : (targetTask.assignees || []);
       notifyUsers.forEach(assigneeName => {
-        sendNativePush({
-          targetType: 'userName',
-          targetValue: assigneeName,
-          title: '📅 Schedule Updated',
-          message: `"${targetTask.title}" has been moved to ${targetDate}`
-        });
+        dispatchNotification(
+          'userName',
+          assigneeName,
+          'schedule',
+          `📅 Rescheduled: "${targetTask.title}" moved to ${targetDate}`,
+          '📅 Schedule Updated',
+          `"${targetTask.title}" has been moved to ${targetDate}`
+        );
       });
 
       if (targetTask.recurrenceType !== 'once' && !updateSeries) {
@@ -1364,12 +1385,14 @@ export default function App() {
     }
 
     selectedAssignees.forEach(assigneeName => {
-      sendNativePush({
-        targetType: 'userName',
-        targetValue: assigneeName,
-        title: '📋 New Task Assigned',
-        message: `You have been assigned: "${taskTitle}" (${taskCompany})`
-      });
+      dispatchNotification(
+        'userName', 
+        assigneeName, 
+        'new_task',
+        `📋 New Task: "${taskTitle}" (${taskCompany})`,
+        '📋 New Task Assigned',
+        `You have been assigned: "${taskTitle}" (${taskCompany})`
+      );
     });
 
     resetForm();
@@ -1466,12 +1489,14 @@ export default function App() {
     }
 
     selectedAssignees.forEach(assigneeName => {
-      sendNativePush({
-        targetType: 'userName',
-        targetValue: assigneeName,
-        title: '✏️ Task Updated by Admin',
-        message: `Details updated for "${taskTitle}"`
-      });
+      dispatchNotification(
+        'userName', 
+        assigneeName, 
+        'update',
+        `✏️ Updated: "${taskTitle}" details modified by Admin`,
+        '✏️ Task Updated by Admin',
+        `Details updated for "${taskTitle}"`
+      );
     });
 
     setSelectedTask(updatedTask);
@@ -1487,12 +1512,14 @@ export default function App() {
 
     if (taskToDelete && taskToDelete.assignees) {
       taskToDelete.assignees.forEach(assigneeName => {
-        sendNativePush({
-          targetType: 'userName',
-          targetValue: assigneeName,
-          title: '🗑️ Task Cancelled',
-          message: `"${taskToDelete.title}" was removed from your queue.`
-        });
+        dispatchNotification(
+          'userName', 
+          assigneeName, 
+          'delete',
+          `🗑️ Cancelled: "${taskToDelete.title}" removed from queue`,
+          '🗑️ Task Cancelled',
+          `"${taskToDelete.title}" was removed from your queue.`
+        );
       });
     }
 
@@ -1514,9 +1541,11 @@ export default function App() {
     }
 
     if (userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
-      triggerAdminAlert(
-        `💬 New Note on "${selectedTask.title}" by ${currentUserName}`,
+      dispatchNotification(
+        'role',
+        'admin',
         'comment',
+        `💬 New Note on "${selectedTask.title}" by ${currentUserName}`,
         '💬 New Execution Note',
         `${currentUserName} commented on "${selectedTask.title}"`
       );
@@ -1559,9 +1588,11 @@ export default function App() {
     await supabase.from('tasks').update(mapToDb(updatedTask)).eq('id', selectedTask.id);
 
     if (userRole === 'employee' && selectedTask?.notifyOnComment !== false) {
-      triggerAdminAlert(
-        `📎 File Uploaded for "${selectedTask.title}" by ${currentUserName}`,
+      dispatchNotification(
+        'role',
+        'admin',
         'photo',
+        `📎 File Uploaded for "${selectedTask.title}" by ${currentUserName}`,
         '📎 Proof File Uploaded',
         `${currentUserName} attached ${file.name} to "${selectedTask.title}"`
       );
@@ -1620,9 +1651,11 @@ export default function App() {
     });
 
     if (selectedTask?.notifyOnComplete !== false) {
-      triggerAdminAlert(
-        `✓ Task Completed: "${selectedTask.title}" by ${currentUserName}`,
+      dispatchNotification(
+        'role',
+        'admin',
         'completion',
+        `✓ Task Completed: "${selectedTask.title}" by ${currentUserName}`,
         '✓ Task Completed',
         `"${selectedTask.title}" marked complete by ${currentUserName}`
       );
@@ -1669,9 +1702,11 @@ export default function App() {
       };
 
       if (selectedTask?.notifyOnTaskCreated !== false) {
-        triggerAdminAlert(
-          `➕ New Sub Task Spawned: "${completionPrompt.title}"`,
+        dispatchNotification(
+          'role',
+          'admin',
           'subtask',
+          `➕ New Sub Task Spawned: "${completionPrompt.title}"`,
           '➕ Sub Task Spawned',
           `${currentUserName} created follow-up task: "${completionPrompt.title}"`
         );
@@ -1841,10 +1876,7 @@ export default function App() {
     setNotifications(notifications.map(n => ({ ...n, read: true })));
   };
 
-  const roleNotifications = notifications.filter(n => 
-    !n.recipientRole || n.recipientRole === 'all' || n.recipientRole === userRole
-  );
-  const unreadNotifCount = roleNotifications.filter(n => !n.read).length;
+  const unreadNotifCount = notifications.filter(n => !n.read).length;
 
   const getPriorityStyle = (priority) => {
     switch (priority) {
@@ -1924,6 +1956,9 @@ export default function App() {
     : currentView === 'week'
     ? visibleTasks.filter(t => t.type === 'timed' && t.startHour !== null) 
     : [];
+
+  let gridStartHour = 6;
+  let gridEndHour = 20;
 
   viewTasks.forEach(t => {
     if (t.type === 'timed' && t.startHour !== null) {
@@ -2115,11 +2150,11 @@ export default function App() {
               {isNotifOpen && (
                 <div className="absolute -left-[4px] sm:left-auto sm:right-0 mt-2 w-72 sm:w-80 bg-white rounded-lg shadow-xl border border-gray-300 z-50 p-3 animate-fade-in">
                   <div className="flex justify-between items-center border-b pb-2 mb-2">
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700">Notification Center ({userRole.toUpperCase()})</h4>
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700">Notification Center</h4>
                     <button onClick={markAllNotifsRead} className="text-[10px] text-blue-600 font-bold hover:underline">Mark all read</button>
                   </div>
                   <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
-                    {roleNotifications.map(n => (
+                    {notifications.map(n => (
                       <div key={n.id} className={`p-2 rounded text-xs border ${n.read ? 'bg-gray-50 border-gray-100 text-gray-500' : 'bg-blue-50/80 border-blue-200 text-gray-900 font-bold'}`}>
                         <div className="flex justify-between items-start gap-1">
                           <span>{n.text}</span>
@@ -2127,8 +2162,8 @@ export default function App() {
                         </div>
                       </div>
                     ))}
-                    {roleNotifications.length === 0 && (
-                      <p className="text-xs text-gray-400 italic text-center py-2">No notifications for {userRole}.</p>
+                    {notifications.length === 0 && (
+                      <p className="text-xs text-gray-400 italic text-center py-2">No notifications for {currentUserName}.</p>
                     )}
                   </div>
                 </div>
@@ -3335,9 +3370,11 @@ export default function App() {
                             await supabase.from('tasks').update(mapToDb(updated)).eq('id', selectedTask.id);
 
                             if (userRole === 'employee' && selectedTask?.notifyOnDeadlineChange !== false) {
-                              triggerAdminAlert(
-                                `📅 Employee Rescheduled: "${selectedTask.title}" deadline changed to ${newDate}`,
+                              dispatchNotification(
+                                'role',
+                                'admin',
                                 'deadline',
+                                `📅 Employee Rescheduled: "${selectedTask.title}" deadline changed to ${newDate}`,
                                 '📅 Employee Changed Deadline',
                                 `${currentUserName} moved deadline for "${selectedTask.title}" to ${newDate}`
                               );
