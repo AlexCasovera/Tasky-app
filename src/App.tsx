@@ -305,7 +305,6 @@ export default function App() {
 
   const [currentDate, setCurrentDate] = useState(new Date());
   
-  // HCP SEARCH ENGINE STATE
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const searchRef = useRef(null);
@@ -429,7 +428,6 @@ export default function App() {
     return `${year}-${month}-${day}`;
   };
 
-  // DYNAMIC OVERDUE CALCULATOR (Ensures visual UI never reverts)
   const isTaskPastDue = (task) => {
     if (!task.date || task.date.trim() === '') return false;
     const todayStr = formatDateKey(new Date());
@@ -474,7 +472,6 @@ export default function App() {
     };
   }, [session, companies]);
 
-  // SAFELY TRIGGER ADMIN ALERTS FOR OVERDUE TASKS (Prevents refresh spam)
   useEffect(() => {
     if (tasks.length === 0) return;
 
@@ -512,7 +509,6 @@ export default function App() {
 
   const masterCompanyList = [...new Set([...companies, ...tasks.map(t => t.company).filter(Boolean)])];
 
-  // REAL-TIME AUDIT TIMESTAMP GENERATOR
   const getCurrentTimestamp = () => {
     const now = new Date();
     return now.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) + ' @ ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1072,7 +1068,6 @@ export default function App() {
 
     const trimmed = newName.trim();
 
-    // OPTIMISTIC UI
     setCompanies(prev => prev.map(c => c === oldName ? trimmed : c));
     setActiveCompanyFilters(prev => prev.map(c => c === oldName ? trimmed : c));
     setTasks(prev => prev.map(t => t.company === oldName ? { ...t, company: trimmed } : t));
@@ -1437,6 +1432,8 @@ export default function App() {
 
     let updatedTasks = tasks.map(t => {
       if (t.id === selectedTask.id) {
+        if (t.status === 'completed' && t.recurrenceType === 'once') return t;
+
         const completionNote = `✅ Marked Complete by ${currentUserName} [${getCurrentTimestamp()}]`;
         const newComments = noteText 
           ? [...(t.comments || []), noteText, completionNote] 
@@ -1476,7 +1473,7 @@ export default function App() {
         endTime: null,
         startHour: null,
         duration: null,
-        timeLabel: 'Unscheduled',
+        timeLabel: 'All-Day',
         priority: selectedTask.priority || 'Medium',
         requiresPhoto: false,
         requiresComment: false,
@@ -2144,7 +2141,7 @@ export default function App() {
                     onDragStart={(e) => handleDragStart(e, task.id, task.date)}
                     onDragEnd={handleDragEnd}
                     onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                    className={`bg-white px-3 py-1.5 rounded border text-xs font-bold transition shadow-2xs flex items-center gap-2 ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${isOverdue ? 'border-red-500 ring-1 ring-red-400 bg-red-50 text-red-900 hover:bg-red-100' : 'border-blue-200 text-gray-800 hover:bg-blue-100'}`}>
+                    className={`px-3 py-1.5 rounded border text-xs font-bold transition shadow-2xs flex items-center gap-2 ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${isOverdue ? 'border-red-500 ring-1 ring-red-400 bg-red-50 text-red-900 hover:bg-red-100' : 'bg-white border-blue-200 text-gray-800 hover:bg-blue-100'}`}>
                     <span>{task.title}</span>
                     <span className="text-[9px] bg-gray-200 text-gray-700 px-1 py-0.5 rounded">{task.company}</span>
                     {task.date && <span className={`text-[10px] px-1.5 py-0.5 rounded border ${isOverdue ? 'bg-red-100 text-red-800 border-red-200' : 'bg-blue-100 text-blue-800 border-blue-200'}`}>Due: {task.date}</span>}
@@ -3140,7 +3137,10 @@ export default function App() {
 
                   <div className="flex justify-between text-xs text-gray-500 bg-gray-100 p-2 rounded">
                     <span>Assigned to: <strong>{selectedTask.assignees && selectedTask.assignees.length > 0 ? selectedTask.assignees.join(', ') : 'Unassigned (Backlog)'}</strong></span>
-                    <span>Occurrence Date: <strong>{selectedInstanceDate}</strong></span>
+                    <span>
+                      {isCurrentInstanceCompleted && selectedTask.recurrenceType === 'once' ? 'Completed On:' : 'Occurrence Date:'} 
+                      <strong> {isCurrentInstanceCompleted && selectedTask.recurrenceType === 'once' && selectedTask.completedDates?.length > 0 ? selectedTask.completedDates[0] : selectedInstanceDate}</strong>
+                    </span>
                   </div>
 
                   {selectedTask.allowAssigneeDeadlineChange && !isCurrentInstanceCompleted && (
@@ -3150,6 +3150,7 @@ export default function App() {
                         <input 
                           type="date" 
                           value={selectedTask.date} 
+                          disabled={selectedTask.recurrenceType !== 'once'}
                           onChange={async (e) => {
                             const newDate = e.target.value;
                             const todayStr = formatDateKey(new Date());
@@ -3180,9 +3181,13 @@ export default function App() {
                               );
                             }
                           }} 
-                          className="p-1.5 text-xs border rounded bg-white font-bold text-gray-800 focus:outline-none cursor-pointer"
+                          className={`p-1.5 text-xs border rounded font-bold text-gray-800 focus:outline-none ${selectedTask.recurrenceType !== 'once' ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-pointer'}`}
                         />
-                        <span className="text-[11px] text-gray-500 italic">(Reschedules task on dispatch board)</span>
+                        {selectedTask.recurrenceType !== 'once' ? (
+                          <span className="text-[10px] text-red-500 italic ml-2">(Use calendar drag-and-drop to reschedule recurring tasks)</span>
+                        ) : (
+                          <span className="text-[11px] text-gray-500 italic ml-2">(Reschedules task on dispatch board)</span>
+                        )}
                       </div>
                     </div>
                   )}
