@@ -146,7 +146,7 @@ const mapToDb = (t) => ({
   start_hour: t.startHour ?? null,
   duration: t.duration ?? null,
   time_label: t.timeLabel || 'All-Day',
-  priority: t.priority || 'Medium',
+  priority: t.priority || 'Low',
   type: t.type || 'flexible',
   status: t.status || 'pending',
   requires_photo: t.requiresPhoto ?? false,
@@ -183,7 +183,7 @@ const mapFromDb = (r) => ({
   startHour: r.start_hour ? Number(r.start_hour) : null,
   duration: r.duration ? Number(r.duration) : null,
   timeLabel: r.time_label || 'All-Day',
-  priority: r.priority || 'Medium',
+  priority: r.priority || 'Low',
   type: r.type || 'flexible',
   status: r.status || 'pending',
   requiresPhoto: r.requires_photo ?? false,
@@ -381,7 +381,7 @@ export default function App() {
   const [taskDesc, setTaskDesc] = useState('');
   const [taskCompany, setTaskCompany] = useState(''); 
   const [selectedAssignees, setSelectedAssignees] = useState([]);
-  const [taskPriority, setTaskPriority] = useState('Medium');
+  const [taskPriority, setTaskPriority] = useState('Low'); // CHANGED: Default is now Low (Green)
   const [taskDate, setTaskDate] = useState('');
   const [hasSpecificTime, setHasSpecificTime] = useState(false); 
   const [startTime, setStartTime] = useState('13:00');
@@ -501,6 +501,14 @@ export default function App() {
        return false;
     }
     return false;
+  };
+
+  // ADDED: Traffic Light Helper - Checks if task is due exactly today
+  const isTaskDueToday = (task, instanceDateStr = null) => {
+    if (!task || task.status === 'completed') return false;
+    const todayStr = formatDateKey(new Date());
+    const dateToCheck = instanceDateStr || task.date;
+    return dateToCheck === todayStr;
   };
 
   const isTaskActiveOnDay = (task, dayOfWeekStr, dateStr) => {
@@ -954,8 +962,8 @@ export default function App() {
           type: isFlex ? 'flexible' : 'timed',
           recurrenceType: 'once',
           exceptionDates: [],
-          isOverdue: targetDate && targetDate.trim() !== '' && targetDate < todayStr,
-          overdueNotified: targetDate && targetDate.trim() !== '' && targetDate < todayStr,
+          isOverdue: false, 
+          overdueNotified: false,
           comments: [...(targetTask.comments || []), moveNote] 
         };
 
@@ -1008,7 +1016,6 @@ export default function App() {
 
       return prevTasks.map(t => {
         if (t.id === taskId) {
-          const newIsOverdue = targetDate && targetDate.trim() !== '' && targetDate < todayStr && t.status !== 'completed';
           const updatedStandard = {
             ...t,
             date: targetDate,
@@ -1019,8 +1026,8 @@ export default function App() {
             endTime: eStr,
             timeLabel: label,
             type: isFlex ? 'flexible' : 'timed',
-            isOverdue: newIsOverdue,
-            overdueNotified: newIsOverdue,
+            isOverdue: false, 
+            overdueNotified: false,
             comments: [...(t.comments || []), moveNote] 
           };
           dbPayloads.push({ action: 'update', payload: updatedStandard });
@@ -1214,7 +1221,7 @@ export default function App() {
     setTaskDesc('');
     setTaskCompany(''); 
     setSelectedAssignees([]);
-    setTaskPriority('Medium');
+    setTaskPriority('Low'); // CHANGED: Default is now Low (Green)
     setTaskDate(formatDateKey(currentDate));
     setHasSpecificTime(false); 
     setStartTime('09:00');
@@ -2287,11 +2294,23 @@ export default function App() {
                               <div className="flex flex-col gap-3">
                                 {compWeekTasks.map(task => {
                                   const style = getPriorityStyle(task.priority);
+                                  const isPastDue = isTaskPastDue(task);
+                                  const isDueToday = !isPastDue && isTaskDueToday(task, task.instanceDate);
+
+                                  let borderClass = style.border;
+                                  let bgClass = "bg-white";
+                                  if (isPastDue) {
+                                    borderClass = "border-red-600 ring-1 ring-red-400";
+                                    bgClass = "bg-red-50/50";
+                                  } else if (isDueToday) {
+                                    borderClass = "border-amber-500 ring-1 ring-amber-400";
+                                  }
+
                                   return (
                                     <div 
                                       key={`${task.id}-${task.instanceDate}`}
                                       onClick={() => handleOpenModal(task, task.instanceDate)}
-                                      className={`bg-white p-3 rounded border-l-4 ${isTaskPastDue(task) ? 'border-red-600 bg-red-50/50 ring-1 ring-red-400' : style.border} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-50 transition gap-3`}>
+                                      className={`${bgClass} p-3 rounded border-l-4 ${borderClass} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-50 transition gap-3`}>
                                       
                                       <div className="flex items-start sm:items-center gap-3 sm:gap-4 w-full sm:w-2/3">
                                         <div className="flex flex-col items-center justify-center bg-gray-50 rounded px-2.5 py-1 min-w-[50px] border border-gray-200 shrink-0">
@@ -2305,7 +2324,6 @@ export default function App() {
                                           <div className="flex items-center gap-2 flex-wrap">
                                             <h3 className="font-bold text-sm truncate">{task.title}</h3>
                                             {task.company && <span className="text-[9px] bg-gray-200 text-gray-700 px-1 py-0.5 rounded">{task.company}</span>}
-                                            {isTaskPastDue(task) && <span className="text-[10px] bg-red-600 text-white font-bold px-1.5 py-0.5 rounded animate-pulse">OVERDUE</span>}
                                             {task.recurrenceType === 'completion' && <span className="text-[9px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded shrink-0">🔄</span>}
                                           </div>
                                           <p className="text-[11px] text-gray-500 truncate">{task.desc}</p>
@@ -2313,7 +2331,14 @@ export default function App() {
                                       </div>
 
                                       <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100 mt-1 sm:mt-0">
-                                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${style.badge}`}>{task.priority}</span>
+                                        {isPastDue ? (
+                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-200 animate-pulse">OVERDUE</span>
+                                        ) : isDueToday ? (
+                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 shadow-sm">Due Today</span>
+                                        ) : (
+                                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${style.badge}`}>{task.priority}</span>
+                                        )}
+
                                         <div className="flex -space-x-1.5">
                                           {(task.assignees || []).map((a, idx) => {
                                             const m = getMemberConfig(a);
@@ -2391,25 +2416,44 @@ export default function App() {
                         .filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)))
                         .map(task => {
                           const style = getPriorityStyle(task.priority);
+                          const isPastDue = isTaskPastDue(task);
+                          const isDueToday = !isPastDue && isTaskDueToday(task, formatDateKey(currentDate));
+
+                          let borderClass = style.border;
+                          let bgClass = "bg-white";
+                          if (isPastDue) {
+                            borderClass = "border-red-600 ring-1 ring-red-400";
+                            bgClass = "bg-red-50/50";
+                          } else if (isDueToday) {
+                            borderClass = "border-amber-500 ring-1 ring-amber-400";
+                          }
+
                           return (
                             <div 
                               key={task.id}
                               onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                              className={`bg-white p-3 sm:p-4 rounded border-l-4 ${isTaskPastDue(task) ? 'border-red-600 bg-red-50/50 ring-1 ring-red-400' : style.border} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-50 transition gap-3 sm:gap-0`}>
+                              className={`${bgClass} p-3 sm:p-4 rounded border-l-4 ${borderClass} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-50 transition gap-3 sm:gap-0`}>
                               <div className="w-full sm:w-2/3 flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
                                 <span className="font-mono text-[10px] sm:text-sm font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200 shrink-0 self-start sm:self-auto">{task.timeLabel}</span>
                                 <div className="min-w-0 w-full">
                                   <div className="flex flex-wrap items-center gap-2">
                                     <h3 className="font-bold text-base sm:text-lg truncate">{task.title}</h3>
                                     <span className="text-[9px] bg-gray-200 text-gray-700 px-1 py-0.5 rounded">{task.company}</span>
-                                    {isTaskPastDue(task) && <span className="text-[10px] bg-red-600 text-white font-bold px-1.5 py-0.5 rounded animate-pulse">OVERDUE</span>}
                                     {task.recurrenceType === 'completion' && <span className="text-[10px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded">🔄 Interval</span>}
                                   </div>
                                   <p className="text-xs sm:text-sm text-gray-500 truncate">{task.desc}</p>
                                 </div>
                               </div>
                               <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto pt-3 sm:pt-0 border-t sm:border-t-0 border-gray-100 mt-1 sm:mt-0">
-                                <span className={`text-xs font-semibold px-3 py-1 rounded-full ${style.badge}`}>{task.priority}</span>
+                                
+                                {isPastDue ? (
+                                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-red-100 text-red-800 border border-red-200 animate-pulse">OVERDUE</span>
+                                ) : isDueToday ? (
+                                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300 shadow-sm">Due Today</span>
+                                ) : (
+                                  <span className={`text-xs font-semibold px-3 py-1 rounded-full ${style.badge}`}>{task.priority}</span>
+                                )}
+
                                 <div className="flex -space-x-2">
                                   {(task.assignees || []).map((a, idx) => {
                                     const m = getMemberConfig(a);
