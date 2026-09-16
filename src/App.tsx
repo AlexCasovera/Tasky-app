@@ -185,8 +185,8 @@ const mapToDb = (t) => {
     completed_dates: t.completedDates || [],
     exception_dates: t.exceptionDates || [],
     is_overdue: t.is_overdue ?? false,
-    overdue_notified: t.overdueNotified ?? false,
-    is_long_term: t.isLongTerm ?? false
+    overdue_notified: t.overdue_notified ?? false,
+    is_long_term: t.is_long_term ?? false
   };
 };
 
@@ -458,9 +458,6 @@ export default function App() {
 
   const [tasks, setTasks] = useState([]);
   const [isDbLoading, setIsDbLoading] = useState(true);
-
-  let gridStartHour = 6;
-  let gridEndHour = 20;
 
   // --- CORE DERIVED VARIABLES ---
   const isCurrentInstanceCompleted = selectedTask && (
@@ -1896,6 +1893,65 @@ export default function App() {
     const style = getPriorityStyle(task.priority);
     return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${style.badge} uppercase`}>{task.priority}</span>;
   };
+
+  const visibleMembers = userRole === 'admin' 
+    ? teamMembers.filter(m => activeEmployeeFilters.includes(m.name) && !hiddenMembers.includes(m.name))
+    : teamMembers.filter(m => m.name === currentUserName);
+
+  const visibleTasks = tasks.filter(t => {
+    if (!t || !t.assignees) return false;
+    
+    if (hiddenCompanies.includes(t.company)) return false;
+
+    const isAssigneeMatch = userRole === 'admin' 
+      ? (t.assignees.length === 0 || t.assignees.some(a => activeEmployeeFilters.includes(a) && !hiddenMembers.includes(a)))
+      : t.assignees.includes(currentUserName);
+
+    const isCompanyMatch = activeCompanyFilters.includes(t.company);
+
+    const isSearchMatch = !searchQuery.trim() || 
+      (t.title && t.title.toLowerCase().includes(searchQuery.toLowerCase())) || 
+      (t.desc && t.desc.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (t.assignees && t.assignees.some(a => a && a.toLowerCase().includes(searchQuery.toLowerCase())));
+
+    return isAssigneeMatch && isCompanyMatch && isSearchMatch;
+  });
+
+  const backlogTasks = tasks.filter(t => !t.isLongTerm && (!t.assignees || t.assignees.length === 0) && t.status !== 'completed' && activeCompanyFilters.includes(t.company) && !hiddenCompanies.includes(t.company));
+  
+  const longTermTasks = visibleTasks.filter(t => t.isLongTerm && t.status !== 'completed' && (userRole === 'admin' || !isTaskPastDue(t)));
+
+  const overdueTasks = visibleTasks.filter(t => isTaskPastDue(t));
+
+  const searchResults = {
+    tasks: tasks.filter(t => 
+      searchQuery.trim() && !hiddenCompanies.includes(t.company) && (
+        t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        t.desc.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (t.comments && t.comments.some(c => c.toLowerCase().includes(searchQuery.toLowerCase())))
+      )
+    ).slice(0, 5),
+    companies: masterCompanyList.filter(c => 
+      searchQuery.trim() && !hiddenCompanies.includes(c) && c.toLowerCase().includes(searchQuery.toLowerCase())
+    ),
+    members: teamMembers.filter(m => 
+      searchQuery.trim() && !hiddenMembers.includes(m.name) && (
+        m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        m.email.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    )
+  };
+
+  const hasSearchResults = searchResults.tasks.length > 0 || searchResults.companies.length > 0 || searchResults.members.length > 0;
+
+  const viewTasks = currentView === 'day' 
+    ? visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)))
+    : currentView === 'week'
+    ? visibleTasks.filter(t => t.type === 'timed' && t.startHour !== null) 
+    : [];
+
+  let gridStartHour = 6;
+  let gridEndHour = 20;
 
   viewTasks.forEach(t => {
     if (t.type === 'timed' && t.startHour !== null) {
