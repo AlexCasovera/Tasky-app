@@ -2802,7 +2802,7 @@ export default function App() {
                 <div className="w-20 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
                   {dynamicTimeSlots.map(hour => (
                     <div key={hour} className="h-20 border-b border-gray-200 p-2 text-xs font-mono font-bold text-gray-400 text-right pr-3">
-                      {hour === 12 ? '12:00 PM' : hour > 12 ? `${hour - 12:00 PM` : hour === 0 ? '12:00 AM' : `${hour}:00 AM`}
+                      {hour === 12 ? '12:00 PM' : hour > 12 ? `${hour - 12}:00 PM` : hour === 0 ? '12:00 AM' : `${hour}:00 AM`}
                     </div>
                   ))}
                 </div>
