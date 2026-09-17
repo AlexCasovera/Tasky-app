@@ -184,9 +184,9 @@ const mapToDb = (t) => {
     chained_steps: t.chainedSteps || [],
     completed_dates: t.completedDates || [],
     exception_dates: t.exceptionDates || [],
-    is_overdue: t.is_overdue ?? false,
+    is_overdue: t.isOverdue ?? false,
     overdue_notified: t.overdueNotified ?? false,
-    is_long_term: t.is_long_term ?? false
+    is_long_term: t.isLongTerm ?? false // BUG FIXED HERE: Changed from t.is_long_term to t.isLongTerm
   };
 };
 
