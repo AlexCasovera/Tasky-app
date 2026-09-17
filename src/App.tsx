@@ -356,47 +356,48 @@ const hasLoadedNotifs = useRef(false);
 const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
 
 // 💾 AUTO-SAVE: Sync to local storage whenever notifications change
-useEffect(() => {
-  if (currentUserName && hasLoadedNotifs.current) {
-    localStorage.setItem(`tasky_notifs_${currentUserName}`, JSON.stringify(notifications));
-  }
-}, [notifications, currentUserName]);
+  useEffect(() => {
+    if (currentUserName && hasLoadedNotifs.current === currentUserName) {
+      localStorage.setItem('tasky_notifs_' + currentUserName, JSON.stringify(notifications));
+    }
+  }, [notifications, currentUserName]);
 
   useEffect(() => {
-  if (!currentUserName) {
-    hasLoadedNotifs.current = false;
-    return;
-  }
+    if (!currentUserName) {
+      hasLoadedNotifs.current = null;
+      return;
+    }
 
-  // 1. Load user's saved notifications from cache on startup
-  const savedNotifs = localStorage.getItem(`tasky_notifs_${currentUserName}`);
-  if (savedNotifs) {
-    setNotifications(JSON.parse(savedNotifs));
-  } else {
-    setNotifications([]); 
-  }
-  hasLoadedNotifs.current = true;
+    // 1. Load user's saved notifications from cache on startup
+    const savedNotifs = localStorage.getItem('tasky_notifs_' + currentUserName);
+    if (savedNotifs) {
+      setNotifications(JSON.parse(savedNotifs));
+    } else {
+      setNotifications([]); 
+    }
+    // CRITICAL FIX: Lock the loaded state to this specific username
+    hasLoadedNotifs.current = currentUserName; 
 
-  // 2. Open Realtime channel
-  const channel = supabase.channel('app-notifications')
-    .on('broadcast', { event: 'app-alert' }, ({ payload }) => {
-      const isForMe = 
-        (payload.targetType === 'role' && payload.targetValue === userRole) || 
-        (payload.targetType === 'userName' && payload.targetValue === currentUserName);
-        
-      if (isForMe) {
-        // Cap at 50 to prevent the menu from becoming bloated and lagging
-        setNotifications(prev => [payload, ...prev].slice(0, 50));
-      }
-    })
-    .subscribe();
+    // 2. Open Realtime channel
+    const channel = supabase.channel('app-notifications')
+      .on('broadcast', { event: 'app-alert' }, ({ payload }) => {
+        const isForMe = 
+          (payload.targetType === 'role' && payload.targetValue === userRole) || 
+          (payload.targetType === 'userName' && payload.targetValue === currentUserName);
+          
+        if (isForMe) {
+          // Cap at 50 to prevent the menu from becoming bloated and lagging
+          setNotifications(prev => [payload, ...prev].slice(0, 50));
+        }
+      })
+      .subscribe();
 
-  notifyChannel.current = channel;
+    notifyChannel.current = channel;
 
-  return () => {
-    supabase.removeChannel(channel);
-  }
-}, [userRole, currentUserName]);
+    return () => {
+      supabase.removeChannel(channel);
+    }
+  }, [userRole, currentUserName]);
 
   // --- UNIFIED NOTIFICATION DISPATCHER ---
   const dispatchNotification = (targetType, targetValue, type, bellText, pushTitle, pushMessage, taskId = null, taskDate = null) => {
