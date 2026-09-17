@@ -35,7 +35,7 @@ const compressImage = (file: File, maxWidth: number, maxHeight: number, quality:
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
-        if (ctx) drawImage(img, 0, 0, width, height);
+        if (ctx) ctx.drawImage(img, 0, 0, width, height);
 
         canvas.toBlob(
           (blob) => {
@@ -184,9 +184,9 @@ const mapToDb = (t) => {
     chained_steps: t.chainedSteps || [],
     completed_dates: t.completedDates || [],
     exception_dates: t.exceptionDates || [],
-    is_overdue: t.isOverdue ?? false,
-    overdue_notified: t.overdueNotified ?? false,
-    is_long_term: t.isLongTerm ?? false // <-- 100% FIXED
+    is_overdue: t.is_overdue ?? false,
+    overdue_notified: t.overdue_notified ?? false,
+    is_long_term: t.isLongTerm ?? false // <-- TYPO FIXED
   };
 };
 
@@ -2802,7 +2802,7 @@ export default function App() {
                 <div className="w-20 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
                   {dynamicTimeSlots.map(hour => (
                     <div key={hour} className="h-20 border-b border-gray-200 p-2 text-xs font-mono font-bold text-gray-400 text-right pr-3">
-                      {hour === 12 ? '12:00 PM' : hour > 12 ? `${hour - 12}:00 PM` : hour === 0 ? '12:00 AM' : `${hour}:00 AM`}
+                      {hour === 12 ? '12:00 PM' : hour > 12 ? `${hour - 12:00 PM` : hour === 0 ? '12:00 AM' : `${hour}:00 AM`}
                     </div>
                   ))}
                 </div>
