@@ -2050,8 +2050,8 @@ export default function App() {
     ? visibleTasks.filter(t => t.type === 'timed' && t.startHour !== null) 
     : [];
 
-  let gridStartHour = 6;
-  let gridEndHour = 20;
+  gridStartHour = 6;
+  gridEndHour = 20;
 
   viewTasks.forEach(t => {
     if (t.type === 'timed' && t.startHour !== null) {
