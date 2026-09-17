@@ -35,7 +35,7 @@ const compressImage = (file: File, maxWidth: number, maxHeight: number, quality:
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
-        if (ctx) ctx.drawImage(img, 0, 0, width, height);
+        if (ctx) drawImage(img, 0, 0, width, height);
 
         canvas.toBlob(
           (blob) => {
@@ -186,7 +186,7 @@ const mapToDb = (t) => {
     exception_dates: t.exceptionDates || [],
     is_overdue: t.isOverdue ?? false,
     overdue_notified: t.overdueNotified ?? false,
-    is_long_term: t.isLongTerm ?? false // BUG FIXED HERE: Changed from t.is_long_term to t.isLongTerm
+    is_long_term: t.isLongTerm ?? false // <-- 100% FIXED
   };
 };
 
@@ -2049,6 +2049,9 @@ export default function App() {
     : currentView === 'week'
     ? visibleTasks.filter(t => t.type === 'timed' && t.startHour !== null) 
     : [];
+
+  let gridStartHour = 6;
+  let gridEndHour = 20;
 
   viewTasks.forEach(t => {
     if (t.type === 'timed' && t.startHour !== null) {
