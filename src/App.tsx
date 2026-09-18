@@ -463,7 +463,7 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
   const [chainedSteps, setChainedSteps] = useState([]);
   const [requiresPhoto, setRequiresPhoto] = useState(false);
   const [requiresComment, setRequiresComment] = useState(false);
-  const [allowAssigneeDeadlineChange, setAllowAssigneeDeadlineChange] = useState(false);
+  const [allowAssigneeDeadlineChange, setAllowAssigneeDeadlineChange] = useState(true);
 
   const [notifyOnComplete, setNotifyOnComplete] = useState(true); 
   const [notifyOnComment, setNotifyOnComment] = useState(true);   
@@ -1308,7 +1308,7 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
     setChainedSteps([]);
     setRequiresPhoto(false);
     setRequiresComment(false);
-    setAllowAssigneeDeadlineChange(false);
+    setAllowAssigneeDeadlineChange(true);
     setNotifyOnComplete(true); 
     setNotifyOnComment(true);   
     setNotifyOnDeadlineChange(true);
