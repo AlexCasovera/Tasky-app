@@ -1308,7 +1308,7 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
     setChainedSteps([]);
     setRequiresPhoto(false);
     setRequiresComment(false);
-    setAllowAssigneeDeadlineChange(trued);
+    setAllowAssigneeDeadlineChange(true);
     setNotifyOnComplete(true); 
     setNotifyOnComment(true);   
     setNotifyOnDeadlineChange(true);
