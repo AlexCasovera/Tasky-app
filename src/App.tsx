@@ -2161,3 +2161,4 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
     </div>
   );
 }
+
