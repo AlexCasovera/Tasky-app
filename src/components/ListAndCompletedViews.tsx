@@ -79,9 +79,9 @@ export default function ListAndCompletedViews({
                 visibleTasks.forEach(t => {
                   if(t.company === company) {
                     weekDates.forEach(wd => {
-                      if (isTaskActiveOnDay(t, wd.dayOfWeekStr, wd.dateStr)) {
-                        compWeekTasks.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
-                      }
+                      if (isTaskActiveOnDay(t, wd.dayOfWeekStr, wd.dateStr) && !isTaskPastDue(t)) {
+                    compWeekTasks.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
+                  }
                       if (isTaskCompletedOnDay(t, wd.dateStr)) {
                         compWeekCompleted.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
                       }
@@ -164,9 +164,9 @@ export default function ListAndCompletedViews({
         <div>
           {currentView === 'list' && (
             <div className="flex flex-col gap-3">
-              {visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate))).length > 0 ? (
+              {visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)) && !isTaskPastDue(t)).length > 0 ? (
                 visibleTasks
-                  .filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)))
+                  .filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)) && !isTaskPastDue(t))
                   .map(task => {
                     const style = getPriorityStyle(task.priority);
                     const isPastDue = isTaskPastDue(task);

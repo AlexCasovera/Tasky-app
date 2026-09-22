@@ -21,8 +21,8 @@ export default function DashboardTrays({
 }) {
   return (
     <>
-      {/* 🚨 EMPLOYEE OVERDUE ALERT TRAY 🚨 */}
-      {userRole === 'employee' && overdueTasks.length > 0 && currentView !== 'create' && currentView !== 'completed' && (
+      {/* 🚨 GLOBAL OVERDUE ALERT TRAY 🚨 */}
+      {overdueTasks.length > 0 && currentView !== 'create' && currentView !== 'completed' && (
         <div className="bg-red-50 border-2 border-red-500 rounded-lg p-3 mb-4 shadow-sm animate-fade-in">
           <div className="flex justify-between items-center mb-2">
             <span className="text-xs font-bold uppercase tracking-wider text-red-800 flex items-center gap-2">
