@@ -151,44 +151,41 @@ const hasLoadedNotifs = useRef(false);
 
 const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
 
-// 💾 AUTO-SAVE: Sync to local storage whenever notifications change
+// 1. Fetch from DB & Subscribe to Changes
   useEffect(() => {
-    if (currentUserName && hasLoadedNotifs.current === currentUserName) {
-      localStorage.setItem('tasky_notifs_' + currentUserName, JSON.stringify(notifications));
-    }
-  }, [notifications, currentUserName]);
+    if (!currentUserName) return;
 
-  useEffect(() => {
-    if (!currentUserName) {
-      hasLoadedNotifs.current = null;
-      return;
-    }
+    const fetchNotifs = async () => {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .or(`and(target_type.eq.role,target_value.eq.${userRole}),and(target_type.eq.userName,target_value.eq.${currentUserName})`)
+        .order('created_at', { ascending: false })
+        .limit(50);
+        
+      if (data && !error) {
+        const mapped = data.map(n => ({
+          id: n.id,
+          text: n.text,
+          type: n.type,
+          targetType: n.target_type,
+          targetValue: n.target_value,
+          taskId: n.task_id,
+          taskDate: n.task_date,
+          read: n.read,
+          time: new Date(n.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' @ ' + new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }));
+        setNotifications(mapped);
+      }
+    };
 
-    // 1. Load user's saved notifications from cache on startup
-    const savedNotifs = localStorage.getItem('tasky_notifs_' + currentUserName);
-    if (savedNotifs) {
-      setNotifications(JSON.parse(savedNotifs));
-    } else {
-      setNotifications([]); 
-    }
-    // CRITICAL FIX: Lock the loaded state to this specific username
-    hasLoadedNotifs.current = currentUserName; 
+    fetchNotifs();
 
-    // 2. Open Realtime channel
-    const channel = supabase.channel('app-notifications')
-      .on('broadcast', { event: 'app-alert' }, ({ payload }) => {
-        const isForMe = 
-          (payload.targetType === 'role' && payload.targetValue === userRole) || 
-          (payload.targetType === 'userName' && payload.targetValue === currentUserName);
-          
-        if (isForMe) {
-          // Cap at 50 to prevent the menu from becoming bloated and lagging
-          setNotifications(prev => [payload, ...prev].slice(0, 50));
-        }
+    const channel = supabase.channel('db-notifications')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => {
+         fetchNotifs(); // Instantly refresh if a new one is added
       })
       .subscribe();
-
-    notifyChannel.current = channel;
 
     return () => {
       supabase.removeChannel(channel);
@@ -196,31 +193,20 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
   }, [userRole, currentUserName]);
 
   // --- UNIFIED NOTIFICATION DISPATCHER ---
-  const dispatchNotification = (targetType, targetValue, type, bellText, pushTitle, pushMessage, taskId = null, taskDate = null) => {
+  const dispatchNotification = async (targetType, targetValue, type, bellText, pushTitle, pushMessage, taskId = null, taskDate = null) => {
     if (pushTitle && pushMessage) {
-      sendNativePush({
-        targetType,
-        targetValue,
-        title: pushTitle,
-        message: pushMessage
-      });
+      sendNativePush({ targetType, targetValue, title: pushTitle, message: pushMessage });
     }
 
     if (bellText) {
-      notifyChannel.current?.send({
-        type: 'broadcast',
-        event: 'app-alert',
-        payload: { 
-          id: Date.now() + Math.random(), 
-          text: bellText, 
-          type, 
-          targetType, 
-          targetValue, 
-          taskId,
-          taskDate,
-          read: false, 
-          time: new Date().toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' @ ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-        }
+      await supabase.from('notifications').insert({
+        text: bellText,
+        type: type,
+        target_type: targetType,
+        target_value: targetValue,
+        task_id: taskId,
+        task_date: taskDate,
+        read: false
       });
     }
   };
@@ -1704,8 +1690,9 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
   };
 
   // --- NOTIFICATION CLICK HANDLER ---
-  const handleNotificationClick = (notif) => {
+  const handleNotificationClick = async (notif) => {
     setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
+    await supabase.from('notifications').update({ read: true }).eq('id', notif.id);
     
     if (notif.taskId) {
       const targetTask = tasks.find(t => t.id === notif.taskId);
@@ -1763,8 +1750,12 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
     );
   };
 
-  const markAllNotifsRead = () => {
+  const markAllNotifsRead = async () => {
+    const unreadIds = notifications.filter(n => !n.read).map(n => n.id);
+    if (unreadIds.length === 0) return;
+    
     setNotifications(notifications.map(n => ({ ...n, read: true })));
+    await supabase.from('notifications').update({ read: true }).in('id', unreadIds);
   };
 
   const unreadNotifCount = notifications.filter(n => !n.read).length;
