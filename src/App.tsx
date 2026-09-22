@@ -788,7 +788,7 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
       const effectiveSourceDate = sourceDateFromPrompt || targetTask.date;
 
       
-      
+
 
       if (targetTask.recurrenceType !== 'once' && !updateSeries) {
         const standaloneTask = {
@@ -1521,7 +1521,7 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
         priority: selectedTask.priority || 'Standard',
         requiresPhoto: false,
         requiresComment: false,
-        allowAssigneeDeadlineChange: false,
+        allowAssigneeDeadlineChange: selectedTask.allowAssigneeDeadlineChange || false,
         recurrenceType: 'once',
         activeDays: [],
         cadenceDays: 14,
