@@ -159,11 +159,14 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
-        .or(`and(target_type.eq.role,target_value.eq.${userRole}),and(target_type.eq.userName,target_value.eq.${currentUserName})`)
+        // We added double-quotes around the variables here so names with spaces don't crash the database!
+        .or(`and(target_type.eq.role,target_value.eq."${userRole}"),and(target_type.eq.userName,target_value.eq."${currentUserName}")`)
         .order('created_at', { ascending: false })
         .limit(50);
         
-      if (data && !error) {
+      if (error) {
+        console.error("Error fetching notifications:", error);
+      } else if (data) {
         const mapped = data.map(n => ({
           id: n.id,
           text: n.text,
@@ -193,13 +196,14 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
   }, [userRole, currentUserName]);
 
   // --- UNIFIED NOTIFICATION DISPATCHER ---
+  // --- UNIFIED NOTIFICATION DISPATCHER ---
   const dispatchNotification = async (targetType, targetValue, type, bellText, pushTitle, pushMessage, taskId = null, taskDate = null) => {
     if (pushTitle && pushMessage) {
       sendNativePush({ targetType, targetValue, title: pushTitle, message: pushMessage });
     }
 
     if (bellText) {
-      await supabase.from('notifications').insert({
+      const { error } = await supabase.from('notifications').insert({
         text: bellText,
         type: type,
         target_type: targetType,
@@ -208,6 +212,7 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
         task_date: taskDate,
         read: false
       });
+      if (error) console.error("Error saving notification to DB:", error);
     }
   };
 
@@ -745,6 +750,23 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
     let dbPayloads = [];
     
     const moveNote = `📅 Rescheduled to ${targetDate} by ${currentUserName} [${getCurrentTimestamp()}]`;
+    // ---> NEW ASYNC-SAFE DISPATCH BLOCK <---
+    const taskToMove = tasks.find(t => t.id === taskId);
+    if (taskToMove) {
+      const notifyUsers = targetMemberName ? [targetMemberName] : (taskToMove.assignees || []);
+      notifyUsers.forEach(assigneeName => {
+        dispatchNotification(
+          'userName',
+          assigneeName,
+          'schedule',
+          `📅 Rescheduled: "${taskToMove.title}" moved to ${targetDate}`,
+          '📅 Schedule Updated',
+          `"${taskToMove.title}" has been moved to ${targetDate}`,
+          taskToMove.id,
+          targetDate
+        );
+      });
+    }
 
     setTasks(prevTasks => {
       const targetTask = prevTasks.find(t => t.id === taskId);
@@ -765,19 +787,8 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
 
       const effectiveSourceDate = sourceDateFromPrompt || targetTask.date;
 
-      const notifyUsers = targetMemberName ? [targetMemberName] : (targetTask.assignees || []);
-      notifyUsers.forEach(assigneeName => {
-        dispatchNotification(
-          'userName',
-          assigneeName,
-          'schedule',
-          `📅 Rescheduled: "${targetTask.title}" moved to ${targetDate}`,
-          '📅 Schedule Updated',
-          `"${targetTask.title}" has been moved to ${targetDate}`,
-          targetTask.id,
-          targetDate
-        );
-      });
+      
+      
 
       if (targetTask.recurrenceType !== 'once' && !updateSeries) {
         const standaloneTask = {
