@@ -78,18 +78,32 @@ export default function TaskInspectorModal({
                       await supabase.from('tasks').update(mapToDb(updated)).eq('id', selectedTask.id);
 
                       if (userRole === 'employee' && selectedTask?.notifyOnDeadlineChange !== false) {
-                        dispatchNotification(
-                          'role',
-                          'admin',
-                          'deadline',
-                          `📅 Employee Rescheduled: "${selectedTask.title}" deadline changed to ${newDate}`,
-                          '📅 Employee Changed Deadline',
-                          `${currentUserName} moved deadline for "${selectedTask.title}" to ${newDate}`,
-                          selectedTask.id,
-                          newDate
-                        );
-                      }
-                    }} 
+          dispatchNotification(
+            'role',
+            'admin',
+            'deadline',
+            `📅 Employee Rescheduled: "${selectedTask.title}" deadline changed to ${newDate}`,
+            '📅 Employee Changed Deadline',
+            `${currentUserName} moved deadline for "${selectedTask.title}" to ${newDate}`,
+            selectedTask.id,
+            newDate
+          );
+        } else if (userRole === 'admin') {
+          // If admin changes the date, notify all assigned employees
+          (selectedTask.assignees || []).forEach(assigneeName => {
+            dispatchNotification(
+              'userName',
+              assigneeName,
+              'schedule',
+              `📅 Schedule Update: "${selectedTask.title}" deadline changed to ${newDate}`,
+              '📅 Deadline Adjusted',
+              `Admin ${currentUserName} moved the deadline for "${selectedTask.title}" to ${newDate}`,
+              selectedTask.id,
+              newDate
+            );
+          });
+        }
+      }}
                     className={`p-1.5 text-xs border rounded font-bold text-gray-800 focus:outline-none ${selectedTask.recurrenceType !== 'once' ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-pointer'}`}
                   />
                   {selectedTask.recurrenceType !== 'once' ? (
