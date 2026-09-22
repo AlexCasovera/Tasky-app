@@ -1824,18 +1824,24 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
   const overdueTasks = visibleTasks.filter(t => isTaskPastDue(t));
 
   const searchResults = {
-    tasks: tasks.filter(t => 
-      searchQuery.trim() && !hiddenCompanies.includes(t.company) && (
-        t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        t.desc.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    tasks: tasks.filter(t => {
+      // 1. Does the task match what they typed in the search bar?
+      const matchesSearch = searchQuery.trim() && !hiddenCompanies.includes(t.company) && (
+        (t.title && t.title.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (t.desc && t.desc.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (t.comments && t.comments.some(c => c.toLowerCase().includes(searchQuery.toLowerCase())))
-      )
-    ).map(t => ({
+      );
+      
+      // 2. Are they allowed to see it? (Admins see all, Employees see only their own)
+      const hasPermission = userRole === 'admin' || (t.assignees && t.assignees.includes(currentUserName));
+      
+      return matchesSearch && hasPermission;
+    }).map(t => ({
       ...t,
       // Check if it's completed either by status or if it has completed dates
       isSearchCompleted: t.status === 'completed' || (t.completedDates && t.completedDates.length > 0)
     })).slice(0, 5),
-    // ... companies and members stay exactly the same
+    
     companies: masterCompanyList.filter(c => 
       searchQuery.trim() && !hiddenCompanies.includes(c) && c.toLowerCase().includes(searchQuery.toLowerCase())
     ),
