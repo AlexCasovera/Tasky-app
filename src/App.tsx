@@ -2,237 +2,33 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 import Auth from './Auth';
-
+import {
+  daysOfWeek,
+  minuteSubSlots,
+  compressImage,
+  enableNativePush,
+  sendNativePush,
+  formatDateKey,
+  mapToDb,
+  mapFromDb,
+  timeToDecimal,
+  decimalToTimeString,
+  formatTimeLabel
+} from './utils';
+import CompletionModal from './components/CompletionModal';
+import RescheduleModal from './components/RescheduleModal';
+import SettingsModal from './components/SettingsModal';
+import TaskInspectorModal from './components/TaskInspectorModal';
+import TaskBuilder from './components/TaskBuilder';
+import DayView from './components/DayView';
+import WeekView from './components/WeekView';
+import MonthView from './components/MonthView';
+import Header from './components/Header';
+import FilterBar from './components/FilterBar';
+import DashboardTrays from './components/DashboardTrays';
+import ListAndCompletedViews from './components/ListAndCompletedViews';
 // --- STATIC CALENDAR HELPERS ---
-const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const minuteSubSlots = [0, 0.25, 0.5, 0.75];
 
-// --- IMAGE COMPRESSION ENGINE ---
-const compressImage = (file: File, maxWidth: number, maxHeight: number, quality: number): Promise<File> => {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        let width = img.width;
-        let height = img.height;
-
-        if (width > height) {
-          if (width > maxWidth) {
-            height = Math.round((height * maxWidth) / width);
-            width = maxWidth;
-          }
-        } else {
-          if (height > maxHeight) {
-            width = Math.round((width * maxHeight) / height);
-            height = maxHeight;
-          }
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) ctx.drawImage(img, 0, 0, width, height);
-
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              resolve(new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() }));
-            } else {
-              resolve(file); 
-            }
-          },
-          'image/jpeg',
-          quality
-        );
-      };
-      img.onerror = () => resolve(file);
-    };
-    reader.onerror = () => resolve(file);
-  });
-};
-
-// --- NATIVE VAPID PUSH CONFIGURATION ---
-const VAPID_PUBLIC_KEY = "BEdpaFVtcj6F-vvykhLdOaDDzUUmcnVB0knI0VjfJjqLLAStEKll692mf1M3xUAo_KS8djPg-YCIya9GOtHB3cA";
-
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-}
-
-const enableNativePush = async (userName: string) => {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-    alert('Native Push notifications are not supported on this browser.');
-    return;
-  }
-
-  try {
-    const registration = await navigator.serviceWorker.register('/sw.js');
-    await navigator.serviceWorker.ready;
-
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') {
-      alert('Notification permission denied by browser.');
-      return;
-    }
-
-    const subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-    });
-
-    const { error } = await supabase
-      .from('profiles')
-      .update({ push_subscription: subscription })
-      .eq('name', userName);
-
-    if (error) {
-      console.error('Failed to save push subscription to Supabase:', error);
-      alert('Failed to save push subscription to database.');
-    } else {
-      alert('📲 Native Push Notifications Enabled Successfully!');
-    }
-  } catch (err) {
-    console.error('Error enabling native push:', err);
-    alert('Error enabling push notifications: ' + err.message);
-  }
-};
-
-const sendNativePush = async ({ targetType, targetValue, title, message }) => {
-  try {
-    let query = supabase.from('profiles').select('push_subscription');
-    if (targetType === 'role') {
-      query = query.eq('role', targetValue);
-    } else {
-      query = query.eq('name', targetValue);
-    }
-
-    const { data, error } = await query;
-    if (error || !data) return;
-
-    for (const profile of data) {
-      if (profile.push_subscription) {
-        await fetch('/api/notify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            subscription: profile.push_subscription,
-            title,
-            message
-          })
-        });
-      }
-    }
-  } catch (err) {
-    console.error('Push Notification Error:', err);
-  }
-};
-
-const formatDateKey = (d) => {
-  if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const mapToDb = (t) => {
-  let dbPriority = t.priority || 'Routine';
-  if (dbPriority === 'Standard') {
-    dbPriority = 'Routine';
-  }
-
-  return {
-    id: String(t.id),
-    title: t.title || '',
-    description: t.desc || '',
-    company: t.company || '',
-    assignees: t.assignees || [],
-    date: t.date || null,
-    date_scheduled: t.date || null,
-    start_time: t.startTime || null,
-    end_time: t.endTime || null,
-    start_hour: t.startHour ?? null,
-    duration: t.duration ?? null,
-    time_label: t.timeLabel || 'All-Day',
-    priority: dbPriority,
-    type: t.type || 'flexible',
-    status: t.status || 'pending',
-    requires_photo: t.requiresPhoto ?? false,
-    requires_comment: t.requiresComment ?? false,
-    allow_deadline_change: t.allowAssigneeDeadlineChange ?? false,
-    recurrence_type: t.recurrenceType || 'once',
-    active_days: t.activeDays || [],
-    cadence_days: t.cadenceDays ?? 14,
-    notify_on_complete: t.notifyOnComplete ?? true,
-    notify_on_comment: t.notifyOnComment ?? true,
-    notify_on_deadline_change: t.notifyOnDeadlineChange ?? true,
-    notify_on_task_created: t.notifyOnTaskCreated ?? true,
-    parent_task_id: t.parentTaskId ? String(t.parentTaskId) : null,
-    parent_task_title: t.parentTaskTitle || null,
-    parent_instance_date: t.parentInstanceDate || null,
-    comments: t.comments || [],
-    chained_steps: t.chainedSteps || [],
-    completed_dates: t.completedDates || [],
-    exception_dates: t.exceptionDates || [],
-    is_overdue: t.is_overdue ?? false,
-    overdue_notified: t.overdue_notified ?? false,
-    is_long_term: t.isLongTerm ?? false // <-- TYPO FIXED
-  };
-};
-
-const mapFromDb = (r) => {
-  let mappedPriority = r.priority || 'Standard';
-  if (mappedPriority === 'Medium' || mappedPriority === 'Low' || mappedPriority === 'Routine') {
-    mappedPriority = 'Standard';
-  }
-
-  return {
-    id: String(r.id),
-    title: r.title || '',
-    desc: r.description || '',
-    company: r.company || '',
-    assignees: r.assignees || [],
-    date: r.date || r.date_scheduled || '',
-    startTime: r.start_time,
-    endTime: r.end_time,
-    startHour: r.start_hour ? Number(r.start_hour) : null,
-    duration: r.duration ? Number(r.duration) : null,
-    timeLabel: r.time_label || 'All-Day',
-    priority: mappedPriority,
-    type: r.type || 'flexible',
-    status: r.status || 'pending',
-    requiresPhoto: r.requires_photo ?? false,
-    requiresComment: r.requires_comment ?? false,
-    allowAssigneeDeadlineChange: r.allow_deadline_change ?? false,
-    recurrenceType: r.recurrence_type || 'once',
-    activeDays: r.active_days || [],
-    cadenceDays: r.cadence_days ?? 14,
-    notifyOnComplete: r.notify_on_complete ?? true,
-    notifyOnComment: r.notify_on_comment ?? true,
-    notifyOnDeadlineChange: r.notify_on_deadline_change ?? true,
-    notifyOnTaskCreated: r.notify_on_task_created ?? true,
-    parentTaskId: r.parent_task_id,
-    parentTaskTitle: r.parent_task_title,
-    parentInstanceDate: r.parent_instance_date,
-    comments: r.comments || [],
-    chainedSteps: r.chained_steps || [],
-    completedDates: r.completed_dates || [],
-    exceptionDates: r.exception_dates || [],
-    isOverdue: r.is_overdue ?? false,
-    overdueNotified: r.overdue_notified ?? false,
-    isLongTerm: r.is_long_term ?? false
-  };
-};
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
@@ -423,7 +219,7 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
           taskId,
           taskDate,
           read: false, 
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+          time: new Date().toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' @ ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
         }
       });
     }
@@ -752,31 +548,6 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
     }
 
     return 'Command Center';
-  };
-
-  const timeToDecimal = (timeStr) => {
-    if (!timeStr) return 9;
-    const [h, m] = timeStr.split(':').map(Number);
-    return h + m / 60;
-  };
-
-  const decimalToTimeString = (dec) => {
-    const hours = Math.floor(dec);
-    const minutes = Math.round((dec - hours) * 60);
-    const hStr = String(hours).padStart(2, '0');
-    const mStr = String(minutes).padStart(2, '0');
-    return `${hStr}:${mStr}`;
-  };
-
-  const formatTimeLabel = (startStr, endStr) => {
-    if (!startStr || !endStr) return 'All-Day';
-    const formatSingle = (t) => {
-      const [h, m] = t.split(':').map(Number);
-      const ampm = h >= 12 ? 'PM' : 'AM';
-      const h12 = h % 12 === 0 ? 12 : h % 12;
-      return `${h12 < 10 ? '0' + h12 : h12}:${m < 10 ? '0' + m : m} ${ampm}`;
-    };
-    return `${formatSingle(startStr)} - ${formatSingle(endStr)}`;
   };
 
   const handleOpenCreateView = () => {
@@ -2057,7 +1828,12 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
         t.desc.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (t.comments && t.comments.some(c => c.toLowerCase().includes(searchQuery.toLowerCase())))
       )
-    ).slice(0, 5),
+    ).map(t => ({
+      ...t,
+      // Check if it's completed either by status or if it has completed dates
+      isSearchCompleted: t.status === 'completed' || (t.completedDates && t.completedDates.length > 0)
+    })).slice(0, 5),
+    // ... companies and members stay exactly the same
     companies: masterCompanyList.filter(c => 
       searchQuery.trim() && !hiddenCompanies.includes(c) && c.toLowerCase().includes(searchQuery.toLowerCase())
     ),
@@ -2102,2138 +1878,276 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
     <div className="min-h-screen bg-[#A9B1A6] p-4 sm:p-8 font-sans text-[#333333]">
       <div className="max-w-[95%] mx-auto bg-[#F4F3ED] p-6 rounded-lg shadow-sm min-h-[850px] flex flex-col relative">
         
-        {/* REAL USER SESSION HEADER WITH HCP GLOBAL SEARCH */}
-        <div className="bg-[#333333] text-white px-4 py-2 rounded-md mb-4 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs shadow-md z-40 relative">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-gray-400 uppercase tracking-wider">User:</span>
-            <span className="text-white font-semibold">{currentProfile?.name || session?.user?.email}</span>
-            <span className="text-gray-500">|</span>
-            <span className="font-bold text-gray-400 uppercase tracking-wider">Role:</span>
-            <span className="text-amber-400 font-bold uppercase">{userRole}</span>
-          </div>
-
-          <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
-            
-            {/* HCP OVERLAY SEARCH INPUT & DROPDOWN */}
-            <div className="relative w-full sm:w-80" ref={searchRef}>
-              <div className="flex items-center bg-gray-800 rounded border border-gray-700 focus-within:border-[#A9B1A6] px-2.5 py-1">
-                <span className="text-gray-400 mr-2 text-xs">🔍</span>
-                <input 
-                  type="text" 
-                  value={searchQuery}
-                  onFocus={() => setIsSearchFocused(true)}
-                  onChange={(e) => {
-                    setSearchQuery(e.target.value);
-                    setIsSearchFocused(true);
-                  }}
-                  placeholder="Search jobs, companies, notes..." 
-                  className="bg-transparent text-white placeholder-gray-400 text-xs focus:outline-none w-full" 
-                />
-                {searchQuery && (
-                  <button onClick={() => { setSearchQuery(''); setIsSearchFocused(false); }} className="text-gray-400 hover:text-white font-bold text-xs ml-1">✕</button>
-                )}
-              </div>
-
-              {/* HCP STYLE OVERLAY DROPDOWN PANEL */}
-              {isSearchFocused && searchQuery.trim().length > 0 && (
-                <div className="absolute left-0 right-0 mt-2 bg-white rounded-lg shadow-2xl border border-gray-300 text-gray-800 z-50 overflow-hidden animate-fade-in max-h-96 overflow-y-auto">
-                  {hasSearchResults ? (
-                    <div className="flex flex-col">
-                      
-                      {/* TASKS SECTION */}
-                      {searchResults.tasks.length > 0 && (
-                        <div className="p-2 border-b border-gray-100">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 px-2 block mb-1">📋 Jobs & Tasks</span>
-                          {searchResults.tasks.map(task => (
-                            <div 
-                              key={task.id}
-                              onClick={() => {
-                                handleOpenModal(task, task.date || formatDateKey(new Date()));
-                                setIsSearchFocused(false);
-                                setSearchQuery('');
-                              }}
-                              className="p-2 hover:bg-blue-50 rounded cursor-pointer transition flex items-center justify-between group"
-                            >
-                              <div className="min-w-0 pr-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-bold text-xs text-gray-900 group-hover:text-blue-600 truncate">{task.title}</span>
-                                  <span className="text-[9px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-bold shrink-0">{task.company}</span>
-                                </div>
-                                <p className="text-[10px] text-gray-500 truncate mt-0.5">{task.desc}</p>
-                              </div>
-                              <span className="text-[10px] font-mono text-gray-400 shrink-0">{task.date || 'Unscheduled'}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* COMPANIES SECTION */}
-                      {searchResults.companies.length > 0 && (
-                        <div className="p-2 border-b border-gray-100 bg-gray-50/50">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 px-2 block mb-1">🏢 Companies</span>
-                          {searchResults.companies.map(comp => (
-                            <div 
-                              key={comp}
-                              onClick={() => {
-                                setActiveCompanyFilters([comp]);
-                                setIsSearchFocused(false);
-                                setSearchQuery('');
-                              }}
-                              className="p-1.5 hover:bg-gray-200/60 rounded cursor-pointer transition flex items-center justify-between text-xs font-bold text-gray-700"
-                            >
-                              <span>{comp}</span>
-                              <span className="text-[9px] text-blue-600 font-semibold">Filter Dashboard →</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* TEAM MEMBERS SECTION */}
-                      {searchResults.members.length > 0 && (
-                        <div className="p-2">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 px-2 block mb-1">👤 Team Members</span>
-                          {searchResults.members.map(member => (
-                            <div 
-                              key={member.id}
-                              onClick={() => {
-                                setActiveEmployeeFilters([member.name]);
-                                setIsSearchFocused(false);
-                                setSearchQuery('');
-                              }}
-                              className="p-1.5 hover:bg-gray-100 rounded cursor-pointer transition flex items-center justify-between"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: member.color }}></span>
-                                <span className="font-bold text-xs text-gray-800">{member.name}</span>
-                              </div>
-                              <span className="text-[9px] text-gray-400">{member.email}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                    </div>
-                  ) : (
-                    <div className="p-4 text-center text-xs text-gray-400 italic">
-                      No results found for "{searchQuery}"
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <button 
-              onClick={handleLogout} 
-              className="px-3 py-1 font-bold text-white transition bg-red-600 rounded hover:bg-red-700 shrink-0"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-
-        {/* CONTROLS HEADER */}
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4 border-b border-gray-300 pb-4">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1 bg-white border border-gray-300 rounded-lg p-1 shadow-2xs">
-              <button onClick={handlePrevDate} className="px-2.5 py-1 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded transition">‹</button>
-              <button onClick={handleToday} className="px-3 py-1 text-xs font-bold text-gray-700 hover:bg-gray-100 rounded transition border-x border-gray-200">Today</button>
-              <button onClick={handleNextDate} className="px-2.5 py-1 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded transition">›</button>
-            </div>
-
-            <div>
-              <h1 className="text-2xl font-serif font-bold text-gray-900 leading-tight">{getHeaderTitle()}</h1>
-              <p className="text-[11px] text-gray-500 font-bold uppercase tracking-wider">Command Center Queue</p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="bg-gray-200 p-1 rounded-lg flex items-center gap-1 border border-gray-300">
-              <button onClick={() => setCurrentView('completed')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'completed' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Completed</button>
-              <button onClick={() => setCurrentView('list')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'list' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>List</button>
-              <button onClick={() => setCurrentView('day')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'day' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Day</button>
-              <button onClick={() => setCurrentView('week')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'week' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Week</button>
-              <button onClick={() => setCurrentView('month')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'month' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Month</button>
-            </div>
-
-            <div className="relative">
-              <button 
-                onClick={() => setIsNotifOpen(!isNotifOpen)}
-                className="bg-white p-2 rounded-lg border border-gray-300 relative hover:bg-gray-50 transition">
-                🔔
-                {unreadNotifCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
-                    {unreadNotifCount}
-                  </span>
-                )}
-              </button>
-
-              {isNotifOpen && (
-                <div className="absolute -left-[4px] sm:left-auto sm:right-0 mt-2 w-72 sm:w-80 bg-white rounded-lg shadow-xl border border-gray-300 z-50 p-3 animate-fade-in">
-                  <div className="flex justify-between items-center border-b pb-2 mb-2">
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700">Notification Center</h4>
-                    <button onClick={markAllNotifsRead} className="text-[10px] text-blue-600 font-bold hover:underline">Mark all read</button>
-                  </div>
-                  <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
-                    {notifications.map(n => (
-                      <div 
-                        key={n.id} 
-                        onClick={() => handleNotificationClick(n)}
-                        className={`p-2 rounded text-xs border cursor-pointer hover:brightness-95 transition ${n.read ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-blue-50 border-blue-200 text-blue-900 shadow-2xs font-bold'}`}>
-                        <div className="flex justify-between items-start gap-2">
-                          <span className="leading-tight">{n.text}</span>
-                          <span className={`text-[9px] shrink-0 ${n.read ? 'text-gray-400' : 'text-blue-500 font-bold'}`}>{n.time}</span>
-                        </div>
-                        {n.taskId && (
-                          <div className="mt-1 text-[9px] text-gray-400 font-bold uppercase">
-                            Click to View ↗
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {notifications.length === 0 && (
-                      <p className="text-xs text-gray-400 italic text-center py-2">No notifications for {currentUserName}.</p>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <button 
-              onClick={() => { resetMemberForm(); setIsSettingsOpen(true); }}
-              className="bg-white p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition font-bold text-sm"
-              title="Settings & Preferences">
-              ⚙️
-            </button>
-
-            {userRole === 'admin' && currentView !== 'create' && (
-              <button onClick={handleOpenCreateView} className="bg-[#5B7049] text-white px-4 py-2 rounded text-xs font-bold shadow-sm hover:bg-[#465638] transition">
-                + New Task
-              </button>
-            )}
-          </div>
-        </div>
+        {/* TOP NAVIGATION & CONTROLS HEADER */}
+        <Header 
+          currentProfile={currentProfile} session={session} userRole={userRole} 
+          searchRef={searchRef} searchQuery={searchQuery} isSearchFocused={isSearchFocused} 
+          setIsSearchFocused={setIsSearchFocused} setSearchQuery={setSearchQuery} 
+          hasSearchResults={hasSearchResults} searchResults={searchResults} 
+          handleOpenModal={handleOpenModal} formatDateKey={formatDateKey} 
+          setActiveCompanyFilters={setActiveCompanyFilters} setActiveEmployeeFilters={setActiveEmployeeFilters} 
+          handleLogout={handleLogout} handlePrevDate={handlePrevDate} handleToday={handleToday} 
+          handleNextDate={handleNextDate} getHeaderTitle={getHeaderTitle} 
+          currentView={currentView} setCurrentView={setCurrentView} 
+          isNotifOpen={isNotifOpen} setIsNotifOpen={setIsNotifOpen} 
+          unreadNotifCount={unreadNotifCount} markAllNotifsRead={markAllNotifsRead} 
+          notifications={notifications} handleNotificationClick={handleNotificationClick} 
+          currentUserName={currentUserName} resetMemberForm={resetMemberForm} 
+          setIsSettingsOpen={setIsSettingsOpen} handleOpenCreateView={handleOpenCreateView} 
+        />
 
         {/* TEAM MEMBER & COMPANY FILTER BAR */}
-        {currentView !== 'create' && (
-          <div className="bg-white p-3 rounded-lg border border-gray-200 mb-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-2xs">
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Companies:</span>
-                <div className="flex flex-wrap gap-1">
-                  {masterCompanyList.filter(c => !hiddenCompanies.includes(c)).map(comp => {
-                    const isActive = activeCompanyFilters.includes(comp);
-                    return (
-                      <button
-                        key={comp}
-                        onClick={() => toggleCompanyFilter(comp)}
-                        className={`text-xs px-2.5 py-1 rounded-md font-bold border transition ${
-                          isActive ? 'bg-[#333333] text-white border-[#333333] shadow-2xs' : 'bg-gray-100 text-gray-400 border-gray-200 line-through'
-                        }`}>
-                        {comp}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+        <FilterBar 
+          currentView={currentView}
+          masterCompanyList={masterCompanyList}
+          hiddenCompanies={hiddenCompanies}
+          activeCompanyFilters={activeCompanyFilters}
+          toggleCompanyFilter={toggleCompanyFilter}
+          userRole={userRole}
+          teamMembers={teamMembers}
+          hiddenMembers={hiddenMembers}
+          activeEmployeeFilters={activeEmployeeFilters}
+          toggleEmployeeFilter={toggleEmployeeFilter}
+          setActiveCompanyFilters={setActiveCompanyFilters}
+          setActiveEmployeeFilters={setActiveEmployeeFilters}
+        />
 
-              {userRole === 'admin' && (
-                <div className="flex items-center gap-2 border-l border-gray-200 pl-4">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Team:</span>
-                  <div className="flex flex-wrap gap-1">
-                    {teamMembers.filter(m => !hiddenMembers.includes(m.name)).map(m => {
-                      const isActive = activeEmployeeFilters.includes(m.name);
-                      return (
-                        <button
-                          key={m.id}
-                          onClick={() => toggleEmployeeFilter(m.name)}
-                          className={`text-xs px-2.5 py-1 rounded-full font-bold border transition flex items-center gap-1.5 ${
-                            isActive ? 'bg-white shadow-2xs border-gray-300 text-gray-800' : 'bg-gray-100 text-gray-400 border-gray-200 line-through'
-                          }`}>
-                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: m.color }}></span>
-                          {m.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <button 
-              onClick={() => {
-                setActiveCompanyFilters([...masterCompanyList]);
-                if (userRole === 'admin') setActiveEmployeeFilters(teamMembers.map(m => m.name));
-              }} 
-              className="text-[11px] font-bold text-[#A9B1A6] hover:underline self-end md:self-center">
-              Reset All Filters
-            </button>
-          </div>
-        )}
-
-        {/* 🚨 EMPLOYEE OVERDUE ALERT TRAY 🚨 */}
-        {userRole === 'employee' && overdueTasks.length > 0 && currentView !== 'create' && currentView !== 'completed' && (
-          <div className="bg-red-50 border-2 border-red-500 rounded-lg p-3 mb-4 shadow-sm animate-fade-in">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-red-800 flex items-center gap-2">
-                🚨 Past Due Tasks ({overdueTasks.length} Action Required)
-              </span>
-            </div>
-            <div className="flex flex-col gap-2">
-              {overdueTasks.map(task => {
-                const missedDate = getMissedDate(task);
-                return (
-                  <div 
-                    key={`overdue-${task.id}`}
-                    onClick={() => handleOpenModal(task, missedDate)}
-                    className="bg-white px-3 py-2 rounded border border-red-300 text-xs font-bold text-gray-800 cursor-pointer hover:bg-red-100 transition shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-l-4 border-l-red-600">
-                    <div className="flex items-center gap-2 w-full sm:w-auto">
-                      <span className="text-[10px] bg-red-100 text-red-800 px-1.5 py-0.5 rounded font-mono border border-red-200 shrink-0">Due: {missedDate}</span>
-                      <span className="truncate text-sm">{task.title}</span>
-                      <span className="text-[9px] bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded shrink-0">{task.company}</span>
-                    </div>
-                    <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
-                      {renderPriorityPill(task, missedDate)}
-                      <div className="flex -space-x-1.5">
-                        {(task.assignees || []).map((a, idx) => {
-                          const m = getMemberConfig(a);
-                          return (
-                            <div key={idx} style={{ backgroundColor: m.color }} className="w-6 h-6 rounded-full border border-white flex items-center justify-center text-[9px] text-white shadow-sm font-bold">
-                              {m.initials}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* LONG-TERM PIPELINE TRAY */}
-        {(userRole === 'admin' || userRole === 'employee') && longTermTasks.length > 0 && currentView !== 'create' && currentView !== 'completed' && (
-          <div className="bg-blue-50 border border-blue-300 rounded-lg p-3 mb-4">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-blue-900 flex items-center gap-2">
-                📌 Long-Term & Pipeline Tasks ({longTermTasks.length} Active)
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {longTermTasks.map(task => {
-                const isOverdue = isTaskPastDue(task);
-                return (
-                  <div 
-                    key={`lt-${task.id}`}
-                    draggable={userRole === 'admin' && !resizingTaskId}
-                    onDragStart={(e) => handleDragStart(e, task.id, task.date)}
-                    onDragEnd={handleDragEnd}
-                    onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                    className={`px-3 py-1.5 rounded border text-xs font-bold transition shadow-2xs flex items-center gap-2 ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${isOverdue ? 'border-red-500 ring-1 ring-red-400 bg-red-50 text-red-900 hover:bg-red-100' : 'bg-white border-blue-200 text-gray-800 hover:bg-blue-100'}`}>
-                    <span>{task.title}</span>
-                    <span className="text-[9px] bg-gray-200 text-gray-700 px-1 py-0.5 rounded">{task.company}</span>
-                    {task.date && <span className={`text-[10px] px-1.5 py-0.5 rounded border ${isOverdue ? 'bg-red-100 text-red-800 border-red-200' : 'bg-blue-100 text-blue-800 border-blue-200'}`}>Due: {task.date}</span>}
-                    {(!task.assignees || task.assignees.length === 0) && <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">Unassigned</span>}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* UNASSIGNED BACKLOG TRAY */}
-        {userRole === 'admin' && backlogTasks.length > 0 && currentView !== 'create' && currentView !== 'completed' && (currentView !== 'list' || listScope === 'day') && (
-          <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-4">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-amber-900 flex items-center gap-2">
-                📥 Unassigned Task Backlog ({backlogTasks.length} Drafts Waiting)
-              </span>
-              <span className="text-[10px] text-amber-700 italic">Click task to assign team members</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {backlogTasks.map(task => (
-                <div 
-                  key={task.id}
-                  draggable={userRole === 'admin' && !resizingTaskId}
-                  onDragStart={(e) => handleDragStart(e, task.id, task.date)}
-                  onDragEnd={handleDragEnd}
-                  onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                  className="bg-white px-3 py-1.5 rounded border border-amber-200 text-xs font-bold text-gray-800 cursor-grab active:cursor-grabbing hover:bg-amber-100 transition shadow-2xs flex items-center gap-2">
-                  <span>{task.title}</span>
-                  <span className="text-[9px] bg-gray-200 text-gray-700 px-1 py-0.5 rounded">{task.company}</span>
-                  <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">Unassigned</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* CONDITIONAL DASHBOARD TRAYS (OVERDUE, PIPELINE, BACKLOG) */}
+    <DashboardTrays 
+      userRole={userRole}
+      currentView={currentView}
+      overdueTasks={overdueTasks}
+      getMissedDate={getMissedDate}
+      handleOpenModal={handleOpenModal}
+      renderPriorityPill={renderPriorityPill}
+      getMemberConfig={getMemberConfig}
+      longTermTasks={longTermTasks}
+      resizingTaskId={resizingTaskId}
+      handleDragStart={handleDragStart}
+      handleDragEnd={handleDragEnd}
+      formatDateKey={formatDateKey}
+      currentDate={currentDate}
+      isTaskPastDue={isTaskPastDue}
+      backlogTasks={backlogTasks}
+      listScope={listScope}
+    />
 
         {/* LIST & COMPLETED VIEWS */}
         {(currentView === 'list' || currentView === 'completed') && (
-          <div className="flex-col flex gap-6 overflow-y-auto pr-2">
-            
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${currentView === 'completed' ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500">
-                  {listScope === 'week' 
-                    ? (currentView === 'completed' ? 'Completed Tasks Overview' : 'Weekly Overview') 
-                    : (currentView === 'completed' ? `Completed on ${getHeaderTitle()}` : `Tasks for ${getHeaderTitle()}`)
-                  }
-                </h2>
-              </div>
-              
-              <div className="bg-gray-200 p-0.5 rounded flex items-center border border-gray-300 shadow-inner">
-                <button 
-                  onClick={() => setListScope('day')}
-                  className={`px-3 py-1 text-[10px] font-bold rounded transition ${listScope === 'day' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                  1-Day
-                </button>
-                <button 
-                  onClick={() => setListScope('week')}
-                  className={`px-3 py-1 text-[10px] font-bold rounded transition ${listScope === 'week' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                  7-Day
-                </button>
-              </div>
-            </div>
-
-            {listScope === 'week' ? (
-              (() => {
-                const start = new Date(currentDate);
-                const day = start.getDay();
-                const diff = start.getDate() - day + (day === 0 ? -6 : 1);
-                start.setDate(diff);
-                
-                const weekDates = [];
-                for(let i=0; i<7; i++) {
-                  const d = new Date(start);
-                  d.setDate(d.getDate() + i);
-                  weekDates.push({ dateStr: formatDateKey(d), dayOfWeekStr: daysOfWeek[d.getDay()] });
-                }
-
-                return (
-                  <>
-                    {masterCompanyList.filter(c => activeCompanyFilters.includes(c) && !hiddenCompanies.includes(c)).map(company => {
-                      
-                      let compWeekTasks = [];
-                      let compWeekCompleted = [];
-
-                      visibleTasks.forEach(t => {
-                        if(t.company === company) {
-                          weekDates.forEach(wd => {
-                            if (isTaskActiveOnDay(t, wd.dayOfWeekStr, wd.dateStr)) {
-                              compWeekTasks.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
-                            }
-                            if (isTaskCompletedOnDay(t, wd.dateStr)) {
-                              compWeekCompleted.push({ ...t, instanceDate: wd.dateStr, instanceDay: wd.dayOfWeekStr });
-                            }
-                          });
-                        }
-                      });
-
-                      const priorityScore = { High: 1, Standard: 2 };
-                      compWeekTasks.sort((a, b) => {
-                        if (a.instanceDate !== b.instanceDate) return a.instanceDate.localeCompare(b.instanceDate);
-                        return (priorityScore[a.priority] || 5) - (priorityScore[b.priority] || 5);
-                      });
-
-                      compWeekCompleted.sort((a, b) => a.instanceDate.localeCompare(b.instanceDate));
-                      const compBacklog = backlogTasks.filter(t => t.company === company);
-
-                      return (
-                        <div key={company} className="flex flex-col gap-4 mb-6">
-                          <div className="flex items-center gap-2 mb-1 border-b border-gray-300 pb-2">
-                            <span className="w-3 h-3 rounded-sm bg-[#333333]"></span>
-                            <h2 className="text-lg font-serif font-bold text-gray-800 tracking-wide">{company}</h2>
-                          </div>
-                          
-                          {currentView === 'list' && (
-                            <>
-                              {userRole === 'admin' && compBacklog.length > 0 && (
-                                <div className="bg-amber-50 border border-amber-300 rounded-lg p-3">
-                                  <div className="flex justify-between items-center mb-2">
-                                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-900 flex items-center gap-2">
-                                      📥 Unassigned Backlog ({compBacklog.length})
-                                    </span>
-                                  </div>
-                                  <div className="flex flex-wrap gap-2">
-                                    {compBacklog.map(task => (
-                                      <div 
-                                        key={task.id}
-                                        draggable={userRole === 'admin'}
-                                        onDragStart={(e) => handleDragStart(e, task.id, task.date)}
-                                        onDragEnd={handleDragEnd}
-                                        onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                                        className="bg-white px-3 py-1.5 rounded border border-amber-200 text-xs font-bold text-gray-800 cursor-grab active:cursor-grabbing hover:bg-amber-100 transition shadow-2xs flex items-center gap-2">
-                                        <span>{task.title}</span>
-                                        <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">Unassigned</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-
-                              <div className="flex flex-col gap-3">
-                                {compWeekTasks.map(task => {
-                                  const style = getPriorityStyle(task.priority);
-                                  const isPastDue = isTaskPastDue(task);
-                                  const isDueToday = !isPastDue && isTaskDueToday(task, task.instanceDate);
-
-                                  let borderClass = style.border;
-                                  let bgClass = "bg-white";
-                                  if (isPastDue) {
-                                    borderClass = "border-red-600 ring-1 ring-red-400";
-                                    bgClass = "bg-red-50/50";
-                                  } else if (isDueToday) {
-                                    borderClass = "border-amber-500 ring-1 ring-amber-400";
-                                    bgClass = "bg-amber-50/20";
-                                  }
-
-                                  return (
-                                    <div 
-                                      key={`${task.id}-${task.instanceDate}`}
-                                      onClick={() => handleOpenModal(task, task.instanceDate)}
-                                      className={`${bgClass} p-3 rounded border-l-4 ${borderClass} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-50 transition gap-3`}>
-                                      
-                                      <div className="flex items-start sm:items-center gap-3 sm:gap-4 w-full sm:w-2/3">
-                                        <div className="flex flex-col items-center justify-center bg-gray-50 rounded px-2.5 py-1 min-w-[50px] border border-gray-200 shrink-0">
-                                          <span className="text-[9px] font-bold text-gray-500 uppercase">{task.instanceDay}</span>
-                                          <span className="text-sm font-bold text-gray-800">{task.instanceDate.split('-')[2]}</span>
-                                        </div>
-                                        
-                                        <span className="font-mono text-xs font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200 shrink-0 self-start sm:self-auto">{task.timeLabel}</span>
-                                        
-                                        <div className="truncate pr-2 w-full">
-                                          <div className="flex items-center gap-2 flex-wrap">
-                                            <h3 className="font-bold text-sm truncate">{task.title}</h3>
-                                            {task.company && <span className="text-[9px] bg-gray-200 text-gray-700 px-1 py-0.5 rounded">{task.company}</span>}
-                                            {task.recurrenceType === 'completion' && <span className="text-[9px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded shrink-0">🔄</span>}
-                                          </div>
-                                          <p className="text-[11px] text-gray-500 truncate">{task.desc}</p>
-                                        </div>
-                                      </div>
-
-                                      <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100 mt-1 sm:mt-0">
-                                        
-                                        {renderPriorityPill(task, task.instanceDate)}
-
-                                        <div className="flex -space-x-1.5">
-                                          {(task.assignees || []).map((a, idx) => {
-                                            const m = getMemberConfig(a);
-                                            return (
-                                              <div key={idx} style={{ backgroundColor: m.color }} className="w-6 h-6 rounded-full border border-white flex items-center justify-center text-[9px] text-white shadow-sm font-bold">
-                                                {m.initials}
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                      </div>
-
-                                    </div>
-                                  );
-                                })}
-                                
-                                {compWeekTasks.length === 0 && (userRole !== 'admin' || compBacklog.length === 0) && (
-                                  <div className="bg-white p-6 rounded text-center border border-dashed border-gray-300">
-                                    <p className="text-sm text-gray-500 font-bold">No active tasks scheduled for {company} this week.</p>
-                                  </div>
-                                )}
-                              </div>
-                            </>
-                          )}
-
-                          {currentView === 'completed' && (
-                            <div className="flex flex-col gap-2">
-                              {compWeekCompleted.length > 0 ? (
-                                compWeekCompleted.map(task => (
-                                  <div 
-                                    key={`${task.id}-comp-${task.instanceDate}`}
-                                    onClick={() => handleOpenModal(task, task.instanceDate)}
-                                    className="bg-gray-200/60 p-2.5 rounded flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-200 transition gap-2">
-                                    <div className="flex items-center gap-3 w-full sm:w-auto">
-                                      <div className="flex flex-col items-center justify-center bg-gray-300/50 rounded px-2 py-0.5 min-w-[40px] shrink-0">
-                                        <span className="text-[8px] font-bold text-gray-500 uppercase">{task.instanceDay}</span>
-                                        <span className="text-xs font-bold text-gray-600">{task.instanceDate.split('-')[2]}</span>
-                                      </div>
-                                      <div className="min-w-0 flex-1">
-                                        <span className="line-through text-xs font-bold text-gray-600 block truncate">{task.title}</span>
-                                        <span className="text-[10px] text-gray-500">Assigned to: {(task.assignees || []).join(', ')}</span>
-                                      </div>
-                                    </div>
-                                    <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full border border-green-300 self-end sm:self-auto shrink-0">
-                                      ✓ Completed
-                                    </span>
-                                  </div>
-                                ))
-                              ) : (
-                                <div className="bg-white p-6 rounded text-center border border-dashed border-gray-300">
-                                  <p className="text-sm text-gray-500 font-bold">No completed tasks for {company} this week.</p>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </>
-                );
-              })()
-            ) : (
-              <div>
-                {currentView === 'list' && (
-                  <div className="flex flex-col gap-3">
-                    {visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate))).length > 0 ? (
-                      visibleTasks
-                        .filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], formatDateKey(currentDate)))
-                        .map(task => {
-                          const style = getPriorityStyle(task.priority);
-                          const isPastDue = isTaskPastDue(task);
-                          const isDueToday = !isPastDue && isTaskDueToday(task, formatDateKey(currentDate));
-
-                          let borderClass = style.border;
-                          let bgClass = "bg-white";
-                          if (isPastDue) {
-                            borderClass = "border-red-600 ring-1 ring-red-400";
-                            bgClass = "bg-red-50/50";
-                          } else if (isDueToday) {
-                            borderClass = "border-amber-500 ring-1 ring-amber-400";
-                            bgClass = "bg-amber-50/20";
-                          }
-
-                          return (
-                            <div 
-                              key={task.id}
-                              onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                              className={`${bgClass} p-3 sm:p-4 rounded border-l-4 ${borderClass} shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-50 transition gap-3 sm:gap-0`}>
-                              <div className="w-full sm:w-2/3 flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
-                                <span className="font-mono text-[10px] sm:text-sm font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200 shrink-0 self-start sm:self-auto">{task.timeLabel}</span>
-                                <div className="min-w-0 w-full">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <h3 className="font-bold text-base sm:text-lg truncate">{task.title}</h3>
-                                    <span className="text-[9px] bg-gray-200 text-gray-700 px-1 py-0.5 rounded">{task.company}</span>
-                                    {task.recurrenceType === 'completion' && <span className="text-[10px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded">🔄 Interval</span>}
-                                  </div>
-                                  <p className="text-xs sm:text-sm text-gray-500 truncate">{task.desc}</p>
-                                </div>
-                              </div>
-                              <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto pt-3 sm:pt-0 border-t sm:border-t-0 border-gray-100 mt-1 sm:mt-0">
-                                
-                                {renderPriorityPill(task, formatDateKey(currentDate))}
-
-                                <div className="flex -space-x-2">
-                                  {(task.assignees || []).map((a, idx) => {
-                                    const m = getMemberConfig(a);
-                                    return (
-                                      <div key={idx} style={{ backgroundColor: m.color }} className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-xs text-white shadow-sm font-bold">
-                                        {m.initials}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })
-                    ) : (
-                      <div className="bg-white p-8 rounded text-center border border-dashed border-gray-300">
-                        <p className="text-sm text-gray-500 font-bold">No active tasks scheduled for this date.</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {currentView === 'completed' && (
-                  <div className="flex flex-col gap-2 mt-2">
-                    {visibleTasks.filter(t => isTaskCompletedOnDay(t, formatDateKey(currentDate))).length > 0 ? (
-                      visibleTasks.filter(t => isTaskCompletedOnDay(t, formatDateKey(currentDate))).map(task => (
-                        <div 
-                          key={task.id} 
-                          onClick={() => handleOpenModal(task, formatDateKey(currentDate))}
-                          className="bg-gray-200/60 p-3 rounded flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-200 transition gap-2">
-                          <div className="flex items-center gap-2 w-full sm:w-auto">
-                            <div className="min-w-0 flex-1">
-                              <span className="line-through text-sm font-bold text-gray-600 block truncate">{task.title}</span>
-                              <span className="text-[9px] bg-gray-300 text-gray-600 px-1 py-0.5 rounded inline-block mt-0.5">{task.company}</span>
-                            </div>
-                            <span className="text-xs text-gray-500 sm:ml-4">Assigned to: {(task.assignees || []).join(', ')}</span>
-                          </div>
-                          <span className="text-xs font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-300 self-end sm:self-auto shrink-0">
-                            ✓ Completed
-                          </span>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="bg-white p-8 rounded text-center border border-dashed border-gray-300">
-                        <p className="text-sm text-gray-500 font-bold">No tasks completed on this date.</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          <ListAndCompletedViews 
+            currentView={currentView}
+            listScope={listScope}
+            setListScope={setListScope}
+            getHeaderTitle={getHeaderTitle}
+            currentDate={currentDate}
+            getWeekStart={getWeekStart}
+            daysOfWeek={daysOfWeek}
+            formatDateKey={formatDateKey}
+            masterCompanyList={masterCompanyList}
+            activeCompanyFilters={activeCompanyFilters}
+            hiddenCompanies={hiddenCompanies}
+            visibleTasks={visibleTasks}
+            isTaskActiveOnDay={isTaskActiveOnDay}
+            isTaskCompletedOnDay={isTaskCompletedOnDay}
+            backlogTasks={backlogTasks}
+            userRole={userRole}
+            handleDragStart={handleDragStart}
+            handleDragEnd={handleDragEnd}
+            handleOpenModal={handleOpenModal}
+            getPriorityStyle={getPriorityStyle}
+            isTaskPastDue={isTaskPastDue}
+            isTaskDueToday={isTaskDueToday}
+            renderPriorityPill={renderPriorityPill}
+            getMemberConfig={getMemberConfig}
+          />
         )}
 
         {/* DAY VIEW */}
         {currentView === 'day' && (
-          <div className="w-full overflow-x-auto pb-4">
-            <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm min-w-[700px]">
-              <div className="flex border-b border-gray-300 bg-gray-100">
-                <div className="w-20 py-3 text-center text-xs font-bold text-gray-500 border-r border-gray-300">Time</div>
-                <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
-                  {visibleMembers.map(member => (
-                    <div key={member.id} className="py-3 px-2 border-r border-gray-300 last:border-r-0 flex items-center justify-center gap-2">
-                      <div style={{ backgroundColor: member.color }} className="w-7 h-7 rounded-full text-white flex items-center justify-center text-xs font-bold shadow-sm">
-                        {member.initials}
-                      </div>
-                      <span className="font-bold text-sm text-gray-800">{member.name}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex border-b border-gray-300 bg-gray-50/80 min-h-[40px] shrink-0">
-                <div className="w-20 py-2 text-center text-[10px] font-bold text-gray-500 border-r border-gray-300 flex items-center justify-center bg-gray-100">All-Day</div>
-                <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))` }}>
-                  {visibleMembers.map(member => {
-                    const dayDateStr = formatDateKey(currentDate);
-                    const allDayTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], dayDateStr) && t.assignees && t.assignees.includes(member.name) && t.type === 'flexible');
-                    
-                    return (
-                      <div 
-                        key={member.id} 
-                        className="p-1 border-r border-gray-300 last:border-r-0 flex flex-col gap-1 min-h-[40px]"
-                        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                        onDrop={(e) => handleDropSlot(e, dayDateStr, null, member.name, true)}
-                      >
-                        {allDayTasks.map(task => (
-                          <div
-                            key={task.id}
-                            draggable={userRole === 'admin' && !resizingTaskId}
-                            onDragStart={(e) => handleDragStart(e, task.id, dayDateStr)}
-                            onDragEnd={handleDragEnd}
-                            onClick={() => handleOpenModal(task, dayDateStr)}
-                            style={{ backgroundColor: member.color }}
-                            className={`text-white text-[10px] font-semibold px-2 py-1 rounded truncate shadow-sm ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition ${isTaskPastDue(task) ? 'ring-2 ring-red-500' : ''}`}
-                          >
-                            {task.title}
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="flex-1 relative overflow-y-auto flex" style={{ maxHeight: '580px' }}>
-                <div className="w-20 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
-                  {dynamicTimeSlots.map(hour => (
-                    <div key={hour} className="h-20 border-b border-gray-200 p-2 text-xs font-mono font-bold text-gray-400 text-right pr-3">
-                      {hour === 12 ? '12:00 PM' : hour > 12 ? `${hour - 12}:00 PM` : hour === 0 ? '12:00 AM' : `${hour}:00 AM`}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex-1 grid relative" style={{ gridTemplateColumns: `repeat(${visibleMembers.length}, minmax(0, 1fr))`, height: `${dynamicTimeSlots.length * 80}px` }}>
-                  {visibleMembers.map(member => {
-                    const dayDateStr = formatDateKey(currentDate);
-                    const memberColTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, daysOfWeek[currentDate.getDay()], dayDateStr) && t.assignees && t.assignees.includes(member.name) && t.type === 'timed');
-                    const layouts = computeDynamicLayouts(memberColTasks);
-
-                    return (
-                      <div key={member.id} className="border-r border-gray-200 last:border-r-0 relative h-full">
-                        {dynamicTimeSlots.map(hour => (
-                          <div key={hour} className="h-20 border-b border-gray-200 flex flex-col">
-                            {minuteSubSlots.map(subOffset => (
-                              <div 
-                                key={subOffset}
-                                onDragOver={(e) => handleSubSlotDragOver(e, dayDateStr, hour + subOffset, member.name)}
-                                onDrop={(e) => handleDropSlot(e, dayDateStr, hour + subOffset, member.name, false)}
-                                className="flex-1 hover:bg-blue-50/50 transition border-b border-dashed border-gray-100 last:border-b-0"
-                                title={`Schedule for ${decimalToTimeString(hour + subOffset)} - ${member.name}`}>
-                              </div>
-                            ))}
-                          </div>
-                        ))}
-
-                        {draggedTaskObj && hoverSlot && hoverSlot.memberName === member.name && hoverSlot.dateStr === dayDateStr && (
-                          <div 
-                            style={{
-                              top: `${(hoverSlot.targetHour - gridStartHour) * 80}px`,
-                              height: `${Math.max(32, (draggedTaskObj.duration || 1) * 80)}px`,
-                              left: '2px',
-                              right: '2px'
-                            }}
-                            className="absolute z-30 bg-blue-500/20 border-2 border-dashed border-blue-600 rounded-md p-2 shadow-lg pointer-events-none flex flex-col justify-between text-blue-950 font-bold backdrop-blur-[2px] animate-pulse">
-                            <div className="flex justify-between items-start gap-1">
-                              <span className="text-[10px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded shadow-2xs font-mono shrink-0">
-                                🎯 {formatTimeLabel(decimalToTimeString(hoverSlot.targetHour), decimalToTimeString(hoverSlot.targetHour + (draggedTaskObj.duration || 1)))}
-                              </span>
-                              <span className="text-[9px] bg-white/90 px-1 py-0.5 rounded border border-blue-300 text-blue-900 truncate">
-                                {member.name}
-                              </span>
-                            </div>
-                            <span className="text-xs truncate text-blue-950 mt-1">{draggedTaskObj.title}</span>
-                          </div>
-                        )}
-
-                        {memberColTasks.map(task => {
-                          const layout = layouts[task.id] || { left: '0%', width: '100%', startPx: 0, heightPx: 80, isFlex: false };
-                          const isFlex = layout.isFlex;
-
-                          return (
-                            <div
-                              key={task.id}
-                              draggable={userRole === 'admin' && !resizingTaskId}
-                              onDragStart={(e) => handleDragStart(e, task.id, dayDateStr)}
-                              onDragEnd={handleDragEnd}
-                              onClick={() => handleOpenModal(task, dayDateStr)}
-                              style={{ 
-                                top: `${layout.startPx}px`, 
-                                height: `${layout.heightPx}px`, 
-                                left: layout.left, 
-                                width: layout.width, 
-                                backgroundColor: member.color 
-                              }}
-                              className={`absolute text-white rounded-md p-2 shadow-md border-l-4 ${isTaskPastDue(task) ? 'border-red-500 ring-2 ring-red-400' : 'border-black/20'} ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition z-10 flex flex-col justify-between overflow-hidden ${isFlex ? 'opacity-95' : ''}`}>
-                              
-                              {!isFlex && userRole === 'admin' && (
-                                <div 
-                                  className="absolute top-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-t-md"
-                                  onPointerDown={(e) => handleResizeStart(e, task, 'top')}
-                                />
-                              )}
-
-                              <div>
-                                <div className="flex justify-between items-start gap-1">
-                                  <h4 className="font-bold text-xs leading-tight drop-shadow-sm truncate">
-                                    {task.title}
-                                  </h4>
-                                  {isTaskPastDue(task) ? (
-                                    <span className="bg-red-600 text-[8px] font-bold px-1 rounded shrink-0">OVERDUE</span>
-                                  ) : (
-                                    isFlex && <span className="bg-black/30 text-[8px] font-bold px-1 rounded shrink-0">ALL-DAY</span>
-                                  )}
-                                </div>
-                                <span className="text-[10px] bg-black/20 px-1 rounded font-mono inline-block mt-0.5">{task.timeLabel}</span>
-                                <p className="text-[10px] opacity-90 truncate mt-0.5">[{task.company}] {task.desc}</p>
-                              </div>
-                              <div className="flex items-center justify-between text-[9px] opacity-80 pt-0.5 border-t border-white/20 mt-auto">
-                                <span>Priority: {task.priority}</span>
-                                <span>{task.recurrenceType === 'completion' ? '🔄' : task.recurrenceType === 'fixed' ? '↻' : ''}</span>
-                              </div>
-
-                              {!isFlex && userRole === 'admin' && (
-                                <div 
-                                  className="absolute bottom-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-b-md"
-                                  onPointerDown={(e) => handleResizeStart(e, task, 'bottom')}
-                                />
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
+          <DayView 
+            visibleMembers={visibleMembers}
+            formatDateKey={formatDateKey}
+            currentDate={currentDate}
+            visibleTasks={visibleTasks}
+            isTaskActiveOnDay={isTaskActiveOnDay}
+            daysOfWeek={daysOfWeek}
+            handleDropSlot={handleDropSlot}
+            userRole={userRole}
+            resizingTaskId={resizingTaskId}
+            handleDragStart={handleDragStart}
+            handleDragEnd={handleDragEnd}
+            handleOpenModal={handleOpenModal}
+            dynamicTimeSlots={dynamicTimeSlots}
+            minuteSubSlots={minuteSubSlots}
+            handleSubSlotDragOver={handleSubSlotDragOver}
+            decimalToTimeString={decimalToTimeString}
+            draggedTaskObj={draggedTaskObj}
+            hoverSlot={hoverSlot}
+            formatTimeLabel={formatTimeLabel}
+            computeDynamicLayouts={computeDynamicLayouts}
+            isTaskPastDue={isTaskPastDue}
+            handleResizeStart={handleResizeStart}
+            gridStartHour={gridStartHour}
+          />
         )}
 
         {/* WEEK VIEW */}
         {currentView === 'week' && (
-          <div className="w-full overflow-x-auto pb-4">
-            <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm min-w-[800px]">
-              <div className="flex border-b border-gray-300 bg-gray-100 font-bold text-xs text-gray-700">
-                <div className="w-16 py-2 text-center border-r border-gray-300">Time</div>
-                <div className="flex-1 grid grid-cols-7">
-                  {daysOfWeek.map((dayName, idx) => {
-                    const weekStart = getWeekStart(currentDate);
-                    const cellDate = new Date(weekStart);
-                    cellDate.setDate(cellDate.getDate() + idx);
-                    const isTodayCell = formatDateKey(cellDate) === formatDateKey(new Date());
-
-                    return (
-                      <div key={dayName} className={`py-2 text-center border-r border-gray-300 last:border-r-0 ${isTodayCell ? 'bg-[#A9B1A6] text-white' : ''}`}>
-                        <span className="block text-[10px] uppercase">{dayName}</span>
-                        <span className="text-xs font-serif">{cellDate.getMonth() + 1}/{cellDate.getDate()}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="flex border-b border-gray-300 bg-gray-50/80 min-h-[40px] shrink-0">
-                <div className="w-16 py-2 text-center text-[10px] font-bold text-gray-500 border-r border-gray-300 flex items-center justify-center bg-gray-100">All-Day</div>
-                <div className="flex-1 grid grid-cols-7">
-                  {daysOfWeek.map((dayName, idx) => {
-                    const weekStart = getWeekStart(currentDate);
-                    const cellDate = new Date(weekStart);
-                    cellDate.setDate(cellDate.getDate() + idx);
-                    const dateStr = formatDateKey(cellDate);
-
-                    const allDayTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, dayName, dateStr) && t.type === 'flexible');
-
-                    return (
-                      <div 
-                        key={dayName} 
-                        className="p-1 border-r border-gray-300 last:border-r-0 flex flex-col gap-1 min-h-[40px]"
-                        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                        onDrop={(e) => handleDropSlot(e, dateStr, null, null, true)}
-                      >
-                        {allDayTasks.map(task => {
-                          const member = getMemberConfig(task.assignees && task.assignees[0]);
-                          return (
-                            <div
-                              key={`${task.id}-${dateStr}`}
-                              draggable={userRole === 'admin' && !resizingTaskId}
-                              onDragStart={(e) => handleDragStart(e, task.id, dateStr)}
-                              onDragEnd={handleDragEnd}
-                              onClick={() => handleOpenModal(task, dateStr)}
-                              style={{ backgroundColor: member.color }}
-                              className={`text-white text-[9px] font-semibold px-1.5 py-0.5 rounded truncate shadow-sm ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:brightness-110 transition ${isTaskPastDue(task) ? 'ring-2 ring-red-500' : ''}`}
-                            >
-                              {task.title}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="flex-1 relative overflow-y-auto flex" style={{ maxHeight: '550px' }}>
-                <div className="w-16 border-r border-gray-300 bg-gray-50 flex flex-col select-none shrink-0" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
-                  {dynamicTimeSlots.map(hour => (
-                    <div key={hour} className="h-20 border-b border-gray-200 p-1 text-[10px] font-mono font-bold text-gray-400 text-right pr-2">
-                      {hour === 12 ? '12 PM' : hour > 12 ? `${hour - 12} PM` : hour === 0 ? '12 AM' : `${hour} AM`}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex-1 grid grid-cols-7 relative" style={{ height: `${dynamicTimeSlots.length * 80}px` }}>
-                  {daysOfWeek.map((dayName, idx) => {
-                    const weekStart = getWeekStart(currentDate);
-                    const cellDate = new Date(weekStart);
-                    cellDate.setDate(cellDate.getDate() + idx);
-                    const dateStr = formatDateKey(cellDate);
-
-                    const dayColTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, dayName, dateStr) && t.type === 'timed');
-                    const layouts = computeDynamicLayouts(dayColTasks);
-
-                    return (
-                      <div key={dayName} className="border-r border-gray-200 last:border-r-0 relative h-full">
-                        {dynamicTimeSlots.map(hour => (
-                          <div key={hour} className="h-20 border-b border-gray-200 flex flex-col">
-                            {minuteSubSlots.map(subOffset => (
-                              <div 
-                                key={subOffset}
-                                onDragOver={(e) => handleSubSlotDragOver(e, dateStr, hour + subOffset, null)}
-                                onDrop={(e) => handleDropSlot(e, dateStr, hour + subOffset, null, false)}
-                                className="flex-1 hover:bg-blue-50/50 transition border-b border-dashed border-gray-100 last:border-b-0"
-                                title={`${dateStr} @ ${decimalToTimeString(hour + subOffset)}`}>
-                              </div>
-                            ))}
-                          </div>
-                        ))}
-
-                        {draggedTaskObj && hoverSlot && hoverSlot.dateStr === dateStr && (
-                          <div 
-                            style={{
-                              top: `${(hoverSlot.targetHour - gridStartHour) * 80}px`,
-                              height: `${Math.max(32, (draggedTaskObj.duration || 1) * 80)}px`,
-                              left: '2px',
-                              right: '2px'
-                            }}
-                            className="absolute z-30 bg-blue-500/20 border-2 border-dashed border-blue-600 rounded p-1.5 shadow-lg pointer-events-none flex flex-col justify-between text-blue-950 font-bold backdrop-blur-[2px] animate-pulse">
-                            <div className="flex justify-between items-center text-[9px] font-bold">
-                              <span className="bg-blue-600 text-white px-1 py-0.5 rounded font-mono truncate">
-                                🎯 {formatTimeLabel(decimalToTimeString(hoverSlot.targetHour), decimalToTimeString(hoverSlot.targetHour + (draggedTaskObj.duration || 1)))}
-                              </span>
-                            </div>
-                            <span className="text-[10px] truncate text-blue-950 mt-0.5">{draggedTaskObj.title}</span>
-                          </div>
-                        )}
-
-                        {dayColTasks.map(task => {
-                          const layout = layouts[task.id] || { left: '0%', width: '100%', startPx: 0, heightPx: 80, isFlex: false };
-                          const member = getMemberConfig(task.assignees && task.assignees[0]);
-                          const isFlex = layout.isFlex;
-
-                          return (
-                            <div
-                              key={`${task.id}-${dateStr}`}
-                              draggable={userRole === 'admin' && !resizingTaskId}
-                              onDragStart={(e) => handleDragStart(e, task.id, dateStr)}
-                              onDragEnd={handleDragEnd}
-                              onClick={() => handleOpenModal(task, dateStr)}
-                              style={{ 
-                                top: `${layout.startPx}px`, 
-                                height: `${layout.heightPx}px`, 
-                                left: layout.left, 
-                                width: layout.width, 
-                                backgroundColor: member.color 
-                              }}
-                              className={`absolute text-white rounded p-1.5 shadow ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 transition z-10 flex flex-col justify-between overflow-hidden ${isTaskPastDue(task) ? 'ring-2 ring-red-500' : ''} ${isFlex ? 'opacity-95' : ''}`}>
-                              
-                              {!isFlex && userRole === 'admin' && (
-                                <div 
-                                  className="absolute top-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-t"
-                                  onPointerDown={(e) => handleResizeStart(e, task, 'top')}
-                                />
-                              )}
-
-                              <div>
-                                <div className="flex justify-between items-center text-[10px] font-bold leading-tight">
-                                  <span className="truncate">{task.title}</span>
-                                  {isTaskPastDue(task) ? (
-                                    <span className="bg-red-600 px-0.5 rounded text-[8px] shrink-0">!</span>
-                                  ) : (
-                                    isFlex && <span className="bg-black/30 px-0.5 rounded text-[7px] shrink-0">ALL-DAY</span>
-                                  )}
-                                </div>
-                                <span className="text-[9px] opacity-80 font-mono block truncate">{task.timeLabel}</span>
-                              </div>
-                              <span className="text-[8px] bg-black/20 px-1 rounded truncate w-max mt-auto">{(task.assignees || []).join(', ')}</span>
-
-                              {!isFlex && userRole === 'admin' && (
-                                <div 
-                                  className="absolute bottom-0 inset-x-0 h-2 cursor-ns-resize hover:bg-white/40 z-20 touch-none rounded-b"
-                                  onPointerDown={(e) => handleResizeStart(e, task, 'bottom')}
-                                />
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
+          <WeekView 
+            daysOfWeek={daysOfWeek}
+            getWeekStart={getWeekStart}
+            currentDate={currentDate}
+            formatDateKey={formatDateKey}
+            visibleTasks={visibleTasks}
+            isTaskActiveOnDay={isTaskActiveOnDay}
+            handleDropSlot={handleDropSlot}
+            getMemberConfig={getMemberConfig}
+            userRole={userRole}
+            resizingTaskId={resizingTaskId}
+            handleDragStart={handleDragStart}
+            handleDragEnd={handleDragEnd}
+            handleOpenModal={handleOpenModal}
+            isTaskPastDue={isTaskPastDue}
+            dynamicTimeSlots={dynamicTimeSlots}
+            computeDynamicLayouts={computeDynamicLayouts}
+            minuteSubSlots={minuteSubSlots}
+            handleSubSlotDragOver={handleSubSlotDragOver}
+            decimalToTimeString={decimalToTimeString}
+            draggedTaskObj={draggedTaskObj}
+            hoverSlot={hoverSlot}
+            gridStartHour={gridStartHour}
+            formatTimeLabel={formatTimeLabel}
+            handleResizeStart={handleResizeStart}
+          />
         )}
 
         {/* MONTH VIEW */}
         {currentView === 'month' && (
-          <div className="flex-1 flex flex-col border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm">
-            <div className="grid grid-cols-7 bg-gray-100 border-b border-gray-300 text-center py-2 text-xs font-bold text-gray-600">
-              {daysOfWeek.map(d => <div key={d}>{d}</div>)}
-            </div>
-            <div className="grid grid-cols-7 grid-rows-5 flex-1 divide-x divide-y divide-gray-200 min-h-[550px]">
-              {Array.from({ length: 35 }).map((_, i) => {
-                const firstOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-                const startDay = firstOfMonth.getDay();
-                const cellDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1 - startDay + i);
-                
-                const isCurrentMonthCell = cellDate.getMonth() === currentDate.getMonth();
-                const dateStr = formatDateKey(cellDate);
-                const dayOfWeekStr = daysOfWeek[cellDate.getDay()];
-                const isTodayCell = dateStr === formatDateKey(new Date());
-
-                // FIX: Look up tasks for every day, regardless of whether it's in the current month or not.
-                const pendingDayTasks = visibleTasks.filter(t => isTaskActiveOnDay(t, dayOfWeekStr, dateStr));
-                const completedDayTasks = visibleTasks.filter(t => isTaskCompletedOnDay(t, dateStr));
-
-                return (
-                  <div 
-                    key={i} 
-                    onDragOver={handleDragOver}
-                    onDrop={(e) => handleDropSlot(e, dateStr, null, null, false)}
-                    className={`p-1.5 flex flex-col transition hover:bg-blue-50/20 ${isCurrentMonthCell ? 'bg-white' : 'bg-gray-100/50 text-gray-400'}`}>
-                    <span className={`text-xs font-bold p-1 ${isTodayCell ? 'bg-[#A9B1A6] text-white rounded-full w-5 h-5 flex items-center justify-center' : 'text-gray-500'}`}>
-                      {cellDate.getDate()}
-                    </span>
-                    <div className="flex flex-col gap-1 mt-1 overflow-y-auto max-h-24">
-                      {pendingDayTasks.map(task => {
-                        const member = getMemberConfig(task.assignees && task.assignees[0]);
-                        return (
-                          <div 
-                            key={`${task.id}-${dateStr}`} 
-                            draggable={userRole === 'admin' && !resizingTaskId}
-                            onDragStart={(e) => handleDragStart(e, task.id, dateStr)}
-                            onDragEnd={handleDragEnd}
-                            onClick={() => handleOpenModal(task, dateStr)}
-                            style={{ backgroundColor: member.color }}
-                            className={`text-white text-[10px] font-semibold p-1 rounded truncate ${userRole === 'admin' && !resizingTaskId ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} hover:opacity-90 shadow-2xs flex items-center justify-between ${isTaskPastDue(task) ? 'ring-2 ring-red-500' : ''} ${isCurrentMonthCell ? 'opacity-100' : 'opacity-40 grayscale'}`}>
-                            <span className="truncate">{task.title}</span>
-                            <div className="flex items-center gap-0.5">
-                              {isTaskPastDue(task) && <span className="text-[8px] bg-red-600 px-0.5 rounded font-bold">!</span>}
-                              {task.recurrenceType === 'completion' && <span className="text-[8px] bg-black/20 px-0.5 rounded">🔄</span>}
-                              {task.recurrenceType === 'fixed' && <span className="text-[8px] bg-black/20 px-0.5 rounded font-mono">↻</span>}
-                            </div>
-                          </div>
-                        );
-                      })}
-
-                      {completedDayTasks.map(task => (
-                        <div 
-                          key={`completed-${task.id}-${dateStr}`}
-                          onClick={() => handleOpenModal(task, dateStr)}
-                          className={`bg-gray-200 text-gray-500 line-through text-[10px] font-semibold p-1 rounded truncate cursor-pointer flex items-center justify-between ${isCurrentMonthCell ? 'opacity-75 hover:opacity-90' : 'opacity-30'}`}>
-                          <span className="truncate">✓ {task.title}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <MonthView 
+            daysOfWeek={daysOfWeek}
+            currentDate={currentDate}
+            formatDateKey={formatDateKey}
+            visibleTasks={visibleTasks}
+            isTaskActiveOnDay={isTaskActiveOnDay}
+            isTaskCompletedOnDay={isTaskCompletedOnDay}
+            handleDragOver={handleDragOver}
+            handleDropSlot={handleDropSlot}
+            getMemberConfig={getMemberConfig}
+            userRole={userRole}
+            resizingTaskId={resizingTaskId}
+            handleDragStart={handleDragStart}
+            handleDragEnd={handleDragEnd}
+            handleOpenModal={handleOpenModal}
+            isTaskPastDue={isTaskPastDue}
+          />
         )}
 
         {/* TASK BUILDER VIEW */}
         {currentView === 'create' && (
-          <div className="flex flex-col h-full animate-fade-in">
-            <div className="flex justify-between items-center mb-6 border-b border-gray-300 pb-4">
-              <h1 className="text-3xl font-serif font-bold">Task Builder</h1>
-              <button onClick={() => setCurrentView(previousView === 'create' ? 'list' : previousView)} className="text-gray-500 hover:text-gray-800 font-semibold text-sm">✕ Cancel</button>
-            </div>
-
-            <div className="flex gap-8 h-full">
-              <div className="w-1/2 flex flex-col gap-5 border-r border-gray-300 pr-8">
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Task Title</label>
-                  <input type="text" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="e.g., Service Espresso Machine" className="w-full px-4 py-2 rounded border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#A9B1A6]" />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Description</label>
-                  <textarea rows={3} value={taskDesc} onChange={(e) => setTaskDesc(e.target.value)} placeholder="Add instructions for this task..." className="w-full px-4 py-2 rounded border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#A9B1A6]"></textarea>
-                </div>
-
-                <div className="flex gap-4">
-                  <div className="w-1/2">
-                    <label className="block text-sm font-bold text-gray-700 mb-1">Assigned to</label>
-                    <select value="" onChange={(e) => { if (e.target.value) handleAddAssignee(e.target.value); }} className="w-full px-4 py-2 rounded border border-gray-300 bg-white mb-2 text-sm focus:outline-none">
-                      <option value="">{teamMembers.filter(m => !selectedAssignees.includes(m.name)).length > 0 ? 'Select team member...' : 'All members assigned'}</option>
-                      {teamMembers.filter(m => !selectedAssignees.includes(m.name)).map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
-                    </select>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedAssignees.map(name => (
-                        <span key={name} className="bg-[#A9B1A6]/20 text-[#333333] text-xs px-2.5 py-1 rounded-md flex items-center gap-1.5 font-bold border border-[#A9B1A6]/30">
-                          {name} <button onClick={() => handleRemoveAssignee(name)} className="text-red-600 hover:text-red-800 ml-1">✕</button>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="w-1/2 flex flex-col gap-2">
-                    <label className="block text-sm font-bold text-gray-700">Deadline Settings</label>
-                    <input type="date" value={taskDate} onChange={(e) => setTaskDate(e.target.value)} className="w-full px-3 py-1.5 rounded border border-gray-300 bg-white text-sm" />
-                    
-                    <div className="flex items-center gap-2 mt-1">
-                      <input type="checkbox" id="timeToggle" checked={hasSpecificTime} onChange={(e) => setHasSpecificTime(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4 cursor-pointer" />
-                      <label htmlFor="timeToggle" className="text-xs text-gray-600 cursor-pointer select-none">Set start & stop time</label>
-                    </div>
-
-                    {hasSpecificTime && (
-                      <div className="flex gap-2 items-center">
-                        <div className="w-1/2">
-                          <span className="text-[10px] text-gray-500 block font-bold">Start:</span>
-                          <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-full p-1.5 border rounded text-xs bg-white focus:outline-none" />
-                        </div>
-                        <div className="w-1/2">
-                          <span className="text-[10px] text-gray-500 block font-bold">Stop:</span>
-                          <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-full p-1.5 border rounded text-xs bg-white focus:outline-none" />
-                        </div>
-                      </div>
-                    )}
-                    
-                    <div className="mt-3 pt-3 border-t border-gray-200">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          checked={isLongTerm} 
-                          onChange={(e) => {
-                            setIsLongTerm(e.target.checked);
-                            // SMART CLEAR logic
-                            if (e.target.checked && taskDate === formatDateKey(new Date())) {
-                              setTaskDate('');
-                            } else if (!e.target.checked && taskDate === '') {
-                              setTaskDate(formatDateKey(new Date()));
-                            }
-                          }} 
-                          className="accent-[#A9B1A6] w-4 h-4" 
-                        />
-                        <span className="text-[11px] font-bold text-gray-800">📌 Mark as Long-Term / Pipeline Task</span>
-                      </label>
-                      <p className="text-[10px] text-gray-500 mt-1 ml-6">Pins this task to the top of the dashboard for constant visibility, with or without a deadline.</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex gap-4">
-                  <div className="w-1/2">
-                    <label className="block text-sm font-bold text-gray-700 mb-1">Company</label>
-                    <select value={taskCompany} onChange={(e) => setTaskCompany(e.target.value)} className="w-full px-4 py-2 rounded border border-gray-300 bg-white text-sm">
-                      <option value="" disabled>Select a Company...</option>
-                      {masterCompanyList.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </div>
-                  <div className="w-1/2">
-                    <label className="block text-sm font-bold text-gray-700 mb-1">Priority Level</label>
-                    <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)} className="w-full px-4 py-2 rounded border border-gray-300 bg-white text-sm">
-                      <option value="High">High (Red)</option>
-                      <option value="Standard">Standard (Green)</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div className="w-1/2 flex flex-col gap-4 overflow-y-auto pb-4">
-                <h3 className="font-bold text-gray-500 uppercase tracking-wider text-xs mb-1">Modular Logic Settings</h3>
-                
-                <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
-                  <h4 className="font-bold text-sm mb-2">Recurrence Engine</h4>
-                  <select 
-                    value={recurrenceType}
-                    onChange={(e) => setRecurrenceType(e.target.value)}
-                    className="w-full px-3 py-2 text-sm rounded border border-gray-300 bg-gray-50 mb-2 focus:outline-none">
-                    <option value="once">One-time Task</option>
-                    <option value="fixed">Recurring Tasks</option>
-                    <option value="completion">Multi-Step Tasks</option>
-                  </select>
-
-                  {recurrenceType === 'fixed' && (
-                    <div className="flex flex-col gap-3 mt-3 pt-3 border-t border-gray-100">
-                      <div>
-                        <span className="block text-xs font-semibold text-gray-600 mb-2">Active Days of the Week:</span>
-                        <div className="flex gap-1">
-                          {daysOfWeek.map(day => (
-                            <button 
-                              key={day}
-                              type="button"
-                              onClick={() => toggleDay(day)}
-                              className={`flex-1 py-1 text-xs font-bold rounded border ${activeDays.includes(day) ? 'bg-[#A9B1A6] text-white border-[#A9B1A6]' : 'bg-white text-gray-500 border-gray-300'}`}>
-                              {day}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-6">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-gray-600">Repeat every:</span>
-                          <input
-                            type="number"
-                            min="1"
-                            value={Math.max(1, Math.round(cadenceDays / 7))}
-                            onChange={(e) => setCadenceDays(Math.max(1, Number(e.target.value)) * 7)}
-                            className="border border-gray-300 rounded px-2 py-1 text-sm w-16 text-center focus:outline-none"
-                          />
-                          <span className="text-xs font-semibold text-gray-600">weeks</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {recurrenceType === 'completion' && (
-                    <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
-                      <span className="text-sm text-gray-600">Re-deploy task</span>
-                      <input type="number" value={cadenceDays} onChange={(e) => setCadenceDays(Number(e.target.value))} className="w-12 p-1 border rounded text-center font-bold" />
-                      <span className="text-sm text-gray-600">days after completion</span>
-                    </div>
-                  )}
-                </div>
-
-                {recurrenceType === 'completion' && (
-                  <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
-                    <div className="flex justify-between items-center mb-2">
-                      <h4 className="font-bold text-sm">Multi-Step Task Chaining Engine</h4>
-                      <button type="button" onClick={handleAddChainedStep} className="text-[10px] font-bold bg-[#A9B1A6] text-white px-2.5 py-1 rounded hover:bg-[#5B7049] transition">+ Add Step</button>
-                    </div>
-                    <p className="text-xs text-gray-500 mb-3">Build an automated pipeline of sub tasks triggered upon completion.</p>
-
-                    {chainedSteps.length === 0 ? (
-                      <p className="text-xs text-gray-400 italic">No sub tasks configured.</p>
-                    ) : (
-                      <div className="flex flex-col gap-3">
-                        {chainedSteps.map((step, idx) => (
-                          <div key={idx} className="bg-gray-50 p-3 rounded border border-gray-200 text-xs flex flex-col gap-2.5 relative">
-                            <div className="flex justify-between items-center font-bold text-gray-700">
-                              <span>Step {idx + 1} Sub Task</span>
-                              <button type="button" onClick={() => handleRemoveChainedStep(idx)} className="text-red-600 font-bold hover:underline">Remove</button>
-                            </div>
-                            
-                            <input type="text" value={step.title} onChange={(e) => handleUpdateChainedStep(idx, 'title', e.target.value)} placeholder="Step Title" className="p-1.5 border rounded bg-white" />
-                            <textarea rows={2} value={step.desc} onChange={(e) => handleUpdateChainedStep(idx, 'desc', e.target.value)} placeholder="Instructions..." className="p-1.5 border rounded bg-white"></textarea>
-
-                            <div className="flex gap-2">
-                              <div className="w-1/2">
-                                <label className="block font-bold text-[10px] text-gray-500 mb-0.5">Deployment Offset</label>
-                                <div className="flex items-center gap-1">
-                                  <input type="number" value={step.relativeDays} onChange={(e) => handleUpdateChainedStep(idx, 'relativeDays', Number(e.target.value))} className="w-12 p-1 border rounded bg-white text-center font-bold" />
-                                  <span className="text-[11px] text-gray-600">days after</span>
-                                </div>
-                              </div>
-
-                              <div className="w-1/2">
-                                <label className="block font-bold text-[10px] text-gray-500 mb-0.5">Assigned to</label>
-                                <select value={step.assignee} onChange={(e) => handleUpdateChainedStep(idx, 'assignee', e.target.value)} className="w-full p-1 border rounded bg-white text-xs">
-                                  <option value="Same as Parent">Same as Parent</option>
-                                  {teamMembers.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
-                                </select>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
-                  <h4 className="font-bold text-sm mb-2">Proof of Work & Permissions</h4>
-                  <div className="flex flex-col gap-2">
-                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                      <input type="checkbox" checked={requiresPhoto} onChange={(e) => setRequiresPhoto(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require proof of work upload (Mandatory to complete)
-                    </label>
-                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                      <input type="checkbox" checked={requiresComment} onChange={(e) => setRequiresComment(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require execution notes/comment to complete
-                    </label>
-                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer border-t pt-2 mt-1 border-gray-100">
-                      <input type="checkbox" checked={allowAssigneeDeadlineChange} onChange={(e) => setAllowAssigneeDeadlineChange(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Allow Employee to Adjust Deadline Date
-                    </label>
-                  </div>
-                </div>
-
-                <div className="bg-[#A9B1A6]/10 p-4 rounded border border-[#A9B1A6]/30">
-                  <h4 className="font-bold text-sm mb-2 text-gray-800">Admin Notification Rules</h4>
-                  <div className="flex flex-col gap-2">
-                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                      <input type="checkbox" checked={notifyOnComplete} onChange={(e) => setNotifyOnComplete(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Notify me when task is completed
-                    </label>
-                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                      <input type="checkbox" checked={notifyOnComment} onChange={(e) => setNotifyOnComment(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Notify me if new comment/files have been added
-                    </label>
-                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                      <input type="checkbox" checked={notifyOnDeadlineChange} onChange={(e) => setNotifyOnDeadlineChange(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Notify me when employee changes deadline
-                    </label>
-                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                      <input type="checkbox" checked={notifyOnTaskCreated} onChange={(e) => setNotifyOnTaskCreated(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Notify me when new task has been added
-                    </label>
-                  </div>
-                </div>
-
-              </div>
-            </div>
-
-            <div className="mt-auto pt-6 border-t border-gray-300 flex justify-end">
-              <button onClick={handleDeployTask} className="bg-[#333333] text-white px-8 py-3 rounded font-bold shadow-sm hover:bg-black transition">Deploy Task</button>
-            </div>
-          </div>
+          <TaskBuilder 
+            setCurrentView={setCurrentView} previousView={previousView} taskTitle={taskTitle} 
+            setTaskTitle={setTaskTitle} taskDesc={taskDesc} setTaskDesc={setTaskDesc} 
+            taskCompany={taskCompany} setTaskCompany={setTaskCompany} masterCompanyList={masterCompanyList} 
+            taskPriority={taskPriority} setTaskPriority={setTaskPriority} taskDate={taskDate} 
+            setTaskDate={setTaskDate} hasSpecificTime={hasSpecificTime} setHasSpecificTime={setHasSpecificTime} 
+            startTime={startTime} setStartTime={setStartTime} endTime={endTime} setEndTime={setEndTime} 
+            isLongTerm={isLongTerm} setIsLongTerm={setIsLongTerm} teamMembers={teamMembers} 
+            selectedAssignees={selectedAssignees} handleAddAssignee={handleAddAssignee} 
+            handleRemoveAssignee={handleRemoveAssignee} recurrenceType={recurrenceType} 
+            setRecurrenceType={setRecurrenceType} activeDays={activeDays} toggleDay={toggleDay} 
+            cadenceDays={cadenceDays} setCadenceDays={setCadenceDays} chainedSteps={chainedSteps} 
+            handleAddChainedStep={handleAddChainedStep} handleUpdateChainedStep={handleUpdateChainedStep} 
+            handleRemoveChainedStep={handleRemoveChainedStep} requiresPhoto={requiresPhoto} 
+            setRequiresPhoto={setRequiresPhoto} requiresComment={requiresComment} 
+            setRequiresComment={setRequiresComment} allowAssigneeDeadlineChange={allowAssigneeDeadlineChange} 
+            setAllowAssigneeDeadlineChange={setAllowAssigneeDeadlineChange} notifyOnComplete={notifyOnComplete} 
+            setNotifyOnComplete={setNotifyOnComplete} notifyOnComment={notifyOnComment} 
+            setNotifyOnComment={setNotifyOnComment} notifyOnDeadlineChange={notifyOnDeadlineChange} 
+            setNotifyOnDeadlineChange={setNotifyOnDeadlineChange} notifyOnTaskCreated={notifyOnTaskCreated} 
+            setNotifyOnTaskCreated={setNotifyOnTaskCreated} handleDeployTask={handleDeployTask}
+          />
         )}
 
         {/* TASK INSPECTOR & FULL EDITING MODAL */}
-        {selectedTask && !completionPrompt && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50" onMouseDown={() => setSelectedTask(null)}>
-            <div className="bg-[#F4F3ED] max-w-2xl w-full rounded-lg shadow-xl p-6 border border-gray-300 flex flex-col gap-4 animate-fade-in max-h-[90vh] overflow-y-auto" onMouseDown={(e) => e.stopPropagation()}>
-              <div className="flex justify-between items-start border-b border-gray-300 pb-3">
-                <div>
-                  <span className="text-xs font-bold text-[#A9B1A6] uppercase tracking-wider">
-                    {isCurrentInstanceCompleted ? 'Completed Occurrence Review' : (userRole === 'admin' ? (isEditing ? 'Admin Full Task Editor' : 'Admin Inspector Mode') : 'Employee Execution View')}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-2xl font-serif font-bold">{selectedTask.title}</h2>
-                    <span className="text-[10px] bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded font-bold">{selectedTask.company}</span>
-                    {isTaskPastDue(selectedTask) && <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded">OVERDUE</span>}
-                  </div>
-                </div>
-                <button onClick={() => setSelectedTask(null)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
-              </div>
-
-              {!isEditing ? (
-                <>
-                  {isTaskPastDue(selectedTask) && !isCurrentInstanceCompleted && (
-                    <div className="bg-red-50 border border-red-400 text-red-800 text-xs font-bold px-3 py-2 rounded mb-1 flex items-center gap-2">
-                      <span>🚨</span> THIS TASK IS PAST DUE. Please complete the work or adjust the deadline.
-                    </div>
-                  )}
-
-                  {selectedTask.isLongTerm && !isTaskPastDue(selectedTask) && (
-                    <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold px-3 py-2 rounded mb-1 flex items-center gap-2">
-                      <span>📌</span> This is a Long-Term Pipeline task pinned to the dashboard.
-                    </div>
-                  )}
-
-                  <p className="text-sm text-gray-600 bg-white p-3 rounded border border-gray-200">{selectedTask.desc}</p>
-
-                  <div className="flex justify-between text-xs text-gray-500 bg-gray-100 p-2 rounded">
-                    <span>Assigned to: <strong>{selectedTask.assignees && selectedTask.assignees.length > 0 ? selectedTask.assignees.join(', ') : 'Unassigned (Backlog)'}</strong></span>
-                    <span>
-                      {isCurrentInstanceCompleted && selectedTask.recurrenceType === 'once' ? 'Completed On:' : 'Occurrence Date:'} 
-                      <strong> {isCurrentInstanceCompleted && selectedTask.recurrenceType === 'once' && selectedTask.completedDates?.length > 0 ? selectedTask.completedDates[0] : selectedInstanceDate}</strong>
-                    </span>
-                  </div>
-
-                  {selectedTask.allowAssigneeDeadlineChange && !isCurrentInstanceCompleted && (
-                    <div className="bg-blue-50 p-3 rounded border border-blue-200 flex flex-col gap-2">
-                      <span className="text-xs font-bold text-blue-900">📅 Admin Permission Granted: Adjust Deadline</span>
-                      <div className="flex items-center gap-2">
-                        <input 
-                          type="date" 
-                          value={selectedTask.date} 
-                          disabled={selectedTask.recurrenceType !== 'once'}
-                          onChange={async (e) => {
-                            const newDate = e.target.value;
-                            const todayStr = formatDateKey(new Date());
-                            const newOverdue = newDate < todayStr;
-                            
-                            // TIMELINE INJECTION
-                            const changeNote = `📅 Deadline adjusted to ${newDate} by ${currentUserName} [${getCurrentTimestamp()}]`;
-
-                            const updated = { 
-                              ...selectedTask, 
-                              date: newDate, 
-                              isOverdue: newOverdue, 
-                              overdueNotified: newOverdue,
-                              comments: [...(selectedTask.comments || []), changeNote]
-                            };
-                            
-                            setSelectedTask(updated);
-                            setTasks(tasks.map(t => t.id === selectedTask.id ? updated : t));
-
-                            await supabase.from('tasks').update(mapToDb(updated)).eq('id', selectedTask.id);
-
-                            if (userRole === 'employee' && selectedTask?.notifyOnDeadlineChange !== false) {
-                              dispatchNotification(
-                                'role',
-                                'admin',
-                                'deadline',
-                                `📅 Employee Rescheduled: "${selectedTask.title}" deadline changed to ${newDate}`,
-                                '📅 Employee Changed Deadline',
-                                `${currentUserName} moved deadline for "${selectedTask.title}" to ${newDate}`,
-                                selectedTask.id,
-                                newDate
-                              );
-                            }
-                          }} 
-                          className={`p-1.5 text-xs border rounded font-bold text-gray-800 focus:outline-none ${selectedTask.recurrenceType !== 'once' ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-pointer'}`}
-                        />
-                        {selectedTask.recurrenceType !== 'once' ? (
-                          <span className="text-[10px] text-red-500 italic ml-2">(Use calendar drag-and-drop to reschedule recurring tasks)</span>
-                        ) : (
-                          <span className="text-[11px] text-gray-500 italic ml-2">(Reschedules task on dispatch board)</span>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="bg-white p-3 rounded border border-gray-200">
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500 mb-2">Task Activity & Timeline</h4>
-                    
-                    {selectedTask.parentTaskId && (
-                      <div className="bg-blue-50/60 p-2 mb-3 rounded border border-blue-100 flex items-center justify-between text-[11px]">
-                        <span className="text-blue-800">
-                          ↳ Sub-task of: <strong className="font-bold">{selectedTask.parentTaskTitle}</strong>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const parentTask = tasks.find(t => t.id === selectedTask.parentTaskId);
-                            if (parentTask) {
-                              handleOpenModal(parentTask, selectedTask.parentInstanceDate);
-                            } else {
-                              alert('Original task could not be found.');
-                            }
-                          }}
-                          className="font-bold text-blue-700 hover:underline"
-                        >
-                          View Previous Task
-                        </button>
-                      </div>
-                    )}
-
-                    {selectedTask.comments && selectedTask.comments.length > 0 ? (
-                      <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1 mb-3">
-                        {selectedTask.comments.map((c, i) => renderComment(c, i))}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-gray-400 italic mb-2">No activity logged yet.</p>
-                    )}
-
-                    {!isCurrentInstanceCompleted && (
-                      <div className="flex gap-2">
-                        <textarea 
-                          rows={2}
-                          value={openCommentInput}
-                          onChange={(e) => setExecutionComment(e.target.value)}
-                          placeholder="Type an update or comment..." 
-                          className="flex-1 p-2 text-xs border border-gray-200 rounded focus:outline-none resize-y min-h-[40px]" 
-                        />
-                        <button 
-                          type="button"
-                          onClick={() => handlePostOpenComment(selectedTask.id)}
-                          className="bg-[#333333] text-white px-3 py-1 rounded text-xs font-bold hover:bg-black transition self-end">
-                          Post Note
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* UNIVERSAL ATTACHMENTS & Proof OF WORK */}
-                  {!isCurrentInstanceCompleted && (
-                    <div 
-                      className={`bg-white p-3 rounded border border-dashed transition flex justify-between items-center my-1 relative ${isDraggingFile ? 'border-blue-500 bg-blue-50' : 'border-amber-300'}`}
-                      onDragOver={(e) => { e.preventDefault(); setIsDraggingFile(true); }}
-                      onDragLeave={() => setIsDraggingFile(false)}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        setIsDraggingFile(false);
-                        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                          handleFileUpload(e.dataTransfer.files[0]);
-                        }
-                      }}
-                    >
-                      {isDraggingFile && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-blue-50/90 z-10 rounded">
-                          <span className="text-blue-700 font-bold text-sm pointer-events-none">Drop file here to upload</span>
-                        </div>
-                      )}
-                      
-                      <div className="flex flex-col">
-                        <span className="text-xs font-semibold text-amber-800 flex items-center gap-1">
-                          📎 Attachments & Proof of Work
-                          {selectedTask.requiresPhoto && <span className="text-red-600 font-bold ml-1">(Required)</span>}
-                        </span>
-                        <span className="text-[10px] text-gray-500">Upload or drag and drop images, PDFs, spreadsheets, etc.</span>
-                      </div>
-                      
-                      <label className="text-xs font-bold px-3 py-1 rounded bg-amber-100 text-amber-800 hover:bg-amber-200 cursor-pointer transition z-20">
-                        + Attach File
-                        <input 
-                          type="file" 
-                          accept="*/*" 
-                          className="hidden" 
-                          onChange={(e) => {
-                            if (e.target.files && e.target.files.length > 0) {
-                              handleFileUpload(e.target.files[0]);
-                            }
-                          }}
-                        />
-                      </label>
-                    </div>
-                  )}
-
-                  {isCurrentInstanceCompleted && (
-                    <div className="bg-white p-3 rounded border border-green-300 flex flex-col gap-2">
-                      <span className="text-xs font-semibold text-green-800">✏️ Append additional review notes</span>
-                      <div className="flex gap-2">
-                        <input 
-                          type="text" 
-                          value={additionalNote}
-                          onChange={(e) => setAdditionalNote(e.target.value)}
-                          placeholder="Type follow-up details..." 
-                          className="flex-1 p-2 text-xs border border-gray-200 rounded focus:outline-none" />
-                        <button onClick={() => handleAppendNote(selectedTask.id)} className="bg-green-700 text-white px-3 py-1 rounded text-xs font-bold hover:bg-green-800 transition">Add Note</button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="flex flex-col gap-4 text-xs">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block font-bold mb-1 text-gray-700">Task Title</label>
-                      <input type="text" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} className="w-full p-2 border rounded bg-white" />
-                    </div>
-
-                    <div className="flex gap-2">
-                      <div className="w-1/2">
-                        <label className="block font-bold mb-1 text-gray-700">Company</label>
-                        <select value={taskCompany} onChange={(e) => setTaskCompany(e.target.value)} className="w-full p-2 border rounded bg-white">
-                          <option value="" disabled>Select a Company...</option>
-                          {masterCompanyList.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                      </div>
-                      <div className="w-1/2">
-                        <label className="block font-bold mb-1 text-gray-700">Priority Level</label>
-                        <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)} className="w-full p-2 border rounded bg-white">
-                          <option value="High">High (Red)</option>
-                          <option value="Standard">Standard (Green)</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block font-bold mb-1 text-gray-700">Description / Instructions</label>
-                    <textarea value={taskDesc} onChange={(e) => setTaskDesc(e.target.value)} className="w-full p-2 border rounded bg-white" rows={2}></textarea>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded border border-gray-200">
-                    <div>
-                      <label className="block font-bold mb-1 text-gray-700">Deadline Date</label>
-                      <input type="date" value={taskDate} onChange={(e) => setTaskDate(e.target.value)} className="w-full p-1.5 border rounded bg-white mb-2" />
-                      
-                      <div className="flex items-center gap-1.5">
-                        <input type="checkbox" id="editTimeToggle" checked={hasSpecificTime} onChange={(e) => setHasSpecificTime(e.target.checked)} className="accent-[#A9B1A6]" />
-                        <label htmlFor="editTimeToggle" className="font-bold text-gray-700 cursor-pointer">Timed Slot</label>
-                      </div>
-
-                      {hasSpecificTime && (
-                        <div className="flex gap-2 mt-1">
-                          <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-1/2 p-1 border rounded bg-white" />
-                          <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-1/2 p-1 border rounded bg-white" />
-                        </div>
-                      )}
-                      
-                      <div className="col-span-2 bg-[#A9B1A6]/10 p-3 rounded border border-[#A9B1A6]/30 mt-3">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input 
-                            type="checkbox" 
-                            checked={isLongTerm} 
-                            onChange={(e) => {
-                              setIsLongTerm(e.target.checked);
-                              // SMART CLEAR logic for edit mode too
-                              if (e.target.checked && taskDate === formatDateKey(new Date())) {
-                                setTaskDate('');
-                              } else if (!e.target.checked && taskDate === '') {
-                                setTaskDate(formatDateKey(new Date()));
-                              }
-                            }} 
-                            className="accent-[#A9B1A6] w-4 h-4" 
-                          />
-                          <span className="text-[11px] font-bold text-gray-800">📌 Mark as Long-Term / Pipeline Task</span>
-                        </label>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block font-bold mb-1 text-gray-700">Assigned to</label>
-                      <select value="" onChange={(e) => { if (e.target.value) handleAddAssignee(e.target.value); }} className="w-full p-1.5 border rounded bg-white mb-1">
-                        <option value="">Add assignee...</option>
-                        {teamMembers.filter(m => !selectedAssignees.includes(m.name)).map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
-                      </select>
-                      <div className="flex flex-wrap gap-1">
-                        {selectedAssignees.map(name => (
-                          <span key={name} className="bg-gray-200 text-[10px] px-2 py-0.5 rounded flex items-center gap-1 font-bold">
-                            {name} <button onClick={() => handleRemoveAssignee(name)} className="text-red-600">✕</button>
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-white p-3 rounded border border-gray-200">
-                    <h4 className="font-bold mb-2 text-gray-700">Recurrence Engine</h4>
-                    <select value={recurrenceType} onChange={(e) => setRecurrenceType(e.target.value)} className="w-full p-1.5 border rounded bg-gray-50 mb-2">
-                      <option value="once">One-time Task</option>
-                      <option value="fixed">Recurring Tasks</option>
-                      <option value="completion">Multi-Step Tasks</option>
-                    </select>
-
-                    {recurrenceType === 'fixed' && (
-                      <div className="flex flex-col gap-2 mt-2">
-                        <div className="flex gap-1">
-                          {daysOfWeek.map(day => (
-                            <button 
-                              key={day}
-                              type="button"
-                              onClick={() => toggleDay(day)}
-                              className={`flex-1 py-1 text-[10px] font-bold rounded border ${activeDays.includes(day) ? 'bg-[#A9B1A6] text-white border-[#A9B1A6]' : 'bg-white text-gray-500'}`}>
-                              {day}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-xs font-bold text-gray-700">Repeat every:</span>
-                          <input
-                            type="number"
-                            min="1"
-                            value={Math.max(1, Math.round(cadenceDays / 7))}
-                            onChange={(e) => setCadenceDays(Math.max(1, Number(e.target.value)) * 7)}
-                            className="w-12 p-1 border rounded text-center font-bold"
-                          />
-                          <span className="text-xs font-bold text-gray-700">weeks</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {recurrenceType === 'completion' && (
-                      <div className="flex items-center gap-2 mt-2">
-                        <span>Re-deploy</span>
-                        <input type="number" value={cadenceDays} onChange={(e) => setCadenceDays(Number(e.target.value))} className="w-12 p-1 border rounded text-center font-bold" />
-                        <span>days after completion</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {recurrenceType === 'completion' && (
-                    <div className="bg-white p-3 rounded border border-gray-200">
-                      <div className="flex justify-between items-center mb-2">
-                        <h4 className="font-bold text-gray-700">Chained Workflow Steps ({chainedSteps.length})</h4>
-                        <button type="button" onClick={handleAddChainedStep} className="text-[10px] font-bold bg-[#A9B1A6] text-white px-2 py-0.5 rounded">+ Step</button>
-                      </div>
-
-                      {chainedSteps.map((step, idx) => (
-                        <div key={idx} className="bg-gray-50 p-2 rounded border border-gray-200 mb-2 flex flex-col gap-1.5">
-                          <div className="flex justify-between font-bold text-gray-600">
-                            <span>Step {idx + 1} Sub Task</span>
-                            <button type="button" onClick={() => handleRemoveChainedStep(idx)} className="text-red-600">Remove</button>
-                          </div>
-                          <input type="text" value={step.title} onChange={(e) => handleUpdateChainedStep(idx, 'title', e.target.value)} placeholder="Step Title" className="p-1 border rounded bg-white" />
-                          <div className="flex gap-2">
-                            <input type="number" value={step.relativeDays} onChange={(e) => handleUpdateChainedStep(idx, 'relativeDays', Number(e.target.value))} className="w-12 p-1 border rounded bg-white text-center font-bold" />
-                            <span className="self-center">days after</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="bg-white p-3 rounded border border-gray-200 flex flex-col gap-1.5">
-                    <label className="flex items-center gap-1.5 font-bold cursor-pointer">
-                      <input type="checkbox" checked={requiresPhoto} onChange={(e) => setRequiresPhoto(e.target.checked)} className="accent-[#A9B1A6]" /> Require proof of work upload (Mandatory to complete)
-                    </label>
-                    <label className="flex items-center gap-1.5 font-bold cursor-pointer">
-                      <input type="checkbox" checked={requiresComment} onChange={(e) => setRequiresComment(e.target.checked)} className="accent-[#A9B1A6]" /> Require Comment
-                    </label>
-                    <label className="flex items-center gap-1.5 font-bold cursor-pointer border-t pt-1.5 mt-1 border-gray-100">
-                      <input type="checkbox" checked={allowAssigneeDeadlineChange} onChange={(e) => setAllowAssigneeDeadlineChange(e.target.checked)} className="accent-[#A9B1A6]" /> Allow Employee to Adjust Deadline Date
-                    </label>
-                  </div>
-
-                  <div className="bg-[#A9B1A6]/10 p-3 rounded border border-[#A9B1A6]/30 flex flex-col gap-1.5">
-                    <h4 className="font-bold text-xs text-gray-800">Admin Notification Rules</h4>
-                    <label className="flex items-center gap-1.5 font-bold cursor-pointer">
-                      <input type="checkbox" checked={notifyOnComplete} onChange={(e) => setNotifyOnComplete(e.target.checked)} className="accent-[#A9B1A6]" /> Notify me when task is completed
-                    </label>
-                    <label className="flex items-center gap-1.5 font-bold cursor-pointer">
-                      <input type="checkbox" checked={notifyOnComment} onChange={(e) => setNotifyOnComment(e.target.checked)} className="accent-[#A9B1A6]" /> Notify me if new comment/files have been added
-                    </label>
-                    <label className="flex items-center gap-1.5 font-bold cursor-pointer">
-                      <input type="checkbox" checked={notifyOnDeadlineChange} onChange={(e) => setNotifyOnDeadlineChange(e.target.checked)} className="accent-[#A9B1A6]" /> Notify me when employee changes deadline
-                    </label>
-                    <label className="flex items-center gap-1.5 font-bold cursor-pointer">
-                      <input type="checkbox" checked={notifyOnTaskCreated} onChange={(e) => setNotifyOnTaskCreated(e.target.checked)} className="accent-[#A9B1A6]" /> Notify me when new task has been added
-                    </label>
-                  </div>
-
-                </div>
-              )}
-
-              <div className="flex justify-between items-center pt-3 border-t border-gray-300 mt-2">
-                {userRole === 'admin' && !isCurrentInstanceCompleted && (
-                  <div className="flex gap-2">
-                    <button onClick={() => setIsEditing(!isEditing)} className="text-xs text-blue-700 font-bold hover:underline">
-                      {isEditing ? 'Cancel Edit' : 'Full Edit Settings'}
-                    </button>
-                    <button onClick={() => handleDeleteTask(selectedTask.id)} className="text-xs text-red-600 font-bold hover:underline">
-                      Delete Task
-                    </button>
-                  </div>
-                )}
-
-                {userRole === 'admin' && isCurrentInstanceCompleted && (
-                  <button onClick={() => handleReopenTask(selectedTask.id)} className="text-xs text-amber-700 font-bold hover:underline">Reopen Occurrence</button>
-                )}
-                
-                <div className="flex gap-2 ml-auto">
-                  {isEditing ? (
-                    <button onClick={handleSaveChanges} className="bg-[#333333] text-white px-4 py-2 rounded text-xs font-bold hover:bg-black transition">
-                      Save All Changes
-                    </button>
-                  ) : (
-                    !isCurrentInstanceCompleted && (
-                      <button onClick={handleInitiateCompletion} className="bg-[#A9B1A6] text-white px-5 py-2 rounded text-xs font-bold shadow-sm hover:bg-gray-600 transition">
-                        Mark Occurrence Complete
-                      </button>
-                    )
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        <TaskInspectorModal 
+          selectedTask={selectedTask} setSelectedTask={setSelectedTask} selectedInstanceDate={selectedInstanceDate}
+          isCurrentInstanceCompleted={isCurrentInstanceCompleted} userRole={userRole} currentUserName={currentUserName}
+          teamMembers={teamMembers} masterCompanyList={masterCompanyList} isEditing={isEditing} setIsEditing={setIsEditing}
+          taskTitle={taskTitle} setTaskTitle={setTaskTitle} taskDesc={taskDesc} setTaskDesc={setTaskDesc} taskCompany={taskCompany}
+          setTaskCompany={setTaskCompany} taskPriority={taskPriority} setTaskPriority={setTaskPriority} taskDate={taskDate}
+          setTaskDate={setTaskDate} hasSpecificTime={hasSpecificTime} setHasSpecificTime={setHasSpecificTime} startTime={startTime}
+          setStartTime={setStartTime} endTime={endTime} setEndTime={setEndTime} isLongTerm={isLongTerm} setIsLongTerm={setIsLongTerm}
+          selectedAssignees={selectedAssignees} handleAddAssignee={handleAddAssignee} handleRemoveAssignee={handleRemoveAssignee}
+          recurrenceType={recurrenceType} setRecurrenceType={setRecurrenceType} activeDays={activeDays} toggleDay={toggleDay}
+          cadenceDays={cadenceDays} setCadenceDays={setCadenceDays} chainedSteps={chainedSteps} handleAddChainedStep={handleAddChainedStep}
+          handleUpdateChainedStep={handleUpdateChainedStep} handleRemoveChainedStep={handleRemoveChainedStep} requiresPhoto={requiresPhoto}
+          setRequiresPhoto={setRequiresPhoto} requiresComment={requiresComment} setRequiresComment={setRequiresComment}
+          allowAssigneeDeadlineChange={allowAssigneeDeadlineChange} setAllowAssigneeDeadlineChange={setAllowAssigneeDeadlineChange}
+          notifyOnComplete={notifyOnComplete} setNotifyOnComplete={setNotifyOnComplete} notifyOnComment={notifyOnComment}
+          setNotifyOnComment={setNotifyOnComment} notifyOnDeadlineChange={notifyOnDeadlineChange} setNotifyOnDeadlineChange={setNotifyOnDeadlineChange}
+          notifyOnTaskCreated={notifyOnTaskCreated} setNotifyOnTaskCreated={setNotifyOnTaskCreated} openCommentInput={openCommentInput}
+          setExecutionComment={setExecutionComment} handlePostOpenComment={handlePostOpenComment} isDraggingFile={isDraggingFile}
+          setIsDraggingFile={setIsDraggingFile} handleFileUpload={handleFileUpload} additionalNote={additionalNote} setAdditionalNote={setAdditionalNote}
+          handleAppendNote={handleAppendNote} handleSaveChanges={handleSaveChanges} handleDeleteTask={handleDeleteTask} handleReopenTask={handleReopenTask}
+          handleInitiateCompletion={handleInitiateCompletion} handleOpenModal={handleOpenModal} isTaskPastDue={isTaskPastDue}
+          getCurrentTimestamp={getCurrentTimestamp} tasks={tasks} setTasks={setTasks} dispatchNotification={dispatchNotification} renderComment={renderComment}
+        />
 
         {/* SUB-TASK COMPLETION PROMPT MODAL */}
-        {completionPrompt && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]" onMouseDown={() => setCompletionPrompt(null)}>
-            <div className="bg-white max-w-md w-full rounded-lg shadow-2xl p-6 border border-gray-300 flex flex-col gap-4 animate-fade-in" onMouseDown={(e) => e.stopPropagation()}>
-              <div className="border-b pb-2">
-                <span className="text-xs font-bold text-[#A9B1A6] uppercase tracking-wider">Complete Task Confirmation</span>
-                <h3 className="text-xl font-serif font-bold text-gray-900 mt-0.5">{selectedTask?.title}</h3>
-              </div>
+        <CompletionModal 
+          completionPrompt={completionPrompt}
+          setCompletionPrompt={setCompletionPrompt}
+          selectedTask={selectedTask}
+          executeCompletion={executeCompletion}
+          teamMembers={teamMembers}
+        />
 
-              {!completionPrompt.showForm ? (
-                <>
-                  <p className="text-sm text-gray-700 leading-relaxed">
-                    Is this task fully resolved, or do you need to branch a new sub task to address unexpected issues (e.g., ordering parts, rescheduling vendor)?
-                  </p>
-                  
-                  <div className="flex flex-col gap-2 mt-2">
-                    <button 
-                      onClick={() => executeCompletion(false)}
-                      className="bg-gray-100 text-gray-800 border border-gray-300 py-2.5 px-4 rounded text-sm font-bold hover:bg-gray-200 transition text-center">
-                      ✓ Mark Fully Complete & Close
-                    </button>
+       {/* RECURRING TASK RESCHEDULE SCOPE PROMPT MODAL */}
+        <RescheduleModal 
+          reschedulePrompt={reschedulePrompt}
+          setReschedulePrompt={setReschedulePrompt}
+          applyTaskMove={applyTaskMove}
+        />
 
-                    <button 
-                      onClick={() => setCompletionPrompt({ ...completionPrompt, showForm: true })}
-                      className="bg-[#333333] text-white py-2.5 px-4 rounded text-sm font-bold hover:bg-black transition text-center">
-                      + Create Sub Task
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  <h4 className="font-bold text-sm text-gray-800">Sub Task Details</h4>
-                  
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Title</label>
-                    <input 
-                      type="text" 
-                      value={completionPrompt.title} 
-                      onChange={(e) => setCompletionPrompt({ ...completionPrompt, title: e.target.value })} 
-                      placeholder="Enter a title for the new sub task..."
-                      className="w-full p-2 text-sm border rounded bg-gray-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#A9B1A6]" />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Details / Notes</label>
-                    <textarea 
-                      rows={2}
-                      value={completionPrompt.desc} 
-                      onChange={(e) => setCompletionPrompt({ ...completionPrompt, desc: e.target.value })} 
-                      placeholder="Why is this sub task needed?"
-                      className="w-full p-2 text-sm border rounded bg-gray-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#A9B1A6]"></textarea>
-                  </div>
-
-                  <div className="flex gap-3">
-                    <div className="w-1/2">
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Assigned To</label>
-                      <select 
-                        value={completionPrompt.assignee} 
-                        onChange={(e) => setCompletionPrompt({ ...completionPrompt, assignee: e.target.value })} 
-                        className="w-full p-2 border rounded bg-white text-xs focus:outline-none">
-                        {teamMembers.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
-                      </select>
-                    </div>
-
-                    <div className="w-1/2">
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Schedule For</label>
-                      <input 
-                        type="date" 
-                        value={completionPrompt.targetDate} 
-                        onChange={(e) => setCompletionPrompt({ ...completionPrompt, targetDate: e.target.value })} 
-                        className="w-full p-1.5 text-sm border rounded bg-white focus:outline-none" />
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 mt-2 pt-3 border-t">
-                    <button 
-                      onClick={() => setCompletionPrompt(null)}
-                      className="w-1/3 bg-gray-100 text-gray-600 font-bold py-2 rounded text-xs hover:bg-gray-200 transition">
-                      Cancel
-                    </button>
-                    <button 
-                      onClick={() => executeCompletion(true)}
-                      className="w-2/3 bg-[#A9B1A6] text-white font-bold py-2 rounded text-xs hover:bg-gray-600 transition shadow-sm">
-                      Complete Original & Deploy
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* RECURRING TASK RESCHEDULE SCOPE PROMPT MODAL */}
-        {reschedulePrompt && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onMouseDown={() => setReschedulePrompt(null)}>
-            <div className="bg-white max-w-md w-full rounded-lg shadow-2xl p-6 border border-gray-300 flex flex-col gap-4 animate-fade-in" onMouseDown={(e) => e.stopPropagation()}>
-              <div className="border-b pb-2">
-                <span className="text-xs font-bold text-amber-600 uppercase tracking-wider">Recurring Task Reschedule</span>
-                <h3 className="text-xl font-serif font-bold text-gray-900 mt-0.5">{reschedulePrompt.task.title}</h3>
-              </div>
-
-              <p className="text-xs text-gray-600 leading-relaxed">
-                You are moving a recurring task to <strong>{reschedulePrompt.targetDate}</strong>
-                {reschedulePrompt.targetHour !== null && ` at ${decimalToTimeString(reschedulePrompt.targetHour)}`}. How would you like to apply this change?
-              </p>
-
-              <div className="flex flex-col gap-2 mt-2">
-                <button 
-                  onClick={() => applyTaskMove(reschedulePrompt.task.id, reschedulePrompt.targetDate, reschedulePrompt.targetHour, reschedulePrompt.targetMemberName, false, reschedulePrompt.sourceDate, reschedulePrompt.isAllDayDrop)}
-                  className="bg-[#A9B1A6] text-white py-2.5 px-4 rounded text-xs font-bold hover:bg-gray-600 transition text-left flex justify-between items-center">
-                  <span>Only This Occurrence</span>
-                  <span className="text-[10px] opacity-80">(Creates standalone task)</span>
-                </button>
-
-                <button 
-                  onClick={() => applyTaskMove(reschedulePrompt.task.id, reschedulePrompt.targetDate, reschedulePrompt.targetHour, reschedulePrompt.targetMemberName, true, reschedulePrompt.sourceDate, reschedulePrompt.isAllDayDrop)}
-                  className="bg-[#333333] text-white py-2.5 px-4 rounded text-xs font-bold hover:bg-black transition text-left flex justify-between items-center">
-                  <span>Entire Series / Future Tasks</span>
-                  <span className="text-[10px] opacity-80">(Updates master rule)</span>
-                </button>
-              </div>
-
-              <div className="pt-2 border-t flex justify-end">
-                <button onClick={() => setReschedulePrompt(null)} className="text-xs text-gray-500 font-bold hover:underline">Cancel Move</button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* SETTINGS & GOVERNANCE MODAL */}
-        {isSettingsOpen && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-end p-4 z-50" onMouseDown={() => setIsSettingsOpen(false)}>
-            <div className="bg-[#F4F3ED] max-w-md w-full h-full rounded-l-lg shadow-2xl p-6 border-l border-gray-300 flex flex-col gap-4 animate-fade-in overflow-y-auto" onMouseDown={(e) => e.stopPropagation()}>
-              <div className="flex justify-between items-center border-b border-gray-300 pb-3">
-                <div>
-                  <span className="text-xs font-bold text-[#A9B1A6] uppercase tracking-wider">
-                    {userRole === 'admin' ? 'System Governance' : 'My Preferences'}
-                  </span>
-                  <h2 className="text-2xl font-serif font-bold text-gray-900">
-                    {userRole === 'admin' ? 'Settings & Team' : 'App Settings'}
-                  </h2>
-                </div>
-                <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
-              </div>
-
-              {/* PUSH NOTIFICATION SETTINGS CARD */}
-              <div className="bg-white p-4 rounded-lg border border-amber-300 flex justify-between items-center shadow-2xs">
-                <div>
-                  <h4 className="font-bold text-xs uppercase tracking-wider text-amber-900">Device Push Alerts</h4>
-                  <p className="text-[11px] text-gray-500 mt-0.5">Enable native lock-screen notifications for this browser/device.</p>
-                </div>
-                <button 
-                  onClick={() => enableNativePush(currentUserName || 'Alex M.')}
-                  className="bg-amber-100 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-amber-200 transition shrink-0 shadow-2xs">
-                  📲 Enable Push Alerts
-                </button>
-              </div>
-
-              {/* ADMIN ONLY CONTROLS */}
-              {userRole === 'admin' && (
-                <>
-                  {/* NEW DASHBOARD VISIBILITY MODULE */}
-                  <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3 shadow-2xs">
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Dashboard Visibility (This Device)</h4>
-                    <p className="text-[10px] text-gray-500">Uncheck items below to completely hide them from your personal dashboard filters and calendar views.</p>
-                    
-                    <div className="flex gap-6 mt-1">
-                      <div className="w-1/2 flex flex-col gap-2">
-                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Companies</span>
-                        {masterCompanyList.map(comp => (
-                          <label key={comp} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
-                            <input 
-                              type="checkbox" 
-                              checked={!hiddenCompanies.includes(comp)} 
-                              onChange={(e) => {
-                                if (e.target.checked) setHiddenCompanies(prev => prev.filter(c => c !== comp));
-                                else setHiddenCompanies(prev => [...prev, comp]);
-                              }} 
-                              className="accent-[#A9B1A6]" 
-                            /> 
-                            {comp}
-                          </label>
-                        ))}
-                      </div>
-                      <div className="w-1/2 flex flex-col gap-2">
-                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Team Members</span>
-                        {teamMembers.map(m => (
-                          <label key={m.id} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
-                            <input 
-                              type="checkbox" 
-                              checked={!hiddenMembers.includes(m.name)} 
-                              onChange={(e) => {
-                                if (e.target.checked) setHiddenMembers(prev => prev.filter(n => n !== m.name));
-                                else setHiddenMembers(prev => [...prev, m.name]);
-                              }} 
-                              className="accent-[#A9B1A6]" 
-                            /> 
-                            {m.name}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-white p-3 rounded-lg border border-gray-200">
-                    <div className="flex justify-between items-center mb-2">
-                      <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500">Active Team Members</h4>
-                      <button 
-                        onClick={resetMemberForm} 
-                        className="text-xs font-bold bg-[#A9B1A6] text-white px-2 py-0.5 rounded hover:bg-gray-600 transition">
-                        + Add New
-                      </button>
-                    </div>
-
-                    <div className="flex flex-col gap-2">
-                      {teamMembers.map(member => (
-                        <div key={member.id} className="flex justify-between items-center p-2 rounded bg-gray-50 border border-gray-200">
-                          <div className="flex items-center gap-2">
-                            <span className="w-3 h-3 rounded-full" style={{ backgroundColor: member.color }}></span>
-                            <div>
-                              <span className="font-bold text-xs text-gray-800 block">{member.name} ({member.role.toUpperCase()})</span>
-                              <span className="text-[10px] text-gray-500">{member.email}</span>
-                            </div>
-                          </div>
-                          <button 
-                            onClick={() => handleOpenEditMember(member)} 
-                            className="text-xs font-bold text-blue-700 hover:underline">
-                            Edit
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3">
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">
-                      {editingMemberId ? 'Edit Team Member Profile' : 'Create New Team Member'}
-                    </h4>
-
-                    <div>
-                      <label className="block text-xs font-bold text-gray-700 mb-1">Full Name</label>
-                      <input 
-                        type="text" 
-                        value={memberName} 
-                        onChange={(e) => setMemberName(e.target.value)} 
-                        placeholder="e.g. Jordan Smith" 
-                        className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none" />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-gray-700 mb-1">Email Address</label>
-                      <input 
-                        type="email" 
-                        value={memberEmail} 
-                        onChange={(e) => setMemberEmail(e.target.value)} 
-                        placeholder="jordan@company.com" 
-                        className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none" />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-gray-700 mb-1">Password</label>
-                      <div className="relative flex items-center">
-                        <input 
-                          type={showPassword ? 'text' : 'password'} 
-                          value={memberPassword} 
-                          onChange={(e) => setMemberPassword(e.target.value)} 
-                          placeholder="••••••••" 
-                          className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none pr-12" />
-                        <button 
-                          type="button" 
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-2 text-[10px] font-bold text-gray-500 hover:text-gray-800">
-                          {showPassword ? 'HIDE' : 'SHOW'}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-3">
-                      <div className="w-1/2">
-                        <label className="block text-xs font-bold text-gray-700 mb-1">Role / Access</label>
-                        <select 
-                          value={memberRole} 
-                          onChange={(e) => setMemberRole(e.target.value)} 
-                          className="w-full p-2 text-xs border border-gray-300 rounded bg-white">
-                          <option value="admin">Admin (Master)</option>
-                          <option value="employee">Employee (Worker)</option>
-                        </select>
-                      </div>
-
-                      <div className="w-1/2">
-                        <label className="block text-xs font-bold text-gray-700 mb-1">Assigned Color</label>
-                        <div className="flex items-center gap-2">
-                          <input 
-                            type="color" 
-                            value={memberColor} 
-                            onChange={(e) => setMemberColor(e.target.value)} 
-                            className="w-8 h-8 rounded border border-gray-300 cursor-pointer p-0 bg-white" />
-                          <span className="text-xs font-mono font-bold text-gray-600">{memberColor}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-between items-center pt-2 mt-1 border-t border-gray-200">
-                      {editingMemberId && (
-                        <button 
-                          onClick={() => handleDeleteMember(editingMemberId, memberName)}
-                          className="text-xs text-red-600 font-bold hover:underline">
-                          Delete Profile
-                        </button>
-                      )}
-                      <div className="flex gap-2 ml-auto">
-                        <button 
-                          onClick={resetMemberForm}
-                          className="px-3 py-1.5 rounded text-xs font-bold text-gray-500 hover:bg-gray-100">
-                          Cancel
-                        </button>
-                        <button 
-                          onClick={handleSaveMember}
-                          className="bg-[#333333] text-white px-4 py-1.5 rounded text-xs font-bold hover:bg-black transition">
-                          {editingMemberId ? 'Update Profile' : 'Add Member'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3 mt-2">
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Company Management</h4>
-                    <div className="flex gap-2">
-                      <input 
-                        type="text" 
-                        value={newCompanyInput}
-                        onChange={(e) => setNewCompanyInput(e.target.value)}
-                        placeholder="New Company Name"
-                        className="flex-1 p-2 text-xs border border-gray-300 rounded focus:outline-none"
-                      />
-                      <button 
-                        onClick={handleAddCompany}
-                        className="bg-[#333333] text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-black transition">
-                        Add
-                      </button>
-                    </div>
-                    <div className="flex flex-col gap-1 mt-2">
-                      {masterCompanyList.map(comp => (
-                        <div key={comp} className="flex justify-between items-center bg-gray-50 p-2 rounded border border-gray-100 text-xs">
-                          {editingCompany === comp ? (
-                            <div className="flex items-center gap-2 w-full">
-                              <input 
-                                type="text" 
-                                value={editingCompanyInput} 
-                                onChange={(e) => setEditingCompanyInput(e.target.value)}
-                                className="flex-1 p-1 text-xs border border-gray-300 rounded focus:outline-none bg-white font-bold"
-                              />
-                              <button 
-                                onClick={() => handleRenameCompany(comp, editingCompanyInput)}
-                                className="text-green-700 font-bold hover:underline">Save</button>
-                              <button 
-                                onClick={() => setEditingCompany(null)}
-                                className="text-gray-500 font-bold hover:underline">Cancel</button>
-                            </div>
-                          ) : (
-                            <>
-                              <span className="font-bold text-gray-700">{comp}</span>
-                              <div className="flex items-center gap-3">
-                                <button 
-                                  onClick={() => {
-                                    setEditingCompany(comp);
-                                    setEditingCompanyInput(comp);
-                                  }}
-                                  className="text-blue-600 font-bold hover:underline">Edit</button>
-                                <button 
-                                  onClick={() => handleDeleteCompany(comp)}
-                                  className="text-red-500 font-bold hover:underline">Remove</button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
-
-            </div>
-          </div>
-        )}
+      {/* SETTINGS & GOVERNANCE MODAL */}
+       <SettingsModal 
+          isSettingsOpen={isSettingsOpen}
+          setIsSettingsOpen={setIsSettingsOpen}
+          userRole={userRole}
+          currentUserName={currentUserName}
+          hiddenCompanies={hiddenCompanies}
+          setHiddenCompanies={setHiddenCompanies}
+          masterCompanyList={masterCompanyList}
+          hiddenMembers={hiddenMembers}
+          setHiddenMembers={setHiddenMembers}
+          teamMembers={teamMembers}
+          resetMemberForm={resetMemberForm}
+          handleOpenEditMember={handleOpenEditMember}
+          editingMemberId={editingMemberId}
+          memberName={memberName}
+          setMemberName={setMemberName}
+          memberEmail={memberEmail}
+          setMemberEmail={setMemberEmail}
+          memberPassword={memberPassword}
+          setMemberPassword={setMemberPassword}
+          showPassword={showPassword}
+          setShowPassword={setShowPassword}
+          memberRole={memberRole}
+          setMemberRole={setMemberRole}
+          memberColor={memberColor}
+          setMemberColor={setMemberColor}
+          handleDeleteMember={handleDeleteMember}
+          handleSaveMember={handleSaveMember}
+          newCompanyInput={newCompanyInput}
+          setNewCompanyInput={setNewCompanyInput}
+          handleAddCompany={handleAddCompany}
+          editingCompany={editingCompany}
+          editingCompanyInput={editingCompanyInput}
+          setEditingCompanyInput={setEditingCompanyInput}
+          handleRenameCompany={handleRenameCompany}
+          setEditingCompany={setEditingCompany}
+          handleDeleteCompany={handleDeleteCompany}
+        />
 
       </div>
     </div>
