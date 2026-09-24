@@ -18,13 +18,14 @@ export default async function handler(req, res) {
       const messageText = payload.message.text;
       const slackUser = payload.user?.name || payload.user?.username || 'Slack User';
 
-      const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-      const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+      // HARDCODE YOUR KEYS RIGHT HERE:
+      const supabaseUrl = 'https://pjnuhzdzvxojudkfnofh.supabase.co';
+      const supabaseKey = 'sb_publishable_PBUZMbHEPkkpjDoDd7m18g_C_6c3cZW';
+      
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       const today = new Date().toISOString().split('T')[0];
       
-      // Hyper-safe insert: letting Supabase handle the ID and removing extra fields
       const { error } = await supabase.from('tasks').insert({
         title: `Slack Request from ${slackUser}`,
         desc: messageText,
@@ -36,7 +37,6 @@ export default async function handler(req, res) {
       });
 
       if (error) {
-        // Logging the exact DB rejection reason
         console.log("Supabase Rejected the Insert:", error);
         return res.status(500).send('Database Error');
       }
