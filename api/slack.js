@@ -18,9 +18,9 @@ export default async function handler(req, res) {
       const messageText = payload.message.text;
       const slackUser = payload.user?.name || payload.user?.username || 'Slack User';
 
-      // HARDCODE YOUR KEYS RIGHT HERE:
-      const supabaseUrl = 'https://pjnuhzdzvxojudkfnofh.supabase.co';
-      const supabaseKey = 'sb_secret_Dv3hbyXhCcROgh1krgy1jQ_tg5fZp88';
+      // Pulling the URL from the existing Vite variable, and the Secret Key from our new secure variable
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+      const supabaseKey = process.env.SUPABASE_SECRET_KEY;
       
       const supabase = createClient(supabaseUrl, supabaseKey);
 
