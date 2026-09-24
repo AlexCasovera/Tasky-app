@@ -20,7 +20,7 @@ export default async function handler(req, res) {
 
       // HARDCODE YOUR KEYS RIGHT HERE:
       const supabaseUrl = 'https://pjnuhzdzvxojudkfnofh.supabase.co';
-      const supabaseKey = 'sb_publishable_PBUZMbHEPkkpjDoDd7m18g_C_6c3cZW';
+      const supabaseKey = 'sb_secret_Dv3hbyXhCcROgh1krgy1jQ_tg5fZp88';
       
       const supabase = createClient(supabaseUrl, supabaseKey);
 
