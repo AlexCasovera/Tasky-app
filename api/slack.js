@@ -44,13 +44,15 @@ export default async function handler(req, res) {
         return res.status(500).send('Database Error');
       }
 
-      return res.status(200).send('OK');
+      // Tell Slack it worked with an empty 200 response (this prevents the UI error)
+      return res.status(200).end(); 
     }
 
-    return res.status(200).send('OK');
+    // Catch-all success for any other Slack pings
+    return res.status(200).end(); 
 
   } catch (err) {
     console.log("Syntax/Parse Error:", err);
-    return res.status(500).send('Server Error');
+    return res.status(500).end();
   }
 }
