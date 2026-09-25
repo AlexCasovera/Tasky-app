@@ -116,7 +116,7 @@ export default async function handler(req, res) {
       return res.status(200).end();
     }
 
-    // ACTION 2: USER CLICKS SUBMIT -> SAVE TASK AND CREATE NOTIFICATION
+    // ACTION 2: USER CLICKS SUBMIT -> SAVE TASK, CREATE NOTIFICATION, PING PHONE
     if (payload.type === 'view_submission' && payload.view.callback_id === 'tasky_modal_submit') {
       const values = payload.view.state.values;
       
@@ -126,10 +126,9 @@ export default async function handler(req, res) {
       const assignee = values.assignee_block.assignee_input.selected_option.value;
       const date = values.date_block.date_input.selected_date;
 
-      // 1. Generate the shared Task ID
       const taskId = Date.now().toString();
 
-      // 2. Insert the Task
+      // 1. Insert the Task
       const { error: taskError } = await supabase.from('tasks').insert({
         id: taskId,
         title: title,
@@ -151,8 +150,8 @@ export default async function handler(req, res) {
         return res.status(500).end();
       }
 
-      // 3. Insert the Notification
-      const { error: notifError } = await supabase.from('notifications').insert({
+      // 2. Insert the UI Notification
+      await supabase.from('notifications').insert({
         text: `New Task: "${title}" (via Slack)`,
         type: 'new_task',
         target_type: 'userName',
@@ -162,9 +161,30 @@ export default async function handler(req, res) {
         read: false
       });
 
-      if (notifError) {
-        console.log("Supabase Rejected Notification Insert:", JSON.stringify(notifError));
-        // We still return 200 so Slack closes the menu, because the task itself succeeded
+      // 3. Fetch Push Subscription & Send Mobile Ping
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('push_subscription')
+        .eq('full_name', assignee)
+        .single();
+
+      if (profile && profile.push_subscription) {
+        const protocol = req.headers['x-forwarded-proto'] || 'https';
+        const host = req.headers.host;
+        
+        try {
+          await fetch(`${protocol}://${host}/api/notify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              subscription: profile.push_subscription,
+              title: 'New Task Assigned',
+              message: `New Task: "${title}" (via Slack)`
+            })
+          });
+        } catch (pushError) {
+          console.log("Failed to hit /api/notify endpoint:", pushError);
+        }
       }
 
       return res.status(200).end();
