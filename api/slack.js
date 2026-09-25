@@ -169,19 +169,29 @@ export default async function handler(req, res) {
         .single();
 
       if (profile && profile.push_subscription) {
-        const protocol = req.headers['x-forwarded-proto'] || 'https';
-        const host = req.headers.host;
-        
         try {
-          await fetch(`${protocol}://${host}/api/notify`, {
+          // Construct the URL dynamically based on Vercel's environment
+          const protocol = req.headers['x-forwarded-proto'] || 'https';
+          const host = req.headers.host || 'tasky-app-gilt.vercel.app'; 
+          const notifyUrl = `${protocol}://${host}/api/notify`;
+
+          // Execute a POST request to your own /api/notify endpoint
+          const notifyResponse = await fetch(notifyUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json' 
+            },
             body: JSON.stringify({
-              subscription: profile.push_subscription,
-              title: 'New Task Assigned',
-              message: `New Task: "${title}" (via Slack)`
+              // We must pass the subscription object exactly as the endpoint expects it
+              subscription: profile.push_subscription, 
+              title: '📋 New Task Assigned',
+              message: `You have been assigned: "${title}" (${company})`
             })
           });
+
+          if (!notifyResponse.ok) {
+            console.log("Push Notification Failed with status:", notifyResponse.status);
+          }
         } catch (pushError) {
           console.log("Failed to hit /api/notify endpoint:", pushError);
         }
