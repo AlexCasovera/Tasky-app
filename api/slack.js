@@ -138,7 +138,11 @@ export default async function handler(req, res) {
         status: 'pending',
         priority: 'Medium',
         recurrence_type: 'once',
-        date: date
+        date: date,
+        notify_on_task_created: true, // Tells the system to notify the assignee
+        notify_on_complete: true,
+        notify_on_comment: true,
+        notify_on_deadline_change: true
       });
 
       if (error) {
