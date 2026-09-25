@@ -1,4 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
+import webpush from 'web-push';
+
+// Set up Web Push directly in the Slack file
+webpush.setVapidDetails(
+  'mailto:admin@tasky.app',
+  process.env.VAPID_PUBLIC_KEY,
+  process.env.VAPID_PRIVATE_KEY
+);
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
@@ -116,7 +124,7 @@ export default async function handler(req, res) {
       return res.status(200).end();
     }
 
-    // ACTION 2: USER CLICKS SUBMIT -> SAVE TASK, CREATE NOTIFICATION, PING PHONE
+    // ACTION 2: USER CLICKS SUBMIT -> SAVE TASK, CREATE NOTIFICATION, PING PHONE DIRECTLY
     if (payload.type === 'view_submission' && payload.view.callback_id === 'tasky_modal_submit') {
       const values = payload.view.state.values;
       
@@ -161,7 +169,7 @@ export default async function handler(req, res) {
         read: false
       });
 
-      // 3. Fetch Push Subscription & Send Mobile Ping
+      // 3. Fetch Push Subscription & Execute Native Web-Push
       const { data: profile } = await supabase
         .from('profiles')
         .select('push_subscription')
@@ -170,30 +178,15 @@ export default async function handler(req, res) {
 
       if (profile && profile.push_subscription) {
         try {
-          // Construct the URL dynamically based on Vercel's environment
-          const protocol = req.headers['x-forwarded-proto'] || 'https';
-          const host = req.headers.host || 'tasky-app-gilt.vercel.app'; 
-          const notifyUrl = `${protocol}://${host}/api/notify`;
-
-          // Execute a POST request to your own /api/notify endpoint
-          const notifyResponse = await fetch(notifyUrl, {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json' 
-            },
-            body: JSON.stringify({
-              // We must pass the subscription object exactly as the endpoint expects it
-              subscription: profile.push_subscription, 
-              title: '📋 New Task Assigned',
-              message: `You have been assigned: "${title}" (${company})`
-            })
+          const pushPayload = JSON.stringify({
+            title: '📋 New Task Assigned',
+            body: `You have been assigned: "${title}" (${company})`,
+            icon: '/icons.svg'
           });
-
-          if (!notifyResponse.ok) {
-            console.log("Push Notification Failed with status:", notifyResponse.status);
-          }
+          
+          await webpush.sendNotification(profile.push_subscription, pushPayload);
         } catch (pushError) {
-          console.log("Failed to hit /api/notify endpoint:", pushError);
+          console.log("Web-Push Delivery Error:", pushError);
         }
       }
 
