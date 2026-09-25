@@ -18,8 +18,10 @@ export default async function handler(req, res) {
       const messageText = payload.message.text;
       const slackUser = payload.user?.name || payload.user?.username || 'Slack User';
 
-      // Pulling the URL from the existing Vite variable, and the Secret Key from our new secure variable
-      const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+      // 1. Hardcode the public URL (GitHub allows this)
+      const supabaseUrl = 'https://pjnuhzdzvxojudkfnofh.supabase.co';
+      
+      // 2. Pull the hidden Secret Key from Vercel
       const supabaseKey = process.env.SUPABASE_SECRET_KEY;
       
       const supabase = createClient(supabaseUrl, supabaseKey);
@@ -37,7 +39,7 @@ export default async function handler(req, res) {
       });
 
       if (error) {
-        console.log("Supabase Rejected the Insert:", error);
+        console.log("Supabase Rejected the Insert:", JSON.stringify(error));
         return res.status(500).send('Database Error');
       }
 
