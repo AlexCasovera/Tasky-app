@@ -173,25 +173,39 @@ export default async function handler(req, res) {
         read: false
       });
 
-      // 3. Fetch Push Subscription & Execute Native Web-Push
-      const { data: profile } = await supabase
+      // 3. PING PHONE VIA /API/NOTIFY
+      console.log(`[Push Debug] Searching for push_subscription for assignee: "${assignee}"`);
+      
+      const { data: profile, error: profileErr } = await supabase
         .from('profiles')
         .select('push_subscription')
         .eq('full_name', assignee)
         .single();
 
-      if (profile && profile.push_subscription) {
+      if (profileErr) {
+        console.log("[Push Debug] Supabase Error finding profile:", profileErr);
+      } else if (!profile || !profile.push_subscription) {
+        console.log(`[Push Debug] Profile found, but push_subscription is NULL for ${assignee}`);
+      } else {
+        console.log("[Push Debug] Subscription found! Forwarding to /api/notify...");
+        
         try {
-          const pushPayload = JSON.stringify({
-            title: '📋 New Task Assigned',
-            body: `You have been assigned: "${title}" (${company})`,
-            icon: '/icons.svg'
+          const notifyResponse = await fetch('https://tasky-app-gilt.vercel.app/api/notify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              subscription: profile.push_subscription,
+              title: '📋 New Task Assigned',
+              message: `You have been assigned: "${title}" (${company})`
+            })
           });
+
+          // Read the exact response from your /api/notify endpoint
+          const notifyData = await notifyResponse.text();
+          console.log(`[Push Debug] /api/notify responded with Status ${notifyResponse.status}:`, notifyData);
           
-          await webpush.sendNotification(profile.push_subscription, pushPayload);
-          console.log("Push notification successfully triggered for", assignee);
         } catch (pushError) {
-          console.log("Web-Push Delivery Error:", pushError);
+          console.log("[Push Debug] Fetch to /api/notify completely failed:", pushError);
         }
       }
 
