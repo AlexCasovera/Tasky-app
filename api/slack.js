@@ -5,17 +5,6 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   try {
-    // 1. SAFELY INITIALIZE WEB-PUSH INSIDE THE HANDLER
-    if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-      webpush.setVapidDetails(
-        'mailto:admin@tasky.app',
-        process.env.VAPID_PUBLIC_KEY,
-        process.env.VAPID_PRIVATE_KEY
-      );
-    } else {
-      console.log("WARNING: VAPID keys are missing from Vercel Environment Variables");
-    }
-
     let rawPayload = req.body.payload;
     if (!rawPayload && typeof req.body === 'string') {
         const params = new URLSearchParams(req.body);
@@ -128,7 +117,7 @@ export default async function handler(req, res) {
       return res.status(200).end();
     }
 
-    // ACTION 2: USER CLICKS SUBMIT -> SAVE TASK, CREATE NOTIFICATION, PING PHONE DIRECTLY
+    // ACTION 2: USER CLICKS SUBMIT -> SAVE TASK & PUSH NATIVE NOTIFICATION
     if (payload.type === 'view_submission' && payload.view.callback_id === 'tasky_modal_submit') {
       const values = payload.view.state.values;
       
@@ -162,7 +151,7 @@ export default async function handler(req, res) {
         return res.status(500).end();
       }
 
-      // 2. Insert the UI Notification
+      // 2. Insert the UI Notification Center Entry
       await supabase.from('notifications').insert({
         text: `New Task: "${title}" (via Slack)`,
         type: 'new_task',
@@ -173,39 +162,35 @@ export default async function handler(req, res) {
         read: false
       });
 
-      // 3. PING PHONE VIA /API/NOTIFY
-      console.log(`[Push Debug] Searching for push_subscription for assignee: "${assignee}"`);
-      
-      const { data: profile, error: profileErr } = await supabase
+      // 3. Independent Native Web-Push
+      const { data: profile } = await supabase
         .from('profiles')
         .select('push_subscription')
         .eq('full_name', assignee)
         .single();
 
-      if (profileErr) {
-        console.log("[Push Debug] Supabase Error finding profile:", profileErr);
-      } else if (!profile || !profile.push_subscription) {
-        console.log(`[Push Debug] Profile found, but push_subscription is NULL for ${assignee}`);
-      } else {
-        console.log("[Push Debug] Subscription found! Forwarding to /api/notify...");
-        
+      if (profile && profile.push_subscription) {
         try {
-          const notifyResponse = await fetch('https://tasky-app-gilt.vercel.app/api/notify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              subscription: profile.push_subscription,
-              title: '📋 New Task Assigned',
-              message: `You have been assigned: "${title}" (${company})`
-            })
-          });
+          // Check for Vite prefix just in case your variables use it
+          const pubKey = process.env.VAPID_PUBLIC_KEY || process.env.VITE_VAPID_PUBLIC_KEY;
+          const privKey = process.env.VAPID_PRIVATE_KEY || process.env.VITE_VAPID_PRIVATE_KEY;
 
-          // Read the exact response from your /api/notify endpoint
-          const notifyData = await notifyResponse.text();
-          console.log(`[Push Debug] /api/notify responded with Status ${notifyResponse.status}:`, notifyData);
-          
+          if (pubKey && privKey) {
+            webpush.setVapidDetails('mailto:admin@tasky.app', pubKey, privKey);
+            
+            const pushPayload = JSON.stringify({
+              title: '📋 New Task Assigned',
+              body: `You have been assigned: "${title}" (${company})`,
+              icon: '/icons.svg'
+            });
+            
+            await webpush.sendNotification(profile.push_subscription, pushPayload);
+            console.log("Native Slack push successful");
+          } else {
+            console.log("Push failed: VAPID keys missing in Vercel environment.");
+          }
         } catch (pushError) {
-          console.log("[Push Debug] Fetch to /api/notify completely failed:", pushError);
+          console.log("Native Slack push error:", pushError);
         }
       }
 
