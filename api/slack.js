@@ -13,13 +13,50 @@ export default async function handler(req, res) {
 
     const payload = JSON.parse(rawPayload);
 
+    const supabaseUrl = 'https://pjnuhzdzvxojudkfnofh.supabase.co';
+    const supabaseKey = process.env.SUPABASE_SECRET_KEY;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
     // ACTION 1: USER CLICKS THE SHORTCUT -> OPEN THE SLACK MODAL
     if (payload.type === 'message_action' && payload.callback_id === 'send_to_tasky') {
       const rawMessageText = payload.message.text || '';
-      
-      // Truncate the message to 100 characters for the title field so it doesn't break the single-line input
       const defaultTitle = rawMessageText.length > 100 ? rawMessageText.substring(0, 100) + '...' : rawMessageText;
       const today = new Date().toISOString().split('T')[0];
+
+      // DYNAMIC FETCH: Pull profiles and companies at the same time to beat Slack's timeout limit
+      const [
+        { data: profiles, error: profileError },
+        { data: companies, error: companyError }
+      ] = await Promise.all([
+        supabase.from('profiles').select('full_name').order('full_name'),
+        supabase.from('companies').select('name').order('name')
+      ]);
+
+      // Map Profiles
+      let assigneeOptions = [];
+      if (!profileError && profiles && profiles.length > 0) {
+        assigneeOptions = profiles
+          .filter(p => p.full_name) 
+          .map(p => ({
+            text: { type: 'plain_text', text: p.full_name.substring(0, 70) },
+            value: p.full_name.substring(0, 70)
+          }));
+      } else {
+        assigneeOptions = [{ text: { type: 'plain_text', text: 'Unassigned' }, value: 'Unassigned' }];
+      }
+
+      // Map Companies
+      let companyOptions = [];
+      if (!companyError && companies && companies.length > 0) {
+        companyOptions = companies
+          .filter(c => c.name) 
+          .map(c => ({
+            text: { type: 'plain_text', text: c.name.substring(0, 70) },
+            value: c.name.substring(0, 70)
+          }));
+      } else {
+        companyOptions = [{ text: { type: 'plain_text', text: 'Internal' }, value: 'Internal' }];
+      }
 
       await fetch('https://slack.com/api/views.open', {
         method: 'POST',
@@ -44,23 +81,17 @@ export default async function handler(req, res) {
               {
                 type: 'input',
                 block_id: 'desc_block',
-                optional: true, // Making Description optional since it starts blank
+                optional: true, 
                 element: { type: 'plain_text_input', multiline: true, action_id: 'desc_input' },
                 label: { type: 'plain_text', text: 'Description' }
               },
               {
                 type: 'input',
                 block_id: 'company_block',
-                // Slack inputs are mandatory by default, and omitting 'initial_option' leaves it completely blank!
                 element: {
                   type: 'static_select',
                   action_id: 'company_input',
-                  options: [
-                    { text: { type: 'plain_text', text: 'TMLFO' }, value: 'TMLFO' },
-                    { text: { type: 'plain_text', text: 'Leprino Personal' }, value: 'Leprino Personal' },
-                    { text: { type: 'plain_text', text: 'Sparkulous' }, value: 'Sparkulous' },
-                    { text: { type: 'plain_text', text: 'Personal Tasks' }, value: 'Personal Tasks' }
-                  ]
+                  options: companyOptions 
                 },
                 label: { type: 'plain_text', text: 'Company' }
               },
@@ -70,14 +101,9 @@ export default async function handler(req, res) {
                 element: {
                   type: 'static_select',
                   action_id: 'assignee_input',
-                  options: [
-                    { text: { type: 'plain_text', text: 'Alex M.' }, value: 'Alex M.' },
-                    { text: { type: 'plain_text', text: 'Marc S.' }, value: 'Marc S.' },
-                    { text: { type: 'plain_text', text: 'Adrian R.' }, value: 'Adrian R.' }
-                  ],
-                  initial_option: { text: { type: 'plain_text', text: 'Alex M.' }, value: 'Alex M.' }
+                  options: assigneeOptions 
                 },
-                label: { type: 'plain_text', text: 'Assignee' }
+                label: { type: 'plain_text', text: 'Employee' } // <--- Changed from 'Assignee' to 'Employee'
               },
               {
                 type: 'input',
@@ -93,21 +119,15 @@ export default async function handler(req, res) {
       return res.status(200).end();
     }
 
-
     // ACTION 2: USER CLICKS SUBMIT ON THE MODAL -> SAVE TO SUPABASE
     if (payload.type === 'view_submission' && payload.view.callback_id === 'tasky_modal_submit') {
       const values = payload.view.state.values;
       
       const title = values.title_block.title_input.value;
-      // If the optional description is left blank, default to an empty string
       const description = values.desc_block.desc_input.value || '';
       const company = values.company_block.company_input.selected_option.value;
       const assignee = values.assignee_block.assignee_input.selected_option.value;
       const date = values.date_block.date_input.selected_date;
-
-      const supabaseUrl = 'https://pjnuhzdzvxojudkfnofh.supabase.co';
-      const supabaseKey = process.env.SUPABASE_SECRET_KEY;
-      const supabase = createClient(supabaseUrl, supabaseKey);
 
       const { error } = await supabase.from('tasks').insert({
         id: Date.now().toString(),
