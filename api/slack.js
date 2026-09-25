@@ -23,7 +23,6 @@ export default async function handler(req, res) {
       const defaultTitle = rawMessageText.length > 100 ? rawMessageText.substring(0, 100) + '...' : rawMessageText;
       const today = new Date().toISOString().split('T')[0];
 
-      // DYNAMIC FETCH: Pull profiles and companies at the same time to beat Slack's timeout limit
       const [
         { data: profiles, error: profileError },
         { data: companies, error: companyError }
@@ -32,7 +31,6 @@ export default async function handler(req, res) {
         supabase.from('companies').select('name').order('name')
       ]);
 
-      // Map Profiles
       let assigneeOptions = [];
       if (!profileError && profiles && profiles.length > 0) {
         assigneeOptions = profiles
@@ -45,7 +43,6 @@ export default async function handler(req, res) {
         assigneeOptions = [{ text: { type: 'plain_text', text: 'Unassigned' }, value: 'Unassigned' }];
       }
 
-      // Map Companies
       let companyOptions = [];
       if (!companyError && companies && companies.length > 0) {
         companyOptions = companies
@@ -103,7 +100,7 @@ export default async function handler(req, res) {
                   action_id: 'assignee_input',
                   options: assigneeOptions 
                 },
-                label: { type: 'plain_text', text: 'Employee' } // <--- Changed from 'Assignee' to 'Employee'
+                label: { type: 'plain_text', text: 'Employee' } 
               },
               {
                 type: 'input',
@@ -119,7 +116,7 @@ export default async function handler(req, res) {
       return res.status(200).end();
     }
 
-    // ACTION 2: USER CLICKS SUBMIT ON THE MODAL -> SAVE TO SUPABASE
+    // ACTION 2: USER CLICKS SUBMIT -> SAVE TASK AND CREATE NOTIFICATION
     if (payload.type === 'view_submission' && payload.view.callback_id === 'tasky_modal_submit') {
       const values = payload.view.state.values;
       
@@ -129,8 +126,12 @@ export default async function handler(req, res) {
       const assignee = values.assignee_block.assignee_input.selected_option.value;
       const date = values.date_block.date_input.selected_date;
 
-      const { error } = await supabase.from('tasks').insert({
-        id: Date.now().toString(),
+      // 1. Generate the shared Task ID
+      const taskId = Date.now().toString();
+
+      // 2. Insert the Task
+      const { error: taskError } = await supabase.from('tasks').insert({
+        id: taskId,
         title: title,
         description: description,
         company: company,
@@ -139,15 +140,31 @@ export default async function handler(req, res) {
         priority: 'Medium',
         recurrence_type: 'once',
         date: date,
-        notify_on_task_created: true, // Tells the system to notify the assignee
+        notify_on_task_created: true,
         notify_on_complete: true,
         notify_on_comment: true,
         notify_on_deadline_change: true
       });
 
-      if (error) {
-        console.log("Supabase Rejected Modal Insert:", JSON.stringify(error));
+      if (taskError) {
+        console.log("Supabase Rejected Task Insert:", JSON.stringify(taskError));
         return res.status(500).end();
+      }
+
+      // 3. Insert the Notification
+      const { error: notifError } = await supabase.from('notifications').insert({
+        text: `New Task: "${title}" (via Slack)`,
+        type: 'new_task',
+        target_type: 'userName',
+        target_value: assignee,
+        task_id: taskId,
+        task_date: date,
+        read: false
+      });
+
+      if (notifError) {
+        console.log("Supabase Rejected Notification Insert:", JSON.stringify(notifError));
+        // We still return 200 so Slack closes the menu, because the task itself succeeded
       }
 
       return res.status(200).end();
