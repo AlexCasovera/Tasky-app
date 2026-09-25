@@ -1,17 +1,21 @@
 import { createClient } from '@supabase/supabase-js';
 import webpush from 'web-push';
 
-// Set up Web Push directly in the Slack file
-webpush.setVapidDetails(
-  'mailto:admin@tasky.app',
-  process.env.VAPID_PUBLIC_KEY,
-  process.env.VAPID_PRIVATE_KEY
-);
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   try {
+    // 1. SAFELY INITIALIZE WEB-PUSH INSIDE THE HANDLER
+    if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+      webpush.setVapidDetails(
+        'mailto:admin@tasky.app',
+        process.env.VAPID_PUBLIC_KEY,
+        process.env.VAPID_PRIVATE_KEY
+      );
+    } else {
+      console.log("WARNING: VAPID keys are missing from Vercel Environment Variables");
+    }
+
     let rawPayload = req.body.payload;
     if (!rawPayload && typeof req.body === 'string') {
         const params = new URLSearchParams(req.body);
@@ -185,6 +189,7 @@ export default async function handler(req, res) {
           });
           
           await webpush.sendNotification(profile.push_subscription, pushPayload);
+          console.log("Push notification successfully triggered for", assignee);
         } catch (pushError) {
           console.log("Web-Push Delivery Error:", pushError);
         }
