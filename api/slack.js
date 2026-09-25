@@ -29,12 +29,13 @@ export default async function handler(req, res) {
       const today = new Date().toISOString().split('T')[0];
       
       const { error } = await supabase.from('tasks').insert({
+        id: Date.now().toString(), 
         title: `Slack Request from ${slackUser}`,
-        desc: messageText,
+        description: messageText,  
         company: 'Internal', 
         status: 'pending',
-        priority: 'Standard',
-        recurrenceType: 'once',
+        priority: 'Medium', // Changed to 'Medium' to match your existing database values
+        recurrence_type: 'once', // Fixed the underscore!
         date: today
       });
 
