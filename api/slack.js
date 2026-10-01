@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-import webpush from 'web-push';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
@@ -18,7 +17,7 @@ export default async function handler(req, res) {
     const supabaseKey = process.env.SUPABASE_SECRET_KEY;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // ACTION 1: USER CLICKS THE SHORTCUT -> OPEN THE SLACK MODAL
+    // ACTION 1: USER CLICKS SHORTCUT -> OPEN SLACK MODAL
     if (payload.type === 'message_action' && payload.callback_id === 'send_to_tasky') {
       const rawMessageText = payload.message.text || '';
       const defaultTitle = rawMessageText.length > 100 ? rawMessageText.substring(0, 100) + '...' : rawMessageText;
@@ -117,29 +116,28 @@ export default async function handler(req, res) {
       return res.status(200).end();
     }
 
-    // ACTION 2: USER CLICKS SUBMIT -> SAVE TASK & PUSH NATIVE NOTIFICATION
+    // ACTION 2: USER SUBMITS MODAL -> SAVE TASK & PING MOBILE
     if (payload.type === 'view_submission' && payload.view.callback_id === 'tasky_modal_submit') {
       const values = payload.view.state.values;
-      
       const title = values.title_block.title_input.value;
       const description = values.desc_block.desc_input.value || '';
       const company = values.company_block.company_input.selected_option.value;
       const assignee = values.assignee_block.assignee_input.selected_option.value;
       const date = values.date_block.date_input.selected_date;
-
       const taskId = Date.now().toString();
 
-      // 1. Insert the Task
+      // Insert Task into Supabase with matching Task Builder defaults
       const { error: taskError } = await supabase.from('tasks').insert({
         id: taskId,
         title: title,
         description: description,
         company: company,
-        assignees: [assignee], 
+        assignees: [assignee],
         status: 'pending',
         priority: 'Medium',
         recurrence_type: 'once',
         date: date,
+        allow_assignee_deadline_change: true, // Matches web app default
         notify_on_task_created: true,
         notify_on_complete: true,
         notify_on_comment: true,
@@ -151,7 +149,7 @@ export default async function handler(req, res) {
         return res.status(500).end();
       }
 
-      // 2. Insert the UI Notification Center Entry
+      // Insert Notification Center Entry (In-app bell)
       await supabase.from('notifications').insert({
         text: `New Task: "${title}" (via Slack)`,
         type: 'new_task',
@@ -162,35 +160,26 @@ export default async function handler(req, res) {
         read: false
       });
 
-      // 3. Independent Native Web-Push
+      // Ping Mobile Device
       const { data: profile } = await supabase
         .from('profiles')
         .select('push_subscription')
-        .eq('full_name', assignee)
+        .or(`full_name.eq."${assignee}",name.eq."${assignee}"`)
         .single();
 
-      if (profile && profile.push_subscription) {
+      if (profile?.push_subscription) {
         try {
-          // Check for Vite prefix just in case your variables use it
-          const pubKey = process.env.VAPID_PUBLIC_KEY || process.env.VITE_VAPID_PUBLIC_KEY;
-          const privKey = process.env.VAPID_PRIVATE_KEY || process.env.VITE_VAPID_PRIVATE_KEY;
-
-          if (pubKey && privKey) {
-            webpush.setVapidDetails('mailto:admin@tasky.app', pubKey, privKey);
-            
-            const pushPayload = JSON.stringify({
+          await fetch('https://tasky-app-gilt.vercel.app/api/notify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              subscription: profile.push_subscription,
               title: '📋 New Task Assigned',
-              body: `You have been assigned: "${title}" (${company})`,
-              icon: '/icons.svg'
-            });
-            
-            await webpush.sendNotification(profile.push_subscription, pushPayload);
-            console.log("Native Slack push successful");
-          } else {
-            console.log("Push failed: VAPID keys missing in Vercel environment.");
-          }
+              message: `You have been assigned: "${title}" (${company})`
+            })
+          });
         } catch (pushError) {
-          console.log("Native Slack push error:", pushError);
+          console.log("Failed to ping /api/notify endpoint:", pushError);
         }
       }
 
