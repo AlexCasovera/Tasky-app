@@ -126,7 +126,7 @@ export default async function handler(req, res) {
       const date = values.date_block.date_input.selected_date;
       const taskId = Date.now().toString();
 
-      // Insert Task into Supabase with matching Task Builder defaults
+      // Insert Task into Supabase using the exact schema column names
       const { error: taskError } = await supabase.from('tasks').insert({
         id: taskId,
         title: title,
@@ -137,7 +137,7 @@ export default async function handler(req, res) {
         priority: 'Medium',
         recurrence_type: 'once',
         date: date,
-        allow_assignee_deadline_change: true, // Matches web app default
+        allow_deadline_change: true, // Corrected column name
         notify_on_task_created: true,
         notify_on_complete: true,
         notify_on_comment: true,
@@ -149,7 +149,7 @@ export default async function handler(req, res) {
         return res.status(500).end();
       }
 
-      // Insert Notification Center Entry (In-app bell)
+      // Insert Notification Center Entry
       await supabase.from('notifications').insert({
         text: `New Task: "${title}" (via Slack)`,
         type: 'new_task',
