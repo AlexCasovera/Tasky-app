@@ -54,7 +54,7 @@ export const compressImage = (file: File, maxWidth: number, maxHeight: number, q
 };
 
 // --- NATIVE VAPID PUSH CONFIGURATION ---
-const VAPID_PUBLIC_KEY = "BEdpaFVtcj6F-vvykhLdOaDDzUUmcnVB0knI0VjfJjqLLAStEKll692mf1M3xUAo_KS8djPg-YCIya9GOtHB3cA";
+const VAPID_PUBLIC_KEY = "BHwkF10ChvQHdkA8haU2qwiLokceGAgQeWqmyE-3R0ZiygmKWXv50YVjCI3TauwJ5OyS47iUsz0wotPEPV8gH_8";
 
 export function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
