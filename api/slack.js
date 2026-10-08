@@ -17,8 +17,48 @@ export default async function handler(req, res) {
     const supabaseKey = process.env.SUPABASE_SECRET_KEY;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // ACTION 1: USER CLICKS SHORTCUT -> OPEN SLACK MODAL
+    // =========================================================================
+    // ACTION 1: USER CLICKS SHORTCUT -> CHECK PERMISSION -> OPEN SLACK MODAL
+    // =========================================================================
     if (payload.type === 'message_action' && payload.callback_id === 'send_to_tasky') {
+      
+      // 1. Check if the clicking user's Slack ID is linked to an Admin in Tasky
+      const { data: callerProfile } = await supabase
+        .from('profiles')
+        .select('id, name, role')
+        .eq('slack_user_id', payload.user.id)
+        .single();
+
+      // 2. If NOT linked or NOT an admin, show a clean "Restricted" modal
+      if (!callerProfile || callerProfile.role !== 'admin') {
+        await fetch('https://slack.com/api/views.open', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.SLACK_BOT_TOKEN}`
+          },
+          body: JSON.stringify({
+            trigger_id: payload.trigger_id,
+            view: {
+              type: 'modal',
+              title: { type: 'plain_text', text: 'Tasky Permissions' },
+              close: { type: 'plain_text', text: 'Dismiss' },
+              blocks: [
+                {
+                  type: 'section',
+                  text: {
+                    type: 'mrkdwn',
+                    text: '⚠️ *Admin Access Required*\n\nCreating tasks directly from Slack messages is reserved for Tasky Administrators.\n\nIf this message requires an action item, please forward or tag an admin.'
+                  }
+                }
+              ]
+            }
+          })
+        });
+        return res.status(200).end();
+      }
+
+      // 3. User is an approved Admin: prepare the form
       const rawMessageText = payload.message.text || '';
       const defaultTitle = rawMessageText.length > 100 ? rawMessageText.substring(0, 100) + '...' : rawMessageText;
       const today = new Date().toISOString().split('T')[0];
@@ -116,8 +156,22 @@ export default async function handler(req, res) {
       return res.status(200).end();
     }
 
+    // =========================================================================
     // ACTION 2: USER SUBMITS MODAL -> SAVE TASK & PING MOBILE
+    // =========================================================================
     if (payload.type === 'view_submission' && payload.view.callback_id === 'tasky_modal_submit') {
+      
+      // Security check: ensure submitting user is still an admin
+      const { data: submitterProfile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('slack_user_id', payload.user.id)
+        .single();
+
+      if (!submitterProfile || submitterProfile.role !== 'admin') {
+        return res.status(403).end();
+      }
+
       const values = payload.view.state.values;
       const title = values.title_block.title_input.value;
       const description = values.desc_block.desc_input.value || '';
@@ -126,7 +180,7 @@ export default async function handler(req, res) {
       const date = values.date_block.date_input.selected_date;
       const taskId = Date.now().toString();
 
-      // Insert Task into Supabase using the exact schema column names
+      // Insert Task into Supabase using exact schema column names
       const { error: taskError } = await supabase.from('tasks').insert({
         id: taskId,
         title: title,
@@ -137,7 +191,7 @@ export default async function handler(req, res) {
         priority: 'Medium',
         recurrence_type: 'once',
         date: date,
-        allow_deadline_change: true, // Corrected column name
+        allow_deadline_change: true,
         notify_on_task_created: true,
         notify_on_complete: true,
         notify_on_comment: true,

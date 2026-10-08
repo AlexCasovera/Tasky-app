@@ -19,6 +19,8 @@ export default function SettingsModal({
   setMemberName,
   memberEmail,
   setMemberEmail,
+  memberSlackId,
+  setMemberSlackId,
   memberPassword,
   setMemberPassword,
   showPassword,
@@ -72,7 +74,7 @@ export default function SettingsModal({
         {/* ADMIN ONLY CONTROLS */}
         {userRole === 'admin' && (
           <>
-            {/* NEW DASHBOARD VISIBILITY MODULE */}
+            {/* DASHBOARD VISIBILITY MODULE */}
             <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3 shadow-2xs">
               <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Dashboard Visibility (This Device)</h4>
               <p className="text-[10px] text-gray-500">Uncheck items below to completely hide them from your personal dashboard filters and calendar views.</p>
@@ -108,7 +110,7 @@ export default function SettingsModal({
                         }} 
                         className="accent-[#A9B1A6]" 
                       /> 
-                          {m.name}
+                      {m.name}
                     </label>
                   ))}
                 </div>
@@ -168,6 +170,22 @@ export default function SettingsModal({
                   onChange={(e) => setMemberEmail(e.target.value)} 
                   placeholder="jordan@company.com" 
                   className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none" />
+              </div>
+
+              {/* SLACK MEMBER ID FIELD */}
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  Slack Member ID <span className="text-[10px] text-gray-400 font-normal">(Optional — e.g. U07G3ABC99)</span>
+                </label>
+                <input 
+                  type="text" 
+                  value={memberSlackId} 
+                  onChange={(e) => setMemberSlackId(e.target.value)} 
+                  placeholder="e.g. U0123456789" 
+                  className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none font-mono" />
+                <p className="text-[10px] text-gray-400 mt-0.5">
+                  In Slack: Click user's profile → <strong>...</strong> → <strong>Copy member ID</strong>.
+                </p>
               </div>
 
               <div>

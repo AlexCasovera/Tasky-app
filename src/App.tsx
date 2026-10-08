@@ -27,8 +27,6 @@ import Header from './components/Header';
 import FilterBar from './components/FilterBar';
 import DashboardTrays from './components/DashboardTrays';
 import ListAndCompletedViews from './components/ListAndCompletedViews';
-// --- STATIC CALENDAR HELPERS ---
-
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
@@ -94,7 +92,8 @@ export default function App() {
           initials: p.initials || p.email.substring(0, 2).toUpperCase(),
           email: p.email,
           role: p.role || 'employee',
-          color: p.color || '#2A9D8F'
+          color: p.color || '#2A9D8F',
+          slackUserId: p.slack_user_id || ''
         }));
         setTeamMembers(mappedMembers);
         if (activeEmployeeFilters.length === 0) setActiveEmployeeFilters(mappedMembers.map(m => m.name));
@@ -145,13 +144,11 @@ export default function App() {
   }, []);
 
   const [isNotifOpen, setIsNotifOpen] = useState(false);
-const [notifications, setNotifications] = useState([]);
-const notifyChannel = useRef(null);
-const hasLoadedNotifs = useRef(false);
+  const [notifications, setNotifications] = useState([]);
 
-const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
+  const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
 
-// 1. Fetch from DB & Subscribe to Changes
+  // 1. Fetch from DB & Subscribe to Changes
   useEffect(() => {
     if (!currentUserName) return;
 
@@ -159,7 +156,6 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
-        // We added double-quotes around the variables here so names with spaces don't crash the database!
         .or(`and(target_type.eq.role,target_value.eq."${userRole}"),and(target_type.eq.userName,target_value.eq."${currentUserName}")`)
         .order('created_at', { ascending: false })
         .limit(50);
@@ -186,7 +182,7 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
 
     const channel = supabase.channel('db-notifications')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => {
-         fetchNotifs(); // Instantly refresh if a new one is added
+         fetchNotifs();
       })
       .subscribe();
 
@@ -195,7 +191,6 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
     }
   }, [userRole, currentUserName]);
 
-  // --- UNIFIED NOTIFICATION DISPATCHER ---
   // --- UNIFIED NOTIFICATION DISPATCHER ---
   const dispatchNotification = async (targetType, targetValue, type, bellText, pushTitle, pushMessage, taskId = null, taskDate = null) => {
     if (pushTitle && pushMessage) {
@@ -223,6 +218,7 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
   const [editingCompanyInput, setEditingCompanyInput] = useState('');
   const [memberName, setMemberName] = useState('');
   const [memberEmail, setMemberEmail] = useState('');
+  const [memberSlackId, setMemberSlackId] = useState('');
   const [memberPassword, setMemberPassword] = useState('');
   const [memberRole, setMemberRole] = useState('employee');
   const [memberColor, setMemberColor] = useState('#2A9D8F');
@@ -750,7 +746,7 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
     let dbPayloads = [];
     
     const moveNote = `📅 Rescheduled to ${targetDate} by ${currentUserName} [${getCurrentTimestamp()}]`;
-    // ---> NEW ASYNC-SAFE DISPATCH BLOCK <---
+
     const taskToMove = tasks.find(t => t.id === taskId);
     if (taskToMove) {
       const notifyUsers = targetMemberName ? [targetMemberName] : (taskToMove.assignees || []);
@@ -786,9 +782,6 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
       let label = isFlex ? 'All-Day' : formatTimeLabel(sStr, eStr);
 
       const effectiveSourceDate = sourceDateFromPrompt || targetTask.date;
-
-      
-
 
       if (targetTask.recurrenceType !== 'once' && !updateSeries) {
         const standaloneTask = {
@@ -933,6 +926,7 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
   const resetMemberForm = () => {
     setMemberName('');
     setMemberEmail('');
+    setMemberSlackId('');
     setMemberPassword('');
     setMemberRole('employee');
     setMemberColor('#2A9D8F');
@@ -944,6 +938,7 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
     setEditingMemberId(member.id);
     setMemberName(member.name);
     setMemberEmail(member.email);
+    setMemberSlackId(member.slackUserId || '');
     setMemberPassword(member.password);
     setMemberRole(member.role);
     setMemberColor(member.color || '#2A9D8F');
@@ -959,7 +954,8 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
         name: memberName,
         initials,
         role: memberRole,
-        color: memberColor
+        color: memberColor,
+        slack_user_id: memberSlackId.trim() || null
       }).eq('id', editingMemberId);
     } else {
       if (!memberEmail.trim()) return alert('Please enter an email address.');
@@ -971,7 +967,8 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
         initials,
         email: memberEmail,
         role: memberRole,
-        color: memberColor
+        color: memberColor,
+        slack_user_id: memberSlackId.trim() || null
       });
 
       if (error) {
@@ -989,7 +986,8 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
         initials: p.initials || p.email.substring(0, 2).toUpperCase(),
         email: p.email,
         role: p.role || 'employee',
-        color: p.color || '#2A9D8F'
+        color: p.color || '#2A9D8F',
+        slackUserId: p.slack_user_id || ''
       })));
     }
 
@@ -1173,7 +1171,7 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
       comments: [`📌 Task Generated by ${currentUserName} [${getCurrentTimestamp()}]`] 
     };
 
-    // 1. FIRE NOTIFICATIONS FIRST (Guarantees transmission before React changes screens)
+    // 1. FIRE NOTIFICATIONS FIRST
     selectedAssignees.forEach(assigneeName => {
       dispatchNotification(
         'userName', 
@@ -1825,20 +1823,17 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
 
   const searchResults = {
     tasks: tasks.filter(t => {
-      // 1. Does the task match what they typed in the search bar?
       const matchesSearch = searchQuery.trim() && !hiddenCompanies.includes(t.company) && (
         (t.title && t.title.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (t.desc && t.desc.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (t.comments && t.comments.some(c => c.toLowerCase().includes(searchQuery.toLowerCase())))
       );
       
-      // 2. Are they allowed to see it? (Admins see all, Employees see only their own)
       const hasPermission = userRole === 'admin' || (t.assignees && t.assignees.includes(currentUserName));
       
       return matchesSearch && hasPermission;
     }).map(t => ({
       ...t,
-      // Check if it's completed either by status or if it has completed dates
       isSearchCompleted: t.status === 'completed' || (t.completedDates && t.completedDates.length > 0)
     })).slice(0, 5),
     
@@ -1920,25 +1915,25 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
           setActiveEmployeeFilters={setActiveEmployeeFilters}
         />
 
-        {/* CONDITIONAL DASHBOARD TRAYS (OVERDUE, PIPELINE, BACKLOG) */}
-    <DashboardTrays 
-      userRole={userRole}
-      currentView={currentView}
-      overdueTasks={overdueTasks}
-      getMissedDate={getMissedDate}
-      handleOpenModal={handleOpenModal}
-      renderPriorityPill={renderPriorityPill}
-      getMemberConfig={getMemberConfig}
-      longTermTasks={longTermTasks}
-      resizingTaskId={resizingTaskId}
-      handleDragStart={handleDragStart}
-      handleDragEnd={handleDragEnd}
-      formatDateKey={formatDateKey}
-      currentDate={currentDate}
-      isTaskPastDue={isTaskPastDue}
-      backlogTasks={backlogTasks}
-      listScope={listScope}
-    />
+        {/* CONDITIONAL DASHBOARD TRAYS */}
+        <DashboardTrays 
+          userRole={userRole}
+          currentView={currentView}
+          overdueTasks={overdueTasks}
+          getMissedDate={getMissedDate}
+          handleOpenModal={handleOpenModal}
+          renderPriorityPill={renderPriorityPill}
+          getMemberConfig={getMemberConfig}
+          longTermTasks={longTermTasks}
+          resizingTaskId={resizingTaskId}
+          handleDragStart={handleDragStart}
+          handleDragEnd={handleDragEnd}
+          formatDateKey={formatDateKey}
+          currentDate={currentDate}
+          isTaskPastDue={isTaskPastDue}
+          backlogTasks={backlogTasks}
+          listScope={listScope}
+        />
 
         {/* LIST & COMPLETED VIEWS */}
         {(currentView === 'list' || currentView === 'completed') && (
@@ -2110,15 +2105,15 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
           teamMembers={teamMembers}
         />
 
-       {/* RECURRING TASK RESCHEDULE SCOPE PROMPT MODAL */}
+        {/* RECURRING TASK RESCHEDULE SCOPE PROMPT MODAL */}
         <RescheduleModal 
           reschedulePrompt={reschedulePrompt}
           setReschedulePrompt={setReschedulePrompt}
           applyTaskMove={applyTaskMove}
         />
 
-      {/* SETTINGS & GOVERNANCE MODAL */}
-       <SettingsModal 
+        {/* SETTINGS & GOVERNANCE MODAL */}
+        <SettingsModal 
           isSettingsOpen={isSettingsOpen}
           setIsSettingsOpen={setIsSettingsOpen}
           userRole={userRole}
@@ -2136,6 +2131,8 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
           setMemberName={setMemberName}
           memberEmail={memberEmail}
           setMemberEmail={setMemberEmail}
+          memberSlackId={memberSlackId}
+          setMemberSlackId={setMemberSlackId}
           memberPassword={memberPassword}
           setMemberPassword={setMemberPassword}
           showPassword={showPassword}
@@ -2161,4 +2158,3 @@ const currentUserName = currentProfile?.name || session?.user?.email?.split('@')
     </div>
   );
 }
-
