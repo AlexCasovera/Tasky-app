@@ -39,7 +39,10 @@ export default function SettingsModal({
   setEditingCompanyInput,
   handleRenameCompany,
   setEditingCompany,
-  handleDeleteCompany
+  handleDeleteCompany,
+  briefingPrefs,
+  handleSaveBriefingPrefs,
+  handleTestBriefing
 }) {
   if (!isSettingsOpen) return null;
 
@@ -69,6 +72,59 @@ export default function SettingsModal({
             className="bg-amber-100 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-amber-200 transition shrink-0 shadow-2xs">
             📲 Enable Push Alerts
           </button>
+        </div>
+
+        {/* SLACK MORNING DISPATCH CARD */}
+        <div className="bg-white p-4 rounded-lg border border-emerald-300 flex flex-col gap-3 shadow-2xs">
+          <div className="flex justify-between items-start border-b border-gray-100 pb-2">
+            <div>
+              <h4 className="font-bold text-xs uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
+                <span>☀️</span> Slack Morning Dispatch
+              </h4>
+              <p className="text-[11px] text-gray-500 mt-0.5">Receive an automated morning breakdown of your tasks directly in Slack.</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={briefingPrefs.enabled} 
+                onChange={(e) => handleSaveBriefingPrefs({ ...briefingPrefs, enabled: e.target.checked })} 
+                className="sr-only peer" 
+              />
+              <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+            </label>
+          </div>
+
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold text-gray-700">Delivery Time:</span>
+            <select 
+              value={briefingPrefs.time || '08:00'} 
+              onChange={(e) => handleSaveBriefingPrefs({ ...briefingPrefs, time: e.target.value })}
+              className="p-1.5 border border-gray-300 rounded bg-white text-xs font-bold text-gray-800 focus:outline-none">
+              <option value="06:00">06:00 AM</option>
+              <option value="07:00">07:00 AM</option>
+              <option value="08:00">08:00 AM</option>
+              <option value="09:00">09:00 AM</option>
+              <option value="10:00">10:00 AM</option>
+            </select>
+          </div>
+
+          <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+            <input 
+              type="checkbox" 
+              checked={briefingPrefs.high_priority_only} 
+              onChange={(e) => handleSaveBriefingPrefs({ ...briefingPrefs, high_priority_only: e.target.checked })}
+              className="accent-emerald-600" 
+            />
+            <span className="font-medium">Only include High Priority tasks</span>
+          </label>
+
+          <div className="pt-2 border-t border-gray-100 flex justify-end">
+            <button 
+              onClick={handleTestBriefing}
+              className="bg-emerald-50 text-emerald-800 border border-emerald-300 px-3 py-1.5 rounded text-xs font-bold hover:bg-emerald-100 transition shadow-2xs">
+              ⚡ Send Test to My Slack
+            </button>
+          </div>
         </div>
 
         {/* ADMIN ONLY CONTROLS */}
@@ -172,7 +228,6 @@ export default function SettingsModal({
                   className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none" />
               </div>
 
-              {/* SLACK MEMBER ID FIELD */}
               <div>
                 <label className="block text-xs font-bold text-gray-700 mb-1">
                   Slack Member ID <span className="text-[10px] text-gray-400 font-normal">(Optional — e.g. U07G3ABC99)</span>
