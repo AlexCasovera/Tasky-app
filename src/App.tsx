@@ -146,20 +146,25 @@ export default function App() {
     }
   };
 
+  // Explicitly routes to tasky-app-gilt where all 6 environment variables are configured
   const handleTestBriefing = async () => {
     if (!currentProfile?.slackUserId) {
       return alert("Please ensure a Slack Member ID is set on your profile first!");
     }
-    const res = await fetch('/api/dispatch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ testUserId: currentProfile.id })
-    });
-    const data = await res.json();
-    if (data.success) {
-      alert("☀️ Test morning briefing sent to your Slack!");
-    } else {
-      alert("Error sending test: " + (data.error || "Check server logs"));
+    try {
+      const res = await fetch('https://tasky-app-gilt.vercel.app/api/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ testUserId: currentProfile.id })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert("☀️ Test morning briefing sent to your Slack!");
+      } else {
+        alert("Error sending test: " + (data.error || "Check server logs"));
+      }
+    } catch (err) {
+      alert("Network Error: " + err.message);
     }
   };
 

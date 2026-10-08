@@ -1,6 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 
 export default async function handler(req, res) {
+  // Enable CORS so requests from either domain can access it
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -8,7 +17,6 @@ export default async function handler(req, res) {
   try {
     const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://pjnuhzdzvxojudkfnofh.supabase.co';
     
-    // Check all possible environment variable names for the Supabase key
     const supabaseKey = 
       process.env.SUPABASE_SECRET_KEY || 
       process.env.SUPABASE_SERVICE_ROLE_KEY || 
@@ -17,7 +25,7 @@ export default async function handler(req, res) {
 
     if (!supabaseKey) {
       return res.status(500).json({ 
-        error: 'Missing Supabase Key in Vercel environment variables (SUPABASE_SECRET_KEY or VITE_SUPABASE_ANON_KEY).' 
+        error: 'Missing Supabase Key in Vercel environment variables.' 
       });
     }
 
