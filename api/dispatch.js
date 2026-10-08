@@ -1,14 +1,26 @@
 import { createClient } from '@supabase/supabase-js';
 
 export default async function handler(req, res) {
-  // Allow GET (for cron jobs) or POST (for test triggers)
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
     const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://pjnuhzdzvxojudkfnofh.supabase.co';
-    const supabaseKey = process.env.SUPABASE_SECRET_KEY;
+    
+    // Check all possible environment variable names for the Supabase key
+    const supabaseKey = 
+      process.env.SUPABASE_SECRET_KEY || 
+      process.env.SUPABASE_SERVICE_ROLE_KEY || 
+      process.env.VITE_SUPABASE_ANON_KEY || 
+      process.env.SUPABASE_ANON_KEY;
+
+    if (!supabaseKey) {
+      return res.status(500).json({ 
+        error: 'Missing Supabase Key in Vercel environment variables (SUPABASE_SECRET_KEY or VITE_SUPABASE_ANON_KEY).' 
+      });
+    }
+
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     const todayDate = new Date();
@@ -147,6 +159,7 @@ export default async function handler(req, res) {
         dispatchedCount++;
       } else {
         console.error(`Failed to DM ${userName} (${slackId}):`, slackJson.error);
+        return res.status(500).json({ error: `Slack API error: ${slackJson.error}` });
       }
     }
 
