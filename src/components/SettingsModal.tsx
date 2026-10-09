@@ -9,8 +9,6 @@ export default function SettingsModal({
   setIsSettingsOpen,
   userRole,
   currentUserName,
-  currentProfile,
-  setCurrentProfile,
   hiddenCompanies,
   setHiddenCompanies,
   masterCompanyList,
@@ -32,8 +30,6 @@ export default function SettingsModal({
   setMemberRole,
   memberColor,
   setMemberColor,
-  memberSlackId,
-  setMemberSlackId,
   handleDeleteMember,
   handleSaveMember,
   newCompanyInput,
@@ -44,95 +40,88 @@ export default function SettingsModal({
   setEditingCompanyInput,
   handleRenameCompany,
   setEditingCompany,
-  handleDeleteCompany,
-  currentDate,
-  formatDateKey
+  handleDeleteCompany
 }) {
-  if (!isSettingsOpen) return null;
-
-  const [dispatchEnabled, setDispatchEnabled] = useState(false);
-  const [dispatchTime, setDispatchTime] = useState('08:00 AM');
-  const [dispatchMember, setDispatchMember] = useState('Alex M.');
-  const [highPriorityOnly, setHighPriorityOnly] = useState(false);
+  const [dispatchEnabled, setDispatchEnabled] = useState(true);
+  const [deliveryTime, setDeliveryTime] = useState('08:00 AM');
+  const [targetAssignee, setTargetAssignee] = useState(currentUserName || 'Alex M.');
+  const [onlyHighPriority, setOnlyHighPriority] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
-  const [testStatus, setTestStatus] = useState('');
+  const [slackMemberId, setSlackMemberId] = useState('');
 
   useEffect(() => {
-    if (currentProfile) {
-      setDispatchEnabled(Boolean(currentProfile.slack_dispatch_enabled));
-      if (currentProfile.slack_dispatch_time) setDispatchTime(currentProfile.slack_dispatch_time);
-      if (currentProfile.slack_dispatch_member) setDispatchMember(currentProfile.slack_dispatch_member);
-      setHighPriorityOnly(Boolean(currentProfile.slack_dispatch_high_priority_only));
-    }
-  }, [currentProfile]);
+    async function loadSlackSettings() {
+      if (!currentUserName) return;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .or(`name.eq."${currentUserName}",full_name.eq."${currentUserName}"`)
+        .single();
 
-  const saveDispatchSettings = async (updates) => {
-    if (!currentProfile?.id) return;
-    const { error } = await supabase
+      if (data && !error) {
+        if (data.slack_member_id) setSlackMemberId(data.slack_member_id);
+        if (data.dispatch_enabled !== undefined) setDispatchEnabled(data.dispatch_enabled);
+        if (data.dispatch_time) setDeliveryTime(data.dispatch_time);
+        if (data.dispatch_target_assignee) setTargetAssignee(data.dispatch_target_assignee);
+        if (data.dispatch_high_priority_only !== undefined) setOnlyHighPriority(data.dispatch_high_priority_only);
+      }
+    }
+    if (isSettingsOpen) {
+      loadSlackSettings();
+    }
+  }, [isSettingsOpen, currentUserName]);
+
+  const handleSaveDispatchSettings = async (newEnabled, newTime, newTarget, newHighPriority) => {
+    setDispatchEnabled(newEnabled);
+    setDeliveryTime(newTime);
+    setTargetAssignee(newTarget);
+    setOnlyHighPriority(newHighPriority);
+
+    await supabase
       .from('profiles')
-      .update(updates)
-      .eq('id', currentProfile.id);
-
-    if (!error && setCurrentProfile) {
-      setCurrentProfile(prev => ({ ...prev, ...updates }));
-    }
-  };
-
-  const handleToggleDispatch = async (enabled) => {
-    setDispatchEnabled(enabled);
-    await saveDispatchSettings({ slack_dispatch_enabled: enabled });
-  };
-
-  const handleTimeChange = async (time) => {
-    setDispatchTime(time);
-    await saveDispatchSettings({ slack_dispatch_time: time });
-  };
-
-  const handleMemberChange = async (target) => {
-    setDispatchMember(target);
-    await saveDispatchSettings({ slack_dispatch_member: target });
-  };
-
-  const handleHighPriorityToggle = async (val) => {
-    setHighPriorityOnly(val);
-    await saveDispatchSettings({ slack_dispatch_high_priority_only: val });
+      .update({
+        dispatch_enabled: newEnabled,
+        dispatch_time: newTime,
+        dispatch_target_assignee: newTarget,
+        dispatch_high_priority_only: newHighPriority
+      })
+      .or(`name.eq."${currentUserName}",full_name.eq."${currentUserName}"`);
   };
 
   const handleSendTest = async () => {
     setIsSendingTest(true);
-    setTestStatus('');
-
-    // Routes to the production gilt deployment where your keys are already configured
-    const dispatchEndpoint = 'https://tasky-app-gilt.vercel.app/api/dispatch';
-
     try {
-      const response = await fetch(dispatchEndpoint, {
+      const activeSlackId = slackMemberId;
+      if (!activeSlackId) {
+        alert('Please make sure your Slack Member ID is saved in your Supabase profile first.');
+        setIsSendingTest(false);
+        return;
+      }
+
+      const res = await fetch('/api/dispatch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          targetMember: dispatchMember || currentUserName,
-          slackUserId: currentProfile?.slack_user_id || 'U_DEV_TEST',
-          deliveryTime: dispatchTime,
-          highPriorityOnly: highPriorityOnly,
-          testDate: formatDateKey ? formatDateKey(currentDate) : new Date().toISOString().split('T')[0],
-          supabaseKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-          supabaseUrl: import.meta.env.VITE_SUPABASE_URL
+          slackMemberId: activeSlackId,
+          targetAssignee: targetAssignee || currentUserName,
+          onlyHighPriority: onlyHighPriority
         })
       });
 
-      const resData = await response.json();
-      if (!response.ok) {
-        throw new Error(resData.error || 'Failed to trigger dispatch');
+      const data = await res.json();
+      if (!res.ok) {
+        alert(`Error sending test: ${data.error || 'Check server logs'}`);
+      } else {
+        alert(`⚡ Test Dispatch sent to Slack for ${targetAssignee}! Check your Slack DMs.`);
       }
-
-      setTestStatus('✅ Test dispatch sent to Slack!');
-      setTimeout(() => setTestStatus(''), 4000);
     } catch (err) {
-      alert(`Error sending test: ${err.message}`);
+      alert(`Network error sending test: ${err.message}`);
     } finally {
       setIsSendingTest(false);
     }
   };
+
+  if (!isSettingsOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-end p-4 z-50" onMouseDown={() => setIsSettingsOpen(false)}>
@@ -149,7 +138,7 @@ export default function SettingsModal({
           <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
         </div>
 
-        {/* DEVICE PUSH ALERTS */}
+        {/* DEVICE PUSH ALERTS CARD */}
         <div className="bg-white p-4 rounded-lg border border-amber-300 flex justify-between items-center shadow-2xs">
           <div>
             <h4 className="font-bold text-xs uppercase tracking-wider text-amber-900">Device Push Alerts</h4>
@@ -162,74 +151,70 @@ export default function SettingsModal({
           </button>
         </div>
 
-        {/* SLACK MORNING DISPATCH CARD */}
-        <div className="bg-white p-4 rounded-lg border border-emerald-300 flex flex-col gap-3 shadow-2xs">
-          <div className="flex justify-between items-center">
+        {/* SLACK MORNING DISPATCH MODULE */}
+        <div className="bg-white p-4 rounded-lg border border-emerald-400 flex flex-col gap-3 shadow-2xs">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-base">☀️</span>
-              <div>
-                <h4 className="font-bold text-xs uppercase tracking-wider text-gray-800">Slack Morning Dispatch</h4>
-                <p className="text-[10px] text-gray-500">Receive an automated morning breakdown of your tasks directly in Slack.</p>
-              </div>
+              <h4 className="font-bold text-xs uppercase tracking-wider text-emerald-950">Slack Morning Dispatch</h4>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input 
                 type="checkbox" 
                 checked={dispatchEnabled} 
-                onChange={(e) => handleToggleDispatch(e.target.checked)} 
+                onChange={(e) => handleSaveDispatchSettings(e.target.checked, deliveryTime, targetAssignee, onlyHighPriority)}
                 className="sr-only peer" 
               />
               <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
             </label>
           </div>
+          <p className="text-[11px] text-gray-500">
+            Receive an automated morning breakdown of your tasks directly in Slack.
+          </p>
 
-          <div className="flex justify-between items-center pt-2 border-t border-gray-100">
-            <span className="text-xs font-bold text-gray-700">Delivery Time:</span>
-            <select 
-              value={dispatchTime} 
-              onChange={(e) => handleTimeChange(e.target.value)} 
-              className="text-xs border border-gray-300 rounded p-1 font-bold bg-white focus:outline-none">
-              <option value="06:00 AM">06:00 AM</option>
-              <option value="07:00 AM">07:00 AM</option>
-              <option value="08:00 AM">08:00 AM</option>
-              <option value="09:00 AM">09:00 AM</option>
-              <option value="10:00 AM">10:00 AM</option>
-            </select>
-          </div>
+          <div className="flex flex-col gap-2.5 pt-1 border-t border-gray-100">
+            <div className="flex items-center justify-between text-xs font-bold text-gray-700">
+              <span>Delivery Time:</span>
+              <select 
+                value={deliveryTime}
+                onChange={(e) => handleSaveDispatchSettings(dispatchEnabled, e.target.value, targetAssignee, onlyHighPriority)}
+                className="p-1.5 border border-gray-300 rounded bg-white text-xs font-semibold focus:outline-none">
+                <option value="06:00 AM">06:00 AM</option>
+                <option value="07:00 AM">07:00 AM</option>
+                <option value="08:00 AM">08:00 AM</option>
+                <option value="09:00 AM">09:00 AM</option>
+                <option value="10:00 AM">10:00 AM</option>
+              </select>
+            </div>
 
-          <div className="flex justify-between items-center pt-2 border-t border-gray-100">
-            <span className="text-xs font-bold text-gray-700">Include tasks for:</span>
-            <select 
-              value={dispatchMember} 
-              onChange={(e) => handleMemberChange(e.target.value)} 
-              className="text-xs border border-gray-300 rounded p-1 font-bold bg-white focus:outline-none">
-              {teamMembers.map(m => (
-                <option key={m.id} value={m.name}>{m.name}</option>
-              ))}
-            </select>
-          </div>
+            <div className="flex items-center justify-between text-xs font-bold text-gray-700">
+              <span>Include tasks for:</span>
+              <select 
+                value={targetAssignee}
+                onChange={(e) => handleSaveDispatchSettings(dispatchEnabled, deliveryTime, e.target.value, onlyHighPriority)}
+                className="p-1.5 border border-gray-300 rounded bg-white text-xs font-semibold focus:outline-none">
+                {teamMembers.map(m => (
+                  <option key={m.id} value={m.name}>{m.name}</option>
+                ))}
+              </select>
+            </div>
 
-          <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
-            <input 
-              type="checkbox" 
-              id="highPriorityOnlyCheck"
-              checked={highPriorityOnly} 
-              onChange={(e) => handleHighPriorityToggle(e.target.checked)} 
-              className="accent-emerald-600 rounded" 
-            />
-            <label htmlFor="highPriorityOnlyCheck" className="text-xs text-gray-700 cursor-pointer">
+            <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer pt-1">
+              <input 
+                type="checkbox" 
+                checked={onlyHighPriority} 
+                onChange={(e) => handleSaveDispatchSettings(dispatchEnabled, deliveryTime, targetAssignee, e.target.checked)}
+                className="accent-emerald-600" 
+              />
               Only include High Priority tasks
             </label>
-          </div>
 
-          <div className="pt-2">
             <button 
-              onClick={handleSendTest} 
+              onClick={handleSendTest}
               disabled={isSendingTest}
-              className="w-full bg-emerald-50 text-emerald-800 border border-emerald-300 py-1.5 px-3 rounded text-xs font-bold hover:bg-emerald-100 transition shadow-2xs flex items-center justify-center gap-1.5 disabled:opacity-50">
-              ⚡ {isSendingTest ? 'Sending...' : 'Send Test to My Slack'}
+              className="mt-1 w-full bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100 transition rounded-md py-2 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs disabled:opacity-50">
+              {isSendingTest ? '⚡ Sending...' : '⚡ Send Test to My Slack'}
             </button>
-            {testStatus && <p className="text-[10px] text-center font-bold text-emerald-700 mt-1">{testStatus}</p>}
           </div>
         </div>
 
@@ -239,7 +224,7 @@ export default function SettingsModal({
             {/* DASHBOARD VISIBILITY MODULE */}
             <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3 shadow-2xs">
               <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Dashboard Visibility (This Device)</h4>
-              <p className="text-[10px] text-gray-500">Uncheck items below to hide them from your personal dashboard filters and calendar views.</p>
+              <p className="text-[10px] text-gray-500">Uncheck items below to completely hide them from your personal dashboard filters and calendar views.</p>
               
               <div className="flex gap-6 mt-1">
                 <div className="w-1/2 flex flex-col gap-2">
@@ -298,7 +283,6 @@ export default function SettingsModal({
                       <div>
                         <span className="font-bold text-xs text-gray-800 block">{member.name} ({member.role.toUpperCase()})</span>
                         <span className="text-[10px] text-gray-500">{member.email}</span>
-                        {member.slack_user_id && <span className="text-[9px] text-blue-600 block">Slack ID: {member.slack_user_id}</span>}
                       </div>
                     </div>
                     <button 
@@ -311,7 +295,7 @@ export default function SettingsModal({
               </div>
             </div>
 
-            {/* CREATE / EDIT TEAM MEMBER FORM */}
+            {/* MEMBER EDIT / CREATE FORM */}
             <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3">
               <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">
                 {editingMemberId ? 'Edit Team Member Profile' : 'Create New Team Member'}
@@ -335,17 +319,6 @@ export default function SettingsModal({
                   onChange={(e) => setMemberEmail(e.target.value)} 
                   placeholder="jordan@company.com" 
                   className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none" />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">Slack Member ID (Optional)</label>
-                <input 
-                  type="text" 
-                  value={memberSlackId || ''} 
-                  onChange={(e) => setMemberSlackId(e.target.value)} 
-                  placeholder="e.g. U0123456789" 
-                  className="w-full p-2 text-xs border border-gray-300 rounded focus:outline-none font-mono" />
-                <span className="text-[9px] text-gray-400">Found in Slack Profile → Three Dots → Copy Member ID</span>
               </div>
 
               <div>
