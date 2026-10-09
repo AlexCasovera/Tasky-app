@@ -1,3 +1,4 @@
+// src/components/SettingsModal.tsx
 // @ts-nocheck
 import React, { useState, useEffect } from 'react';
 import { enableNativePush } from '../utils';
@@ -101,8 +102,11 @@ export default function SettingsModal({
     setIsSendingTest(true);
     setTestStatus('');
 
+    // Routes to the production gilt deployment where your keys are already configured
+    const dispatchEndpoint = 'https://tasky-app-gilt.vercel.app/api/dispatch';
+
     try {
-      const response = await fetch('/api/dispatch', {
+      const response = await fetch(dispatchEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -110,7 +114,9 @@ export default function SettingsModal({
           slackUserId: currentProfile?.slack_user_id || 'U_DEV_TEST',
           deliveryTime: dispatchTime,
           highPriorityOnly: highPriorityOnly,
-          testDate: formatDateKey ? formatDateKey(currentDate) : new Date().toISOString().split('T')[0]
+          testDate: formatDateKey ? formatDateKey(currentDate) : new Date().toISOString().split('T')[0],
+          supabaseKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+          supabaseUrl: import.meta.env.VITE_SUPABASE_URL
         })
       });
 

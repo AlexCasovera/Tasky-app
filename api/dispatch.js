@@ -1,3 +1,4 @@
+// api/dispatch.js
 import { createClient } from '@supabase/supabase-js';
 
 const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -78,8 +79,18 @@ function isTaskOverdue(task, todayStr) {
 }
 
 export default async function handler(req, res) {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://pjnuhzdzvxojudkfnofh.supabase.co';
-  const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  const body = req.body || {};
+
+  const supabaseUrl = body.supabaseUrl || process.env.VITE_SUPABASE_URL || 'https://pjnuhzdzvxojudkfnofh.supabase.co';
+  const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.VITE_SUPABASE_ANON_KEY || body.supabaseKey;
   const slackBotToken = process.env.SLACK_BOT_TOKEN;
 
   if (!supabaseKey) {
@@ -94,7 +105,6 @@ export default async function handler(req, res) {
 
   try {
     const isManualTest = req.method === 'POST';
-    const body = req.body || {};
 
     let recipients = [];
 
@@ -160,27 +170,6 @@ export default async function handler(req, res) {
       });
 
       const firstName = recipient.target_member.split(' ')[0] || 'Team';
-
-      let textSummary = `☀️ Good Morning, ${firstName}!\n📅 Daily Dispatch for ${formattedDateString}\n\n`;
-
-      if (overdue.length > 0) {
-        textSummary += `🚨 *PAST DUE (${overdue.length} Action Required):*\n`;
-        overdue.forEach(t => {
-          const taskDate = t.date || t.date_scheduled || 'Past Due';
-          textSummary += `• [Due: ${taskDate}] *${t.title}* • [${t.company || 'Internal'}]\n`;
-        });
-        textSummary += `\n`;
-      }
-
-      if (todaysTasks.length > 0) {
-        textSummary += `📋 *Today's Agenda (${todaysTasks.length} task${todaysTasks.length === 1 ? '' : 's'}):*\n`;
-        todaysTasks.forEach(t => {
-          const timeLabel = t.time_label || 'All-Day';
-          textSummary += `• ${timeLabel} — *${t.title}* • [${t.company || 'Internal'}]\n`;
-        });
-      } else {
-        textSummary += `🎉 *No tasks scheduled for today!* Enjoy your day.\n`;
-      }
 
       const slackResponse = await fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',
