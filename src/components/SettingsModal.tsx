@@ -108,6 +108,20 @@ export default function SettingsModal({
             </select>
           </div>
 
+          {/* DUAL PROFILE ASSIGNEE SELECTOR DROPDOWN */}
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold text-gray-700">Include tasks for:</span>
+            <select 
+              value={briefingPrefs.target_assignee || 'auto'} 
+              onChange={(e) => handleSaveBriefingPrefs({ ...briefingPrefs, target_assignee: e.target.value })}
+              className="p-1.5 border border-gray-300 rounded bg-white text-xs font-bold text-gray-800 focus:outline-none max-w-[190px] truncate">
+              <option value="auto">Auto (Both Worker & Admin)</option>
+              {teamMembers.map(m => (
+                <option key={m.id} value={m.name}>{m.name}</option>
+              ))}
+            </select>
+          </div>
+
           <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
             <input 
               type="checkbox" 
