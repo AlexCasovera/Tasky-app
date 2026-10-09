@@ -48,28 +48,55 @@ export default function SettingsModal({
   const [onlyHighPriority, setOnlyHighPriority] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [slackMemberId, setSlackMemberId] = useState('');
+  const [isSavingSlackId, setIsSavingSlackId] = useState(false);
+  const [memberSlackId, setMemberSlackId] = useState('');
 
+  // 1. Load target assignee's dispatch settings and Slack ID whenever targetAssignee or modal opens
   useEffect(() => {
-    async function loadSlackSettings() {
-      if (!currentUserName) return;
+    async function loadTargetAssigneeSlack() {
+      if (!targetAssignee) return;
+
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
-        .or(`name.eq."${currentUserName}",full_name.eq."${currentUserName}"`)
-        .single();
+        .or(`name.eq."${targetAssignee}",full_name.eq."${targetAssignee}"`)
+        .limit(1);
 
-      if (data && !error) {
-        if (data.slack_member_id) setSlackMemberId(data.slack_member_id);
-        if (data.dispatch_enabled !== undefined) setDispatchEnabled(data.dispatch_enabled);
-        if (data.dispatch_time) setDeliveryTime(data.dispatch_time);
-        if (data.dispatch_target_assignee) setTargetAssignee(data.dispatch_target_assignee);
-        if (data.dispatch_high_priority_only !== undefined) setOnlyHighPriority(data.dispatch_high_priority_only);
+      if (data && data.length > 0 && !error) {
+        const prof = data[0];
+        setSlackMemberId(prof.slack_member_id || '');
+        if (prof.dispatch_enabled !== undefined) setDispatchEnabled(prof.dispatch_enabled);
+        if (prof.dispatch_time) setDeliveryTime(prof.dispatch_time);
+        if (prof.dispatch_high_priority_only !== undefined) setOnlyHighPriority(prof.dispatch_high_priority_only);
+      } else {
+        setSlackMemberId('');
       }
     }
+
     if (isSettingsOpen) {
-      loadSlackSettings();
+      loadTargetAssigneeSlack();
     }
-  }, [isSettingsOpen, currentUserName]);
+  }, [isSettingsOpen, targetAssignee]);
+
+  // 2. Load memberSlackId when editing a specific team member
+  useEffect(() => {
+    async function loadEditingMemberSlack() {
+      if (!editingMemberId) {
+        setMemberSlackId('');
+        return;
+      }
+      const { data } = await supabase
+        .from('profiles')
+        .select('slack_member_id')
+        .eq('id', editingMemberId)
+        .single();
+
+      if (data) {
+        setMemberSlackId(data.slack_member_id || '');
+      }
+    }
+    loadEditingMemberSlack();
+  }, [editingMemberId]);
 
   const handleSaveDispatchSettings = async (newEnabled, newTime, newTarget, newHighPriority) => {
     setDispatchEnabled(newEnabled);
@@ -85,15 +112,47 @@ export default function SettingsModal({
         dispatch_target_assignee: newTarget,
         dispatch_high_priority_only: newHighPriority
       })
-      .or(`name.eq."${currentUserName}",full_name.eq."${currentUserName}"`);
+      .or(`name.eq."${newTarget}",full_name.eq."${newTarget}"`);
+  };
+
+  const handleSaveSlackIdDirectly = async () => {
+    if (!targetAssignee) return;
+    setIsSavingSlackId(true);
+    try {
+      const cleanId = slackMemberId.trim();
+      const { error } = await supabase
+        .from('profiles')
+        .update({ slack_member_id: cleanId })
+        .or(`name.eq."${targetAssignee}",full_name.eq."${targetAssignee}"`);
+
+      if (error) {
+        alert(`Error saving Slack ID: ${error.message}`);
+      } else {
+        alert(`✓ Slack Member ID saved for ${targetAssignee}!`);
+      }
+    } catch (err) {
+      alert(`Error: ${err.message}`);
+    } finally {
+      setIsSavingSlackId(false);
+    }
+  };
+
+  const handleSaveMemberWithSlack = async () => {
+    await handleSaveMember();
+    if (editingMemberId) {
+      await supabase
+        .from('profiles')
+        .update({ slack_member_id: memberSlackId.trim() })
+        .eq('id', editingMemberId);
+    }
   };
 
   const handleSendTest = async () => {
     setIsSendingTest(true);
     try {
-      const activeSlackId = slackMemberId;
+      const activeSlackId = slackMemberId.trim();
       if (!activeSlackId) {
-        alert('Please make sure your Slack Member ID is saved in your Supabase profile first.');
+        alert(`Please enter a Slack Member ID (e.g. U08...) for ${targetAssignee} above and click "Save ID".`);
         setIsSendingTest(false);
         return;
       }
@@ -197,6 +256,33 @@ export default function SettingsModal({
                   <option key={m.id} value={m.name}>{m.name}</option>
                 ))}
               </select>
+            </div>
+
+            {/* DIRECT SLACK ID INPUT FOR SELECTED USER */}
+            <div className="flex flex-col gap-1 bg-gray-50 p-2 rounded border border-gray-200">
+              <div className="flex justify-between items-center text-[10px] font-bold text-gray-600">
+                <span>Slack Member ID ({targetAssignee}):</span>
+                {slackMemberId ? (
+                  <span className="text-emerald-700 font-mono">✓ ID Connected</span>
+                ) : (
+                  <span className="text-amber-700">⚠️ No ID linked</span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  value={slackMemberId} 
+                  onChange={(e) => setSlackMemberId(e.target.value)} 
+                  placeholder="e.g. U0812345678" 
+                  className="flex-1 p-1.5 text-xs font-mono border border-gray-300 rounded bg-white focus:outline-none"
+                />
+                <button 
+                  onClick={handleSaveSlackIdDirectly}
+                  disabled={isSavingSlackId}
+                  className="bg-gray-800 text-white text-[10px] font-bold px-2.5 py-1 rounded hover:bg-black transition shrink-0 disabled:opacity-50">
+                  {isSavingSlackId ? 'Saving...' : 'Save ID'}
+                </button>
+              </div>
             </div>
 
             <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer pt-1">
@@ -322,6 +408,16 @@ export default function SettingsModal({
               </div>
 
               <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Slack Member ID</label>
+                <input 
+                  type="text" 
+                  value={memberSlackId} 
+                  onChange={(e) => setMemberSlackId(e.target.value)} 
+                  placeholder="e.g. U08XXXXXX" 
+                  className="w-full p-2 text-xs font-mono border border-gray-300 rounded focus:outline-none" />
+              </div>
+
+              <div>
                 <label className="block text-xs font-bold text-gray-700 mb-1">Password</label>
                 <div className="relative flex items-center">
                   <input 
@@ -379,7 +475,7 @@ export default function SettingsModal({
                     Cancel
                   </button>
                   <button 
-                    onClick={handleSaveMember}
+                    onClick={handleSaveMemberWithSlack}
                     className="bg-[#333333] text-white px-4 py-1.5 rounded text-xs font-bold hover:bg-black transition">
                     {editingMemberId ? 'Update Profile' : 'Add Member'}
                   </button>
