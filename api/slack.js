@@ -22,15 +22,16 @@ export default async function handler(req, res) {
     // =========================================================================
     if (payload.type === 'message_action' && payload.callback_id === 'send_to_tasky') {
       
-      // 1. Check if the clicking user's Slack ID is linked to an Admin in Tasky
-      const { data: callerProfile } = await supabase
+      // Check if ANY profile tied to this Slack ID is an Admin
+      const { data: callerProfiles } = await supabase
         .from('profiles')
         .select('id, name, role')
-        .eq('slack_user_id', payload.user.id)
-        .single();
+        .eq('slack_user_id', payload.user.id);
 
-      // 2. If NOT linked or NOT an admin, show a clean "Restricted" modal
-      if (!callerProfile || callerProfile.role !== 'admin') {
+      const isAdmin = callerProfiles && callerProfiles.some(p => p.role === 'admin');
+
+      // If NOT an admin, show a clean "Restricted" modal
+      if (!isAdmin) {
         await fetch('https://slack.com/api/views.open', {
           method: 'POST',
           headers: {
@@ -58,7 +59,7 @@ export default async function handler(req, res) {
         return res.status(200).end();
       }
 
-      // 3. User is an approved Admin: prepare the form
+      // User is an approved Admin: prepare the form
       const rawMessageText = payload.message.text || '';
       const defaultTitle = rawMessageText.length > 100 ? rawMessageText.substring(0, 100) + '...' : rawMessageText;
       const today = new Date().toISOString().split('T')[0];
@@ -161,14 +162,13 @@ export default async function handler(req, res) {
     // =========================================================================
     if (payload.type === 'view_submission' && payload.view.callback_id === 'tasky_modal_submit') {
       
-      // Security check: ensure submitting user is still an admin
-      const { data: submitterProfile } = await supabase
+      const { data: submitterProfiles } = await supabase
         .from('profiles')
         .select('role')
-        .eq('slack_user_id', payload.user.id)
-        .single();
+        .eq('slack_user_id', payload.user.id);
 
-      if (!submitterProfile || submitterProfile.role !== 'admin') {
+      const isSubmitterAdmin = submitterProfiles && submitterProfiles.some(p => p.role === 'admin');
+      if (!isSubmitterAdmin) {
         return res.status(403).end();
       }
 
@@ -180,7 +180,6 @@ export default async function handler(req, res) {
       const date = values.date_block.date_input.selected_date;
       const taskId = Date.now().toString();
 
-      // Insert Task into Supabase using exact schema column names
       const { error: taskError } = await supabase.from('tasks').insert({
         id: taskId,
         title: title,
@@ -203,7 +202,6 @@ export default async function handler(req, res) {
         return res.status(500).end();
       }
 
-      // Insert Notification Center Entry
       await supabase.from('notifications').insert({
         text: `New Task: "${title}" (via Slack)`,
         type: 'new_task',
@@ -214,7 +212,6 @@ export default async function handler(req, res) {
         read: false
       });
 
-      // Ping Mobile Device
       const { data: profile } = await supabase
         .from('profiles')
         .select('push_subscription')
