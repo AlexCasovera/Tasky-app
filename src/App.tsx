@@ -75,13 +75,6 @@ export default function App() {
   const [companies, setCompanies] = useState([]);
   const [activeCompanyFilters, setActiveCompanyFilters] = useState([]);
 
-  // --- BRIEFING PREFERENCES STATE ---
-  const [briefingPrefs, setBriefingPrefs] = useState({
-    enabled: false,
-    time: '08:00',
-    high_priority_only: false
-  });
-
   useEffect(() => {
     async function loadData() {
       const { data: companyData, error: compErr } = await supabase.from('companies').select('*');
@@ -100,7 +93,11 @@ export default function App() {
           email: p.email,
           role: p.role || 'employee',
           color: p.color || '#2A9D8F',
-          slackUserId: p.slack_user_id || ''
+          slack_user_id: p.slack_user_id || null,
+          slack_dispatch_enabled: p.slack_dispatch_enabled || false,
+          slack_dispatch_time: p.slack_dispatch_time || '08:00 AM',
+          slack_dispatch_member: p.slack_dispatch_member || null,
+          slack_dispatch_high_priority_only: p.slack_dispatch_high_priority_only || false
         }));
         setTeamMembers(mappedMembers);
         if (activeEmployeeFilters.length === 0) setActiveEmployeeFilters(mappedMembers.map(m => m.name));
@@ -122,12 +119,12 @@ export default function App() {
             email: myProfile.email,
             role: myProfile.role || 'employee',
             color: myProfile.color || '#2A9D8F',
-            slackUserId: myProfile.slack_user_id || ''
+            slack_user_id: myProfile.slack_user_id || null,
+            slack_dispatch_enabled: myProfile.slack_dispatch_enabled || false,
+            slack_dispatch_time: myProfile.slack_dispatch_time || '08:00 AM',
+            slack_dispatch_member: myProfile.slack_dispatch_member || null,
+            slack_dispatch_high_priority_only: myProfile.slack_dispatch_high_priority_only || false
           });
-
-          if (myProfile.slack_briefing_prefs) {
-            setBriefingPrefs(myProfile.slack_briefing_prefs);
-          }
         }
       }
     }
@@ -137,35 +134,6 @@ export default function App() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-  };
-
-  const handleSaveBriefingPrefs = async (newPrefs) => {
-    setBriefingPrefs(newPrefs);
-    if (currentProfile?.id) {
-      await supabase.from('profiles').update({ slack_briefing_prefs: newPrefs }).eq('id', currentProfile.id);
-    }
-  };
-
-  // Explicitly routes to tasky-app-gilt where all 6 environment variables are configured
-  const handleTestBriefing = async () => {
-    if (!currentProfile?.slackUserId) {
-      return alert("Please ensure a Slack Member ID is set on your profile first!");
-    }
-    try {
-      const res = await fetch('https://tasky-app-gilt.vercel.app/api/dispatch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ testUserId: currentProfile.id })
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert("☀️ Test morning briefing sent to your Slack!");
-      } else {
-        alert("Error sending test: " + (data.error || "Check server logs"));
-      }
-    } catch (err) {
-      alert("Network Error: " + err.message);
-    }
   };
 
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -189,7 +157,6 @@ export default function App() {
 
   const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
 
-  // Fetch notifications
   useEffect(() => {
     if (!currentUserName) return;
 
@@ -258,10 +225,10 @@ export default function App() {
   const [editingCompanyInput, setEditingCompanyInput] = useState('');
   const [memberName, setMemberName] = useState('');
   const [memberEmail, setMemberEmail] = useState('');
-  const [memberSlackId, setMemberSlackId] = useState('');
   const [memberPassword, setMemberPassword] = useState('');
   const [memberRole, setMemberRole] = useState('employee');
   const [memberColor, setMemberColor] = useState('#2A9D8F');
+  const [memberSlackId, setMemberSlackId] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
   const [selectedTask, setSelectedTask] = useState(null);
@@ -485,7 +452,7 @@ export default function App() {
         );
 
         const { error } = await supabase.from('tasks').update({ is_overdue: true, overdue_notified: true }).eq('id', task.id);
-        if (error) console.error("Could not save overdue state to DB (Likely RLS blocking):", error);
+        if (error) console.error("Could not save overdue state to DB:", error);
       });
 
       localStorage.setItem('localNotifiedTasks', JSON.stringify([...localNotified, ...newlyNotifiedIds]));
@@ -784,7 +751,6 @@ export default function App() {
     let dbPayloads = [];
     
     const moveNote = `📅 Rescheduled to ${targetDate} by ${currentUserName} [${getCurrentTimestamp()}]`;
-
     const taskToMove = tasks.find(t => t.id === taskId);
     if (taskToMove) {
       const notifyUsers = targetMemberName ? [targetMemberName] : (taskToMove.assignees || []);
@@ -964,10 +930,10 @@ export default function App() {
   const resetMemberForm = () => {
     setMemberName('');
     setMemberEmail('');
-    setMemberSlackId('');
     setMemberPassword('');
     setMemberRole('employee');
     setMemberColor('#2A9D8F');
+    setMemberSlackId('');
     setEditingMemberId(null);
     setShowPassword(false);
   };
@@ -976,10 +942,10 @@ export default function App() {
     setEditingMemberId(member.id);
     setMemberName(member.name);
     setMemberEmail(member.email);
-    setMemberSlackId(member.slackUserId || '');
-    setMemberPassword(member.password);
+    setMemberPassword(member.password || '');
     setMemberRole(member.role);
     setMemberColor(member.color || '#2A9D8F');
+    setMemberSlackId(member.slack_user_id || '');
   };
 
   const handleSaveMember = async () => {
@@ -1025,7 +991,11 @@ export default function App() {
         email: p.email,
         role: p.role || 'employee',
         color: p.color || '#2A9D8F',
-        slackUserId: p.slack_user_id || ''
+        slack_user_id: p.slack_user_id || null,
+        slack_dispatch_enabled: p.slack_dispatch_enabled || false,
+        slack_dispatch_time: p.slack_dispatch_time || '08:00 AM',
+        slack_dispatch_member: p.slack_dispatch_member || null,
+        slack_dispatch_high_priority_only: p.slack_dispatch_high_priority_only || false
       })));
     }
 
@@ -1089,7 +1059,7 @@ export default function App() {
     const { error } = await supabase.from('companies').insert({ id: newId, name: newName });
     
     if (error) {
-      alert(`Database Error: ${error.message}\nPlease make sure your "companies" table has RLS disabled or a valid Insert policy.`);
+      alert(`Database Error: ${error.message}`);
       setCompanies(prev => prev.filter(c => c !== newName));
       setActiveCompanyFilters(prev => prev.filter(c => c !== newName));
     }
@@ -1864,7 +1834,6 @@ export default function App() {
       );
       
       const hasPermission = userRole === 'admin' || (t.assignees && t.assignees.includes(currentUserName));
-      
       return matchesSearch && hasPermission;
     }).map(t => ({
       ...t,
@@ -1915,7 +1884,7 @@ export default function App() {
     <div className="min-h-screen bg-[#A9B1A6] p-4 sm:p-8 font-sans text-[#333333]">
       <div className="max-w-[95%] mx-auto bg-[#F4F3ED] p-6 rounded-lg shadow-sm min-h-[850px] flex flex-col relative">
         
-        {/* TOP NAVIGATION & CONTROLS HEADER */}
+        {/* HEADER */}
         <Header 
           currentProfile={currentProfile} session={session} userRole={userRole} 
           searchRef={searchRef} searchQuery={searchQuery} isSearchFocused={isSearchFocused} 
@@ -1933,7 +1902,7 @@ export default function App() {
           setIsSettingsOpen={setIsSettingsOpen} handleOpenCreateView={handleOpenCreateView} 
         />
 
-        {/* TEAM MEMBER & COMPANY FILTER BAR */}
+        {/* FILTER BAR */}
         <FilterBar 
           currentView={currentView}
           masterCompanyList={masterCompanyList}
@@ -1949,7 +1918,7 @@ export default function App() {
           setActiveEmployeeFilters={setActiveEmployeeFilters}
         />
 
-        {/* CONDITIONAL DASHBOARD TRAYS */}
+        {/* DASHBOARD TRAYS */}
         <DashboardTrays 
           userRole={userRole}
           currentView={currentView}
@@ -2105,7 +2074,7 @@ export default function App() {
           />
         )}
 
-        {/* TASK INSPECTOR & FULL EDITING MODAL */}
+        {/* TASK INSPECTOR MODAL */}
         <TaskInspectorModal 
           selectedTask={selectedTask} setSelectedTask={setSelectedTask} selectedInstanceDate={selectedInstanceDate}
           isCurrentInstanceCompleted={isCurrentInstanceCompleted} userRole={userRole} currentUserName={currentUserName}
@@ -2130,7 +2099,7 @@ export default function App() {
           getCurrentTimestamp={getCurrentTimestamp} tasks={tasks} setTasks={setTasks} dispatchNotification={dispatchNotification} renderComment={renderComment}
         />
 
-        {/* SUB-TASK COMPLETION PROMPT MODAL */}
+        {/* COMPLETION MODAL */}
         <CompletionModal 
           completionPrompt={completionPrompt}
           setCompletionPrompt={setCompletionPrompt}
@@ -2139,19 +2108,21 @@ export default function App() {
           teamMembers={teamMembers}
         />
 
-        {/* RECURRING TASK RESCHEDULE SCOPE PROMPT MODAL */}
+        {/* RESCHEDULE MODAL */}
         <RescheduleModal 
           reschedulePrompt={reschedulePrompt}
           setReschedulePrompt={setReschedulePrompt}
           applyTaskMove={applyTaskMove}
         />
 
-        {/* SETTINGS & GOVERNANCE MODAL */}
+        {/* SETTINGS MODAL */}
         <SettingsModal 
           isSettingsOpen={isSettingsOpen}
           setIsSettingsOpen={setIsSettingsOpen}
           userRole={userRole}
           currentUserName={currentUserName}
+          currentProfile={currentProfile}
+          setCurrentProfile={setCurrentProfile}
           hiddenCompanies={hiddenCompanies}
           setHiddenCompanies={setHiddenCompanies}
           masterCompanyList={masterCompanyList}
@@ -2165,8 +2136,6 @@ export default function App() {
           setMemberName={setMemberName}
           memberEmail={memberEmail}
           setMemberEmail={setMemberEmail}
-          memberSlackId={memberSlackId}
-          setMemberSlackId={setMemberSlackId}
           memberPassword={memberPassword}
           setMemberPassword={setMemberPassword}
           showPassword={showPassword}
@@ -2175,6 +2144,8 @@ export default function App() {
           setMemberRole={setMemberRole}
           memberColor={memberColor}
           setMemberColor={setMemberColor}
+          memberSlackId={memberSlackId}
+          setMemberSlackId={setMemberSlackId}
           handleDeleteMember={handleDeleteMember}
           handleSaveMember={handleSaveMember}
           newCompanyInput={newCompanyInput}
@@ -2186,9 +2157,8 @@ export default function App() {
           handleRenameCompany={handleRenameCompany}
           setEditingCompany={setEditingCompany}
           handleDeleteCompany={handleDeleteCompany}
-          briefingPrefs={briefingPrefs}
-          handleSaveBriefingPrefs={handleSaveBriefingPrefs}
-          handleTestBriefing={handleTestBriefing}
+          currentDate={currentDate}
+          formatDateKey={formatDateKey}
         />
 
       </div>

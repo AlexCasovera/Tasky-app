@@ -1,185 +1,255 @@
 import { createClient } from '@supabase/supabase-js';
 
+const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function isTaskActiveOnDay(task, dayOfWeekStr, dateStr) {
+  if (!task) return false;
+  if (task.status === 'completed') return false;
+  if (task.completed_dates && task.completed_dates.includes(dateStr)) return false;
+  if (task.exception_dates && task.exception_dates.includes(dateStr)) return false;
+  if (task.end_date && dateStr > task.end_date) return false;
+
+  if (task.recurrence_type === 'fixed') {
+    const startDate = task.date || task.date_scheduled;
+    if (startDate && dateStr < startDate) return false;
+    if (!task.active_days || !task.active_days.includes(dayOfWeekStr)) return false;
+
+    const intervalWeeks = Math.max(1, Math.round((task.cadence_days || 7) / 7));
+    if (intervalWeeks > 1 && startDate) {
+      const parseDate = (ds) => {
+        const [y, m, d] = ds.split('-').map(Number);
+        return new Date(y, m - 1, d);
+      };
+      const sDate = parseDate(startDate);
+      const cDate = parseDate(dateStr);
+
+      const sSunday = new Date(sDate);
+      sSunday.setDate(sDate.getDate() - sDate.getDay());
+
+      const cSunday = new Date(cDate);
+      cSunday.setDate(cDate.getDate() - cDate.getDay());
+
+      const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+      const weeksDiff = Math.round((cSunday.getTime() - sSunday.getTime()) / msPerWeek);
+
+      if (weeksDiff % intervalWeeks !== 0) return false;
+    }
+    return true;
+  }
+
+  const taskDate = task.date || task.date_scheduled;
+  return taskDate === dateStr;
+}
+
+function isTaskOverdue(task, todayStr) {
+  if (!task) return false;
+  if (task.status === 'completed') return false;
+  const taskDate = task.date || task.date_scheduled;
+  if (!taskDate || taskDate.trim() === '') return false;
+
+  if (task.recurrence_type === 'once' || task.recurrence_type === 'completion') {
+    if (taskDate < todayStr) {
+      if (task.completed_dates && task.completed_dates.includes(taskDate)) return false;
+      return true;
+    }
+    return false;
+  }
+
+  if (task.recurrence_type === 'fixed') {
+    const maxLookback = Math.max(7, task.cadence_days || 7);
+    for (let i = 1; i <= maxLookback; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const checkDateStr = `${y}-${m}-${day}`;
+      const dayOfWeekStr = daysOfWeek[d.getDay()];
+
+      if (isTaskActiveOnDay(task, dayOfWeekStr, checkDateStr)) {
+        if (task.completed_dates && task.completed_dates.includes(checkDateStr)) continue;
+        if (task.exception_dates && task.exception_dates.includes(checkDateStr)) continue;
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://pjnuhzdzvxojudkfnofh.supabase.co';
+  const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  const slackBotToken = process.env.SLACK_BOT_TOKEN;
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  if (!supabaseKey) {
+    return res.status(500).json({ error: 'Missing Supabase Key in Vercel environment variables (SUPABASE_SECRET_KEY or VITE_SUPABASE_ANON_KEY).' });
   }
 
-  if (req.method !== 'GET' && req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+  if (!slackBotToken) {
+    return res.status(500).json({ error: 'Missing SLACK_BOT_TOKEN in Vercel environment variables.' });
   }
+
+  const supabase = createClient(supabaseUrl, supabaseKey);
 
   try {
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://pjnuhzdzvxojudkfnofh.supabase.co';
-    
-    const supabaseKey = 
-      process.env.SUPABASE_SECRET_KEY || 
-      process.env.SUPABASE_SERVICE_ROLE_KEY || 
-      process.env.VITE_SUPABASE_ANON_KEY || 
-      process.env.SUPABASE_ANON_KEY;
-
-    if (!supabaseKey) {
-      return res.status(500).json({ 
-        error: 'Missing Supabase Key in Vercel environment variables.' 
-      });
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    const todayDate = new Date();
-    const todayStr = todayDate.toISOString().split('T')[0];
-    const formattedDate = todayDate.toLocaleDateString('en-US', {
-      weekday: 'long',
-      month: 'short',
-      day: 'numeric'
-    });
-
+    const isManualTest = req.method === 'POST';
     const body = req.body || {};
-    const testUserId = body.testUserId;
 
-    // 1. Fetch eligible profiles with a linked Slack ID
-    let profileQuery = supabase
-      .from('profiles')
-      .select('id, name, full_name, role, slack_user_id, slack_briefing_prefs')
-      .not('slack_user_id', 'is', null);
+    let recipients = [];
 
-    if (testUserId) {
-      profileQuery = profileQuery.eq('id', testUserId);
-    }
-
-    const { data: profiles, error: profileErr } = await profileQuery;
-    if (profileErr || !profiles) {
-      return res.status(500).json({ error: profileErr?.message || 'No profiles found' });
-    }
-
-    // 2. Fetch all active tasks scheduled for today
-    const { data: allTasks, error: taskErr } = await supabase
-      .from('tasks')
-      .select('*')
-      .neq('status', 'completed');
-
-    if (taskErr) {
-      return res.status(500).json({ error: taskErr.message });
-    }
-
-    let dispatchedCount = 0;
-
-    // 3. Process dispatch for each profile
-    for (const profile of profiles) {
-      const prefs = profile.slack_briefing_prefs || {};
-      
-      if (!testUserId && !prefs.enabled) {
-        continue;
+    if (isManualTest) {
+      const { targetMember, slackUserId, highPriorityOnly, testDate } = body;
+      if (!slackUserId) {
+        return res.status(400).json({ error: 'No Slack User ID found for your profile. Please add your Slack Member ID in Settings.' });
       }
 
-      const rawUserName = profile.name || profile.full_name || '';
-      const slackId = profile.slack_user_id;
-      if (!slackId) continue;
+      recipients.push({
+        slack_user_id: slackUserId,
+        target_member: targetMember || 'Alex M.',
+        high_priority_only: Boolean(highPriorityOnly),
+        test_date: testDate
+      });
+    } else {
+      const { data: profiles, error: profileErr } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('slack_dispatch_enabled', true)
+        .not('slack_user_id', 'is', null);
 
-      // Automatically construct name aliases:
-      // "Adrian R. (ADMIN)" -> matches both "Adrian R. (ADMIN)" AND "Adrian R."
-      const cleanName = rawUserName.replace(/\s*\((admin|master|worker|employee)\)/i, '').trim();
-      const targetNames = [rawUserName, cleanName];
-
-      // If user chose a specific assignee in settings, include that too
-      if (prefs.target_assignee && prefs.target_assignee !== 'auto') {
-        targetNames.push(prefs.target_assignee);
+      if (profileErr) throw profileErr;
+      if (!profiles || profiles.length === 0) {
+        return res.status(200).json({ message: 'No profiles configured for automatic Slack morning dispatch.' });
       }
 
-      // Filter tasks assigned to ANY of the user's aliases for today
-      let userTasks = (allTasks || []).filter(t => {
-        const assignees = t.assignees || [];
-        const isAssigned = assignees.some(a => targetNames.includes(a));
-        const isToday = t.date === todayStr || t.date_scheduled === todayStr;
-        return isAssigned && isToday;
+      recipients = profiles.map(p => ({
+        slack_user_id: p.slack_user_id,
+        target_member: p.slack_dispatch_member || p.name,
+        high_priority_only: Boolean(p.slack_dispatch_high_priority_only),
+        test_date: null
+      }));
+    }
+
+    const { data: allTasks, error: tasksErr } = await supabase.from('tasks').select('*');
+    if (tasksErr) throw tasksErr;
+
+    const results = [];
+
+    for (const recipient of recipients) {
+      const targetDateStr = recipient.test_date || new Date().toISOString().split('T')[0];
+      const targetDateObj = new Date(targetDateStr + 'T00:00:00');
+      const targetDayOfWeek = daysOfWeek[targetDateObj.getDay()];
+
+      const memberTasks = (allTasks || []).filter(t => {
+        if (!t.assignees || !Array.isArray(t.assignees)) return false;
+        return t.assignees.includes(recipient.target_member);
       });
 
-      if (prefs.high_priority_only) {
-        userTasks = userTasks.filter(t => t.priority === 'High');
+      let overdue = memberTasks.filter(t => isTaskOverdue(t, targetDateStr));
+      let todaysTasks = memberTasks.filter(t => isTaskActiveOnDay(t, targetDayOfWeek, targetDateStr));
+
+      if (recipient.high_priority_only) {
+        overdue = overdue.filter(t => t.priority === 'High');
+        todaysTasks = todaysTasks.filter(t => t.priority === 'High');
       }
 
-      userTasks.sort((a, b) => {
-        if (a.start_time && !b.start_time) return -1;
-        if (!a.start_time && b.start_time) return 1;
-        return (a.start_time || '').localeCompare(b.start_time || '');
+      const formattedDateString = targetDateObj.toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'short',
+        day: 'numeric'
       });
 
-      const blocks = [
-        {
-          type: 'header',
-          text: {
-            type: 'plain_text',
-            text: `☀️ Good Morning, ${cleanName.split(' ')[0]}!`,
-            emoji: true
-          }
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: `📅 *Daily Dispatch for ${formattedDate}*`
-            }
-          ]
-        },
-        { type: 'divider' }
-      ];
+      const firstName = recipient.target_member.split(' ')[0] || 'Team';
 
-      if (userTasks.length === 0) {
-        blocks.push({
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: '🎉 *You have no active tasks scheduled for today.* Enjoy your day!'
-          }
+      let textSummary = `☀️ Good Morning, ${firstName}!\n📅 Daily Dispatch for ${formattedDateString}\n\n`;
+
+      if (overdue.length > 0) {
+        textSummary += `🚨 *PAST DUE (${overdue.length} Action Required):*\n`;
+        overdue.forEach(t => {
+          const taskDate = t.date || t.date_scheduled || 'Past Due';
+          textSummary += `• [Due: ${taskDate}] *${t.title}* • [${t.company || 'Internal'}]\n`;
+        });
+        textSummary += `\n`;
+      }
+
+      if (todaysTasks.length > 0) {
+        textSummary += `📋 *Today's Agenda (${todaysTasks.length} task${todaysTasks.length === 1 ? '' : 's'}):*\n`;
+        todaysTasks.forEach(t => {
+          const timeLabel = t.time_label || 'All-Day';
+          textSummary += `• ${timeLabel} — *${t.title}* • [${t.company || 'Internal'}]\n`;
         });
       } else {
-        const taskLines = userTasks.map(t => {
-          const time = t.time_label || 'All-Day';
-          const priorityTag = t.priority === 'High' ? ' `🚨 HIGH`' : '';
-          const companyTag = t.company ? ` • _[${t.company}]_` : '';
-          return `• *${time}* — *${t.title}*${companyTag}${priorityTag}`;
-        });
-
-        blocks.push({
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: `Here is your agenda for today (*${userTasks.length} task${userTasks.length > 1 ? 's' : ''}*):\n\n${taskLines.join('\n')}`
-          }
-        });
+        textSummary += `🎉 *No tasks scheduled for today!* Enjoy your day.\n`;
       }
 
-      const slackRes = await fetch('https://slack.com/api/chat.postMessage', {
+      const slackResponse = await fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.SLACK_BOT_TOKEN}`
+          'Authorization': `Bearer ${slackBotToken}`
         },
         body: JSON.stringify({
-          channel: slackId,
-          text: `☀️ Good Morning, ${cleanName}! Here is your Tasky agenda for today.`,
-          blocks: blocks
+          channel: recipient.slack_user_id,
+          text: `Tasky Daily Dispatch for ${formattedDateString}`,
+          blocks: [
+            {
+              type: 'header',
+              text: {
+                type: 'plain_text',
+                text: `☀️ Good Morning, ${firstName}!`,
+                emoji: true
+              }
+            },
+            {
+              type: 'context',
+              elements: [
+                {
+                  type: 'mrkdwn',
+                  text: `📅 *Daily Dispatch for ${formattedDateString}*`
+                }
+              ]
+            },
+            {
+              type: 'divider'
+            },
+            ...(overdue.length > 0 ? [
+              {
+                type: 'section',
+                text: {
+                  type: 'mrkdwn',
+                  text: `🚨 *Past Due Tasks (${overdue.length} Action Required)*\n` +
+                    overdue.map(t => `• *${t.title}* • [${t.company || 'General'}] _(Due: ${t.date || t.date_scheduled})_`).join('\n')
+                }
+              },
+              {
+                type: 'divider'
+              }
+            ] : []),
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: todaysTasks.length > 0
+                  ? `Here is your agenda for today (*${todaysTasks.length} task${todaysTasks.length === 1 ? '' : 's'}*):\n` +
+                    todaysTasks.map(t => `• *${t.time_label || 'All-Day'}* — ${t.title} • [${t.company || 'General'}]`).join('\n')
+                  : `🎉 *No scheduled tasks for today!*`
+              }
+            }
+          ]
         })
       });
 
-      const slackJson = await slackRes.json();
-      if (slackJson.ok) {
-        dispatchedCount++;
-      } else {
-        console.error(`Failed to DM ${cleanName} (${slackId}):`, slackJson.error);
-        return res.status(500).json({ error: `Slack API error: ${slackJson.error}` });
+      const slackResult = await slackResponse.json();
+      if (!slackResult.ok) {
+        throw new Error(`Slack API error: ${slackResult.error || 'Failed to send message'}`);
       }
+
+      results.push({ user: recipient.target_member, status: 'sent', count: todaysTasks.length, overdue: overdue.length });
     }
 
-    return res.status(200).json({ success: true, dispatched: dispatchedCount });
-
-  } catch (error) {
-    console.error('Dispatch Handler Error:', error);
-    return res.status(500).json({ error: error.message });
+    return res.status(200).json({ success: true, results });
+  } catch (err) {
+    console.error('Dispatch execution error:', err);
+    return res.status(500).json({ error: err.message || 'Internal dispatch error' });
   }
 }
