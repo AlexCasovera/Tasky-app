@@ -59,10 +59,12 @@ export default function SettingsModal({
   const [dispatchStatusMessage, setDispatchStatusMessage] = useState('');
   const [isSavingSlackId, setIsSavingSlackId] = useState(false);
 
-  const activeMemberObj = teamMembers.find(m => m.name === selectedDispatchMember) || teamMembers.find(m => m.name === currentUserName) || teamMembers[0];
+  // DECOUPLED STATE: loggedInUserObj holds the Slack ID destination, targetMemberObj holds the task workload
+  const loggedInUserObj = teamMembers.find(m => m.name === currentUserName) || teamMembers[0];
+  const targetMemberObj = teamMembers.find(m => m.name === selectedDispatchMember) || teamMembers[0];
 
   const handleQuickSaveSlackId = async (newSlackId) => {
-    if (!activeMemberObj) return;
+    if (!loggedInUserObj) return;
     setIsSavingSlackId(true);
     setDispatchStatusMessage('');
 
@@ -70,20 +72,20 @@ export default function SettingsModal({
     const { error } = await supabase
       .from('profiles')
       .update({ slack_user_id: cleanId || null })
-      .eq('id', activeMemberObj.id);
+      .eq('id', loggedInUserObj.id);
 
     if (error) {
       alert(`Error saving Slack ID: ${error.message}`);
     } else {
-      setTeamMembers(prev => prev.map(m => m.id === activeMemberObj.id ? { ...m, slackUserId: cleanId } : m));
+      setTeamMembers(prev => prev.map(m => m.id === loggedInUserObj.id ? { ...m, slackUserId: cleanId } : m));
       setDispatchStatusMessage('✓ Slack ID saved successfully');
     }
     setIsSavingSlackId(false);
   };
 
   const handleSendTestDispatch = async () => {
-    if (!activeMemberObj?.slackUserId) {
-      alert(`Please save a Slack Member ID for ${activeMemberObj?.name || 'this user'} first.`);
+    if (!loggedInUserObj?.slackUserId) {
+      alert(`Please save a Slack Member ID for your account (${loggedInUserObj?.name || 'this user'}) first.`);
       return;
     }
 
@@ -91,8 +93,8 @@ export default function SettingsModal({
     setDispatchStatusMessage('');
 
     const payload = {
-      targetMemberName: activeMemberObj.name,
-      slackUserId: activeMemberObj.slackUserId,
+      targetMemberName: targetMemberObj.name,
+      slackUserId: loggedInUserObj.slackUserId, // Routes to Admin
       onlyHighPriority: onlyHighPriority,
       date: formatDateKey ? formatDateKey(currentDate || new Date()) : new Date().toISOString().split('T')[0]
     };
@@ -214,9 +216,9 @@ export default function SettingsModal({
           <div className="bg-gray-50 p-2.5 rounded border border-gray-200 flex flex-col gap-1.5 text-xs">
             <div className="flex justify-between items-center">
               <span className="font-bold text-[11px] text-gray-700">
-                Slack User ID ({activeMemberObj?.name}):
+                Slack Destination ID ({loggedInUserObj?.name}):
               </span>
-              {activeMemberObj?.slackUserId ? (
+              {loggedInUserObj?.slackUserId ? (
                 <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">
                   ✓ Connected
                 </span>
@@ -230,10 +232,10 @@ export default function SettingsModal({
             <div className="flex gap-2">
               <input 
                 type="text"
-                value={activeMemberObj?.slackUserId || ''}
+                value={loggedInUserObj?.slackUserId || ''}
                 onChange={(e) => {
                   const val = e.target.value;
-                  setTeamMembers(prev => prev.map(m => m.id === activeMemberObj?.id ? { ...m, slackUserId: val } : m));
+                  setTeamMembers(prev => prev.map(m => m.id === loggedInUserObj?.id ? { ...m, slackUserId: val } : m));
                 }}
                 placeholder="e.g. U08S5KMHT08"
                 className="flex-1 p-1.5 text-xs font-mono border rounded bg-white"
@@ -241,7 +243,7 @@ export default function SettingsModal({
               <button 
                 type="button"
                 disabled={isSavingSlackId}
-                onClick={() => handleQuickSaveSlackId(activeMemberObj?.slackUserId || '')}
+                onClick={() => handleQuickSaveSlackId(loggedInUserObj?.slackUserId || '')}
                 className="bg-gray-800 text-white px-2.5 py-1 text-xs font-bold rounded hover:bg-black transition">
                 {isSavingSlackId ? 'Saving...' : 'Save'}
               </button>
@@ -309,7 +311,7 @@ export default function SettingsModal({
                         }} 
                         className="accent-[#A9B1A6]" 
                       /> 
-                      {m.name}
+                        {m.name}
                     </label>
                   ))}
                 </div>

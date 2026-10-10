@@ -56,7 +56,6 @@ export default async function handler(req, res) {
     }
 
     const memberName = targetMemberName || 'Team Member';
-    const firstFirstName = memberName.split(' ')[0];
 
     // Filter tasks belonging to the selected employee (including past due items)
     const filteredTasks = (allTasks || []).filter(task => {
@@ -82,7 +81,7 @@ export default async function handler(req, res) {
         type: 'header',
         text: {
           type: 'plain_text',
-          text: `☀️ Good Morning, ${firstFirstName}!`,
+          text: `☀️ Dispatch: ${memberName}'s Agenda`,
           emoji: true
         }
       },
@@ -105,7 +104,7 @@ export default async function handler(req, res) {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `🎉 *You're all clear!* No pending tasks found for today.`
+          text: `🎉 *All clear!* No pending tasks found for ${memberName} today.`
         }
       });
     } else {
@@ -122,7 +121,7 @@ export default async function handler(req, res) {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*Here is your agenda for today (${filteredTasks.length} task${filteredTasks.length > 1 ? 's' : ''}):*\n\n` + taskLines.join('\n')
+          text: `*Here is the agenda for today (${filteredTasks.length} task${filteredTasks.length > 1 ? 's' : ''}):*\n\n` + taskLines.join('\n')
         }
       });
     }
@@ -135,7 +134,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         channel: slackUserId,
-        text: `☀️ Daily Dispatch for ${dateFormatted} (${filteredTasks.length} tasks)`,
+        text: `☀️ Daily Dispatch for ${memberName}: ${dateFormatted} (${filteredTasks.length} tasks)`,
         blocks: blocks
       })
     });
