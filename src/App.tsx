@@ -2156,21 +2156,3 @@ export default function App() {
     </div>
   );
 }
-```
-
----
-
-```json
-// vercel.json
-{
-  "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/$1"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
-  ]
-}

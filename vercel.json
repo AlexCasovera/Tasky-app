@@ -1,8 +1,12 @@
 {
-  "crons": [
+  "rewrites": [
     {
-      "path": "/api/dispatch",
-      "schedule": "0 14 * * *"
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
