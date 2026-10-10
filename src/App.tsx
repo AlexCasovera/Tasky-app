@@ -1,3 +1,4 @@
+// src/App.tsx
 // @ts-nocheck
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
@@ -93,11 +94,7 @@ export default function App() {
           email: p.email,
           role: p.role || 'employee',
           color: p.color || '#2A9D8F',
-          slack_user_id: p.slack_user_id || null,
-          slack_dispatch_enabled: p.slack_dispatch_enabled || false,
-          slack_dispatch_time: p.slack_dispatch_time || '08:00 AM',
-          slack_dispatch_member: p.slack_dispatch_member || null,
-          slack_dispatch_high_priority_only: p.slack_dispatch_high_priority_only || false
+          slackUserId: p.slack_user_id || ''
         }));
         setTeamMembers(mappedMembers);
         if (activeEmployeeFilters.length === 0) setActiveEmployeeFilters(mappedMembers.map(m => m.name));
@@ -119,11 +116,7 @@ export default function App() {
             email: myProfile.email,
             role: myProfile.role || 'employee',
             color: myProfile.color || '#2A9D8F',
-            slack_user_id: myProfile.slack_user_id || null,
-            slack_dispatch_enabled: myProfile.slack_dispatch_enabled || false,
-            slack_dispatch_time: myProfile.slack_dispatch_time || '08:00 AM',
-            slack_dispatch_member: myProfile.slack_dispatch_member || null,
-            slack_dispatch_high_priority_only: myProfile.slack_dispatch_high_priority_only || false
+            slackUserId: myProfile.slack_user_id || ''
           });
         }
       }
@@ -196,7 +189,7 @@ export default function App() {
 
     return () => {
       supabase.removeChannel(channel);
-    }
+    };
   }, [userRole, currentUserName]);
 
   const dispatchNotification = async (targetType, targetValue, type, bellText, pushTitle, pushMessage, taskId = null, taskDate = null) => {
@@ -226,9 +219,9 @@ export default function App() {
   const [memberName, setMemberName] = useState('');
   const [memberEmail, setMemberEmail] = useState('');
   const [memberPassword, setMemberPassword] = useState('');
+  const [memberSlackId, setMemberSlackId] = useState('');
   const [memberRole, setMemberRole] = useState('employee');
   const [memberColor, setMemberColor] = useState('#2A9D8F');
-  const [memberSlackId, setMemberSlackId] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
   const [selectedTask, setSelectedTask] = useState(null);
@@ -931,9 +924,9 @@ export default function App() {
     setMemberName('');
     setMemberEmail('');
     setMemberPassword('');
+    setMemberSlackId('');
     setMemberRole('employee');
     setMemberColor('#2A9D8F');
-    setMemberSlackId('');
     setEditingMemberId(null);
     setShowPassword(false);
   };
@@ -943,9 +936,9 @@ export default function App() {
     setMemberName(member.name);
     setMemberEmail(member.email);
     setMemberPassword(member.password || '');
+    setMemberSlackId(member.slackUserId || '');
     setMemberRole(member.role);
     setMemberColor(member.color || '#2A9D8F');
-    setMemberSlackId(member.slack_user_id || '');
   };
 
   const handleSaveMember = async () => {
@@ -954,13 +947,17 @@ export default function App() {
     const initials = memberName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
 
     if (editingMemberId) {
-      await supabase.from('profiles').update({
+      const { error } = await supabase.from('profiles').update({
         name: memberName,
         initials,
         role: memberRole,
         color: memberColor,
         slack_user_id: memberSlackId.trim() || null
       }).eq('id', editingMemberId);
+
+      if (error) {
+        return alert(`Error updating team member: ${error.message}`);
+      }
     } else {
       if (!memberEmail.trim()) return alert('Please enter an email address.');
 
@@ -977,8 +974,7 @@ export default function App() {
 
       if (error) {
         console.error('Error creating profile:', error);
-        alert(`Error creating team member: ${error.message}`);
-        return;
+        return alert(`Error creating team member: ${error.message}`);
       }
     }
 
@@ -991,11 +987,7 @@ export default function App() {
         email: p.email,
         role: p.role || 'employee',
         color: p.color || '#2A9D8F',
-        slack_user_id: p.slack_user_id || null,
-        slack_dispatch_enabled: p.slack_dispatch_enabled || false,
-        slack_dispatch_time: p.slack_dispatch_time || '08:00 AM',
-        slack_dispatch_member: p.slack_dispatch_member || null,
-        slack_dispatch_high_priority_only: p.slack_dispatch_high_priority_only || false
+        slackUserId: p.slack_user_id || ''
       })));
     }
 
@@ -1884,7 +1876,7 @@ export default function App() {
     <div className="min-h-screen bg-[#A9B1A6] p-4 sm:p-8 font-sans text-[#333333]">
       <div className="max-w-[95%] mx-auto bg-[#F4F3ED] p-6 rounded-lg shadow-sm min-h-[850px] flex flex-col relative">
         
-        {/* HEADER */}
+        {/* TOP NAVIGATION & CONTROLS HEADER */}
         <Header 
           currentProfile={currentProfile} session={session} userRole={userRole} 
           searchRef={searchRef} searchQuery={searchQuery} isSearchFocused={isSearchFocused} 
@@ -1902,7 +1894,7 @@ export default function App() {
           setIsSettingsOpen={setIsSettingsOpen} handleOpenCreateView={handleOpenCreateView} 
         />
 
-        {/* FILTER BAR */}
+        {/* TEAM MEMBER & COMPANY FILTER BAR */}
         <FilterBar 
           currentView={currentView}
           masterCompanyList={masterCompanyList}
@@ -1918,7 +1910,7 @@ export default function App() {
           setActiveEmployeeFilters={setActiveEmployeeFilters}
         />
 
-        {/* DASHBOARD TRAYS */}
+        {/* CONDITIONAL DASHBOARD TRAYS */}
         <DashboardTrays 
           userRole={userRole}
           currentView={currentView}
@@ -2099,7 +2091,7 @@ export default function App() {
           getCurrentTimestamp={getCurrentTimestamp} tasks={tasks} setTasks={setTasks} dispatchNotification={dispatchNotification} renderComment={renderComment}
         />
 
-        {/* COMPLETION MODAL */}
+        {/* SUB-TASK COMPLETION MODAL */}
         <CompletionModal 
           completionPrompt={completionPrompt}
           setCompletionPrompt={setCompletionPrompt}
@@ -2121,14 +2113,13 @@ export default function App() {
           setIsSettingsOpen={setIsSettingsOpen}
           userRole={userRole}
           currentUserName={currentUserName}
-          currentProfile={currentProfile}
-          setCurrentProfile={setCurrentProfile}
           hiddenCompanies={hiddenCompanies}
           setHiddenCompanies={setHiddenCompanies}
           masterCompanyList={masterCompanyList}
           hiddenMembers={hiddenMembers}
           setHiddenMembers={setHiddenMembers}
           teamMembers={teamMembers}
+          setTeamMembers={setTeamMembers}
           resetMemberForm={resetMemberForm}
           handleOpenEditMember={handleOpenEditMember}
           editingMemberId={editingMemberId}
@@ -2138,14 +2129,14 @@ export default function App() {
           setMemberEmail={setMemberEmail}
           memberPassword={memberPassword}
           setMemberPassword={setMemberPassword}
+          memberSlackId={memberSlackId}
+          setMemberSlackId={setMemberSlackId}
           showPassword={showPassword}
           setShowPassword={setShowPassword}
           memberRole={memberRole}
           setMemberRole={setMemberRole}
           memberColor={memberColor}
           setMemberColor={setMemberColor}
-          memberSlackId={memberSlackId}
-          setMemberSlackId={setMemberSlackId}
           handleDeleteMember={handleDeleteMember}
           handleSaveMember={handleSaveMember}
           newCompanyInput={newCompanyInput}
@@ -2157,11 +2148,29 @@ export default function App() {
           handleRenameCompany={handleRenameCompany}
           setEditingCompany={setEditingCompany}
           handleDeleteCompany={handleDeleteCompany}
-          currentDate={currentDate}
           formatDateKey={formatDateKey}
+          currentDate={currentDate}
         />
 
       </div>
     </div>
   );
+}
+```
+
+---
+
+```json
+// vercel.json
+{
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
 }

@@ -7,8 +7,8 @@ export default async function handler(req, res) {
   try {
     let rawPayload = req.body.payload;
     if (!rawPayload && typeof req.body === 'string') {
-      const params = new URLSearchParams(req.body);
-      rawPayload = params.get('payload');
+        const params = new URLSearchParams(req.body);
+        rawPayload = params.get('payload');
     }
     if (!rawPayload) return res.status(400).send('No payload');
 
@@ -18,60 +18,33 @@ export default async function handler(req, res) {
     const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.VITE_SUPABASE_ANON_KEY;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const slackBotToken = process.env.SLACK_BOT_TOKEN;
-
-    // ACTION 1: USER CLICKS SHORTCUT IN SLACK
+    // ACTION 1: USER CLICKS SHORTCUT -> CHECK ADMIN PERMISSION -> OPEN SLACK MODAL
     if (payload.type === 'message_action' && payload.callback_id === 'send_to_tasky') {
-      const clickingUserId = payload.user?.id;
+      const slackUserId = payload.user?.id;
 
-      // --- PERMISSION CHECK: ONLY ADMINS CAN CREATE TASKS ---
-      const { data: userProfile, error: profileLookupError } = await supabase
+      // Verify that this Slack user has Admin privileges in Tasky
+      const { data: requestingProfile, error: authError } = await supabase
         .from('profiles')
         .select('*')
-        .eq('slack_member_id', clickingUserId)
-        .limit(1);
+        .eq('slack_user_id', slackUserId)
+        .single();
 
-      const matchedProfile = userProfile && userProfile.length > 0 ? userProfile[0] : null;
-
-      // If user profile is not linked or not an admin, block them
-      if (!matchedProfile || matchedProfile.role !== 'admin') {
-        await fetch('https://slack.com/api/views.open', {
+      if (authError || !requestingProfile || requestingProfile.role !== 'admin') {
+        await fetch('https://slack.com/api/chat.postEphemeral', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${slackBotToken}`
+            'Authorization': `Bearer ${process.env.SLACK_BOT_TOKEN}`
           },
           body: JSON.stringify({
-            trigger_id: payload.trigger_id,
-            view: {
-              type: 'modal',
-              title: { type: 'plain_text', text: 'Access Restricted' },
-              close: { type: 'plain_text', text: 'Close' },
-              blocks: [
-                {
-                  type: 'header',
-                  text: {
-                    type: 'plain_text',
-                    text: '🔒 Admin Permission Required',
-                    emoji: true
-                  }
-                },
-                {
-                  type: 'section',
-                  text: {
-                    type: 'mrkdwn',
-                    text: 'Only *Tasky Admins* are authorized to create and schedule tasks directly through Slack.\n\nIf you need a new task scheduled, please contact your team admin or manager.'
-                  }
-                }
-              ]
-            }
+            channel: payload.channel.id,
+            user: slackUserId,
+            text: '⛔ Only Tasky Admins have permission to create tasks from Slack. Please ask an Admin or log in to Tasky.'
           })
         });
-
         return res.status(200).end();
       }
 
-      // --- USER IS AN ADMIN: OPEN TASK BUILDER MODAL ---
       const rawMessageText = payload.message.text || '';
       const defaultTitle = rawMessageText.length > 100 ? rawMessageText.substring(0, 100) + '...' : rawMessageText;
       const today = new Date().toISOString().split('T')[0];
@@ -80,50 +53,46 @@ export default async function handler(req, res) {
         { data: profiles, error: profileError },
         { data: companies, error: companyError }
       ] = await Promise.all([
-        supabase.from('profiles').select('name, full_name').order('name'),
+        supabase.from('profiles').select('full_name, name').order('name'),
         supabase.from('companies').select('name').order('name')
       ]);
 
       let assigneeOptions = [];
       if (!profileError && profiles && profiles.length > 0) {
         assigneeOptions = profiles
-          .map(p => p.name || p.full_name)
+          .map(p => p.full_name || p.name)
           .filter(Boolean)
-          .map(fullName => ({
-            text: { type: 'plain_text', text: fullName.substring(0, 70) },
-            value: fullName.substring(0, 70)
+          .map(name => ({
+            text: { type: 'plain_text', text: name.substring(0, 70) },
+            value: name.substring(0, 70)
           }));
-      }
-
-      if (assigneeOptions.length === 0) {
+      } else {
         assigneeOptions = [{ text: { type: 'plain_text', text: 'Unassigned' }, value: 'Unassigned' }];
       }
 
       let companyOptions = [];
       if (!companyError && companies && companies.length > 0) {
         companyOptions = companies
-          .filter(c => c.name)
+          .filter(c => c.name) 
           .map(c => ({
             text: { type: 'plain_text', text: c.name.substring(0, 70) },
             value: c.name.substring(0, 70)
           }));
-      }
-
-      if (companyOptions.length === 0) {
-        companyOptions = [{ text: { type: 'plain_text', text: 'General' }, value: 'General' }];
+      } else {
+        companyOptions = [{ text: { type: 'plain_text', text: 'Internal' }, value: 'Internal' }];
       }
 
       await fetch('https://slack.com/api/views.open', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${slackBotToken}`
+          'Authorization': `Bearer ${process.env.SLACK_BOT_TOKEN}`
         },
         body: JSON.stringify({
           trigger_id: payload.trigger_id,
           view: {
             type: 'modal',
-            callback_id: 'tasky_modal_submit',
+            callback_id: 'tasky_modal_submit', 
             title: { type: 'plain_text', text: 'Create Tasky Task' },
             submit: { type: 'plain_text', text: 'Create Task' },
             blocks: [
@@ -136,7 +105,7 @@ export default async function handler(req, res) {
               {
                 type: 'input',
                 block_id: 'desc_block',
-                optional: true,
+                optional: true, 
                 element: { type: 'plain_text_input', multiline: true, action_id: 'desc_input' },
                 label: { type: 'plain_text', text: 'Description' }
               },
@@ -146,7 +115,7 @@ export default async function handler(req, res) {
                 element: {
                   type: 'static_select',
                   action_id: 'company_input',
-                  options: companyOptions
+                  options: companyOptions 
                 },
                 label: { type: 'plain_text', text: 'Company' }
               },
@@ -156,9 +125,9 @@ export default async function handler(req, res) {
                 element: {
                   type: 'static_select',
                   action_id: 'assignee_input',
-                  options: assigneeOptions
+                  options: assigneeOptions 
                 },
-                label: { type: 'plain_text', text: 'Employee' }
+                label: { type: 'plain_text', text: 'Employee' } 
               },
               {
                 type: 'input',
@@ -184,7 +153,6 @@ export default async function handler(req, res) {
       const date = values.date_block.date_input.selected_date;
       const taskId = Date.now().toString();
 
-      // Insert Task into Supabase
       const { error: taskError } = await supabase.from('tasks').insert({
         id: taskId,
         title: title,
@@ -192,12 +160,9 @@ export default async function handler(req, res) {
         company: company,
         assignees: [assignee],
         status: 'pending',
-        priority: 'Standard',
+        priority: 'Routine',
         recurrence_type: 'once',
         date: date,
-        date_scheduled: date,
-        time_label: 'All-Day',
-        type: 'flexible',
         allow_deadline_change: true,
         notify_on_task_created: true,
         notify_on_complete: true,
@@ -206,11 +171,10 @@ export default async function handler(req, res) {
       });
 
       if (taskError) {
-        console.error('Supabase Rejected Task Insert:', JSON.stringify(taskError));
+        console.error("Supabase Rejected Task Insert:", JSON.stringify(taskError));
         return res.status(500).end();
       }
 
-      // Insert Notification Center Entry
       await supabase.from('notifications').insert({
         text: `New Task: "${title}" (via Slack)`,
         type: 'new_task',
@@ -221,7 +185,6 @@ export default async function handler(req, res) {
         read: false
       });
 
-      // Ping Mobile Device
       const { data: profile } = await supabase
         .from('profiles')
         .select('push_subscription')
@@ -230,7 +193,7 @@ export default async function handler(req, res) {
 
       if (profile?.push_subscription) {
         try {
-          await fetch('https://tasky-app-gilt.vercel.app/api/notify', {
+          await fetch(`${req.headers.origin || 'https://tasky-app-gilt.vercel.app'}/api/notify`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -240,7 +203,7 @@ export default async function handler(req, res) {
             })
           });
         } catch (pushError) {
-          console.error('Failed to ping /api/notify endpoint:', pushError);
+          console.error("Failed to ping /api/notify endpoint:", pushError);
         }
       }
 
@@ -248,9 +211,8 @@ export default async function handler(req, res) {
     }
 
     return res.status(200).end();
-
   } catch (err) {
-    console.error('Syntax/Parse Error in Slack handler:', err);
+    console.error("Syntax/Parse Error:", err);
     return res.status(500).end();
   }
 }
