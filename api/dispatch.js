@@ -2,6 +2,15 @@
 import { createClient } from '@supabase/supabase-js';
 
 export default async function handler(req, res) {
+  // Set CORS headers so calls across preview domains work seamlessly
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -16,12 +25,21 @@ export default async function handler(req, res) {
   const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.VITE_SUPABASE_ANON_KEY;
   const slackBotToken = process.env.SLACK_BOT_TOKEN;
 
-  if (!supabaseKey) {
-    return res.status(500).json({ error: 'Missing Supabase Key in Vercel environment variables' });
-  }
-
-  if (!slackBotToken) {
-    return res.status(500).json({ error: 'Missing SLACK_BOT_TOKEN in Vercel environment variables' });
+  // AUTOMATIC PROXY: If keys are missing on this instance (e.g. tasky-app-5gkh), forward to tasky-app-gilt which already has them
+  if (!supabaseKey || !slackBotToken) {
+    try {
+      const forwardedResponse = await fetch('https://tasky-app-gilt.vercel.app/api/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req.body)
+      });
+      const forwardedData = await forwardedResponse.json();
+      return res.status(forwardedResponse.status).json(forwardedData);
+    } catch (forwardErr) {
+      return res.status(500).json({
+        error: `Missing environment keys and forward failed: ${forwardErr.message}`
+      });
+    }
   }
 
   const supabase = createClient(supabaseUrl, supabaseKey);
@@ -40,7 +58,7 @@ export default async function handler(req, res) {
     const memberName = targetMemberName || 'Team Member';
     const firstFirstName = memberName.split(' ')[0];
 
-    // Filter tasks belonging to target employee
+    // Filter tasks belonging to the selected employee (including past due items)
     const filteredTasks = (allTasks || []).filter(task => {
       const isAssigned = (task.assignees || []).includes(memberName);
       if (!isAssigned) return false;

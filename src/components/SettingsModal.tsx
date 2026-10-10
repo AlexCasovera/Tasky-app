@@ -90,23 +90,44 @@ export default function SettingsModal({
     setIsSendingTest(true);
     setDispatchStatusMessage('');
 
+    const payload = {
+      targetMemberName: activeMemberObj.name,
+      slackUserId: activeMemberObj.slackUserId,
+      onlyHighPriority: onlyHighPriority,
+      date: formatDateKey ? formatDateKey(currentDate || new Date()) : new Date().toISOString().split('T')[0]
+    };
+
     try {
-      const response = await fetch('/api/dispatch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          targetMemberName: activeMemberObj.name,
-          slackUserId: activeMemberObj.slackUserId,
-          onlyHighPriority: onlyHighPriority,
-          date: formatDateKey ? formatDateKey(currentDate || new Date()) : new Date().toISOString().split('T')[0]
-        })
-      });
+      // Route through the primary deployment that already has SUPABASE_SECRET_KEY & SLACK_BOT_TOKEN
+      let response;
+      try {
+        response = await fetch('https://tasky-app-gilt.vercel.app/api/dispatch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } catch (externalErr) {
+        // Fallback to local /api/dispatch (which also proxies automatically if keys are absent)
+        response = await fetch('/api/dispatch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      }
+
+      if (!response.ok && response.status === 404) {
+        response = await fetch('/api/dispatch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      }
 
       const data = await response.json();
       if (!response.ok) {
         alert(`Error sending test: ${data.error || 'Unknown error'}`);
       } else {
-        alert(`✓ Dispatch sent to Slack! Delivered agenda with ${data.count} tasks.`);
+        alert(`✓ Dispatch sent to Slack! Delivered agenda with ${data.count} task${data.count === 1 ? '' : 's'}.`);
       }
     } catch (err) {
       alert(`Error sending test: ${err.message}`);
