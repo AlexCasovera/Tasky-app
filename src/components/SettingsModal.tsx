@@ -64,7 +64,7 @@ export default function SettingsModal({
 
   const targetMemberObj = teamMembers.find(m => m.name === selectedDispatchMember) || teamMembers[0];
 
-  // Instantly sync dispatch settings to Supabase when toggled
+ // Instantly sync dispatch settings to Supabase when toggled
   const handleDispatchPreferenceChange = async (field, value) => {
     if (!loggedInUserObj) return;
 
@@ -80,6 +80,11 @@ export default function SettingsModal({
 
     if (error) {
       alert(`Error saving ${field}: ${error.message}`);
+    } else {
+      // FIX: Update the master teamMembers array so the data persists when the modal reopens
+      setTeamMembers(prev => prev.map(m => 
+        m.id === loggedInUserObj.id ? { ...m, [field]: value } : m
+      ));
     }
   };
 
@@ -481,6 +486,7 @@ export default function SettingsModal({
                   className="bg-[#333333] text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-black transition">
                   Add
                 </button>
+
               </div>
               <div className="flex flex-col gap-1 mt-2">
                 {masterCompanyList.map(comp => (
