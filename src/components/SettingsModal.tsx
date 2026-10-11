@@ -49,19 +49,39 @@ export default function SettingsModal({
 }) {
   if (!isSettingsOpen) return null;
 
-  const [dispatchEnabled, setDispatchEnabled] = useState(true);
-  const [deliveryTime, setDeliveryTime] = useState('08:00 AM');
+  // Initialize objects early so we can use their DB values as default states
+  const loggedInUserObj = teamMembers.find(m => m.name === currentUserName) || teamMembers[0];
+
+  const [dispatchEnabled, setDispatchEnabled] = useState(loggedInUserObj?.dispatch_enabled || false);
   const [selectedDispatchMember, setSelectedDispatchMember] = useState(() => {
-    return currentUserName || (teamMembers[0]?.name || '');
+    return loggedInUserObj?.dispatch_target_name || currentUserName || (teamMembers[0]?.name || '');
   });
-  const [onlyHighPriority, setOnlyHighPriority] = useState(false);
+  const [onlyHighPriority, setOnlyHighPriority] = useState(loggedInUserObj?.dispatch_priority_only || false);
+  
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [dispatchStatusMessage, setDispatchStatusMessage] = useState('');
   const [isSavingSlackId, setIsSavingSlackId] = useState(false);
 
-  // DECOUPLED STATE: loggedInUserObj holds the Slack ID destination, targetMemberObj holds the task workload
-  const loggedInUserObj = teamMembers.find(m => m.name === currentUserName) || teamMembers[0];
   const targetMemberObj = teamMembers.find(m => m.name === selectedDispatchMember) || teamMembers[0];
+
+  // Instantly sync dispatch settings to Supabase when toggled
+  const handleDispatchPreferenceChange = async (field, value) => {
+    if (!loggedInUserObj) return;
+
+    // Optimistic UI update for instantaneous feel
+    if (field === 'dispatch_enabled') setDispatchEnabled(value);
+    if (field === 'dispatch_target_name') setSelectedDispatchMember(value);
+    if (field === 'dispatch_priority_only') setOnlyHighPriority(value);
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ [field]: value })
+      .eq('id', loggedInUserObj.id);
+
+    if (error) {
+      alert(`Error saving ${field}: ${error.message}`);
+    }
+  };
 
   const handleQuickSaveSlackId = async (newSlackId) => {
     if (!loggedInUserObj) return;
@@ -94,13 +114,12 @@ export default function SettingsModal({
 
     const payload = {
       targetMemberName: targetMemberObj.name,
-      slackUserId: loggedInUserObj.slackUserId, // Routes to Admin
+      slackUserId: loggedInUserObj.slackUserId, 
       onlyHighPriority: onlyHighPriority,
       date: formatDateKey ? formatDateKey(currentDate || new Date()) : new Date().toISOString().split('T')[0]
     };
 
     try {
-      // Route through the primary deployment that already has SUPABASE_SECRET_KEY & SLACK_BOT_TOKEN
       let response;
       try {
         response = await fetch('https://tasky-app-gilt.vercel.app/api/dispatch', {
@@ -109,7 +128,6 @@ export default function SettingsModal({
           body: JSON.stringify(payload)
         });
       } catch (externalErr) {
-        // Fallback to local /api/dispatch (which also proxies automatically if keys are absent)
         response = await fetch('/api/dispatch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -177,7 +195,7 @@ export default function SettingsModal({
               <input 
                 type="checkbox" 
                 checked={dispatchEnabled} 
-                onChange={(e) => setDispatchEnabled(e.target.checked)} 
+                onChange={(e) => handleDispatchPreferenceChange('dispatch_enabled', e.target.checked)} 
                 className="sr-only peer" 
               />
               <div className="w-9 h-5 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
@@ -185,27 +203,14 @@ export default function SettingsModal({
           </div>
 
           <p className="text-[10px] text-gray-500">
-            Receive an automated morning breakdown of your tasks directly in Slack.
+            Receive an automated morning breakdown of your tasks directly in Slack every weekday at 8:00 AM (AZ Time).
           </p>
 
           <div className="flex items-center justify-between gap-2 pt-1 border-t border-gray-100">
-            <span className="text-xs font-bold text-gray-700">Delivery Time:</span>
-            <select 
-              value={deliveryTime} 
-              onChange={(e) => setDeliveryTime(e.target.value)} 
-              className="text-xs font-bold p-1.5 border border-gray-300 rounded bg-white">
-              <option value="06:00 AM">06:00 AM</option>
-              <option value="07:00 AM">07:00 AM</option>
-              <option value="08:00 AM">08:00 AM</option>
-              <option value="09:00 AM">09:00 AM</option>
-            </select>
-          </div>
-
-          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-bold text-gray-700">Include tasks for:</span>
             <select 
               value={selectedDispatchMember} 
-              onChange={(e) => setSelectedDispatchMember(e.target.value)} 
+              onChange={(e) => handleDispatchPreferenceChange('dispatch_target_name', e.target.value)} 
               className="text-xs font-bold p-1.5 border border-gray-300 rounded bg-white">
               {teamMembers.map(m => (
                 <option key={m.id} value={m.name}>{m.name} ({m.role})</option>
@@ -257,7 +262,7 @@ export default function SettingsModal({
             <input 
               type="checkbox" 
               checked={onlyHighPriority} 
-              onChange={(e) => setOnlyHighPriority(e.target.checked)} 
+              onChange={(e) => handleDispatchPreferenceChange('dispatch_priority_only', e.target.checked)} 
               className="accent-emerald-600 w-3.5 h-3.5" 
             />
             <span>Only include High Priority tasks</span>

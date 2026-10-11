@@ -8,5 +8,11 @@
       "source": "/(.*)",
       "destination": "/index.html"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron-dispatch",
+      "schedule": "0 15 * * 1-5"
+    }
   ]
 }
