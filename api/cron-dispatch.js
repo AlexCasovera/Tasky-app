@@ -1,13 +1,86 @@
 // api/cron-dispatch.js
 import { createClient } from '@supabase/supabase-js';
 
+const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function parseDateToUTC(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
+}
+
+function formatUTCDate(d) {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+function isTaskScheduledOnDay(task, dateStr, dayOfWeekStr) {
+  if (!task) return false;
+  if (task.endDate && dateStr > task.endDate) return false;
+
+  if (task.recurrenceType === 'fixed') {
+    const startDate = task.date;
+    if (startDate && dateStr < startDate) return false;
+    if (!task.activeDays || !task.activeDays.includes(dayOfWeekStr)) return false;
+
+    const intervalWeeks = Math.max(1, Math.round((task.cadenceDays || 7) / 7));
+    if (intervalWeeks > 1 && startDate) {
+      const sDate = parseDateToUTC(startDate);
+      const sSunday = new Date(sDate);
+      sSunday.setUTCDate(sDate.getUTCDate() - sDate.getUTCDay());
+
+      const cDate = parseDateToUTC(dateStr);
+      const cSunday = new Date(cDate);
+      cSunday.setUTCDate(cDate.getUTCDate() - cDate.getUTCDay());
+
+      const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+      const weeksDiff = Math.round((cSunday.getTime() - sSunday.getTime()) / msPerWeek);
+
+      if (weeksDiff % intervalWeeks !== 0) return false;
+    }
+    return true;
+  }
+  return task.date === dateStr;
+}
+
+function isTaskPastDue(task, targetDateStr) {
+  if (!task.date || task.date.trim() === '') return false;
+  if (task.status === 'completed') return false;
+
+  if (task.recurrenceType === 'once' || task.recurrenceType === 'completion') {
+    return task.date < targetDateStr;
+  }
+
+  if (task.recurrenceType === 'fixed') {
+      let missedDate = null;
+      const maxLookback = Math.max(7, task.cadenceDays || 7);
+      for (let i = 1; i <= maxLookback; i++) {
+        const d = parseDateToUTC(targetDateStr);
+        d.setUTCDate(d.getUTCDate() - i);
+        const checkDateStr = formatUTCDate(d);
+        const dayOfWeekStr = daysOfWeek[d.getUTCDay()];
+        
+        if (isTaskScheduledOnDay(task, checkDateStr, dayOfWeekStr)) {
+            missedDate = checkDateStr;
+            break;
+        }
+      }
+
+      if (missedDate && missedDate < targetDateStr) {
+        const completedDates = task.completedDates || [];
+        const exceptionDates = task.exceptionDates || [];
+        if (completedDates.includes(missedDate)) return false;
+        if (exceptionDates.includes(missedDate)) return false;
+        return true;
+      }
+      return false;
+  }
+  return false;
+}
+
 export default async function handler(req, res) {
-  // Allow GET requests (Vercel crons default to GET)
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Vercel Cron Security: Ensures only Vercel can trigger this automated endpoint
   const authHeader = req.headers.authorization;
   if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized cron execution' });
@@ -23,12 +96,11 @@ export default async function handler(req, res) {
 
   const supabase = createClient(supabaseUrl, supabaseKey);
   
-  // Calculate today's date locked to Arizona time (UTC-7) to ensure day boundary consistency
   const azDate = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Phoenix" }));
   const targetDate = azDate.toISOString().split('T')[0];
+  const targetDayStr = daysOfWeek[azDate.getDay()];
 
   try {
-    // 1. Fetch all users who have toggled the dispatch ON and have a connected Slack ID
     const { data: profiles, error: profileError } = await supabase
       .from('profiles')
       .select('slack_user_id, name, full_name, dispatch_target_name, dispatch_priority_only')
@@ -40,7 +112,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ message: 'No active dispatches found for today.' });
     }
 
-    // 2. Fetch all active tasks across the company
     const { data: allTasks, error: taskError } = await supabase
       .from('tasks')
       .select('*')
@@ -50,31 +121,26 @@ export default async function handler(req, res) {
 
     let messagesSent = 0;
 
-    // 3. Process each opted-in user sequentially
     for (const profile of profiles) {
-      // The worker schedule we are pulling (Fallback to the user's own profile name)
       const targetName = profile.dispatch_target_name || profile.name || profile.full_name;
       const firstFirstName = targetName.split(' ')[0];
 
-      // Filter tasks for this specific user
       const filteredTasks = (allTasks || []).filter(task => {
         const isAssigned = (task.assignees || []).includes(targetName);
         if (!isAssigned) return false;
         
         if (profile.dispatch_priority_only && task.priority !== 'High') return false;
 
-        const isScheduledToday = task.date === targetDate;
-        const isPastDue = task.date && task.date < targetDate;
+        const isScheduledToday = isTaskScheduledOnDay(task, targetDate, targetDayStr);
+        const isPastDue = isTaskPastDue(task, targetDate);
 
         return isScheduledToday || isPastDue;
       });
 
-      // Format Date for Slack Header
       const parsedDate = new Date(targetDate + 'T12:00:00Z');
       const options = { weekday: 'long', month: 'short', day: 'numeric' };
       const dateFormatted = isNaN(parsedDate.getTime()) ? targetDate : parsedDate.toLocaleDateString('en-US', options);
 
-      // Build Slack Block Kit
       let blocks = [
         {
           type: 'header',
@@ -94,7 +160,7 @@ export default async function handler(req, res) {
         });
       } else {
         const taskLines = filteredTasks.map(t => {
-          const isPastDue = t.date && t.date < targetDate;
+          const isPastDue = isTaskPastDue(t, targetDate);
           const overdueBadge = isPastDue ? ' 🚨 *OVERDUE*' : '';
           const priorityBadge = t.priority === 'High' ? ' 🔴 *HIGH PRIORITY*' : '';
           const timeBadge = t.time_label || 'All-Day';
@@ -108,7 +174,6 @@ export default async function handler(req, res) {
         });
       }
 
-      // Send payload to Slack API
       const slackResponse = await fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',
         headers: {
