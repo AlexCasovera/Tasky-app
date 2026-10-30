@@ -2,40 +2,73 @@
 import { createClient } from '@supabase/supabase-js';
 
 const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const fullDaysOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+function toDateStr(val) {
+  if (!val) return '';
+  let str = String(val).trim();
+  if (str.includes('T')) str = str.split('T')[0];
+  if (str.includes('/')) {
+    const parts = str.split('/');
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
+    }
+  }
+  return str;
+}
 
 function parseDateToUTC(dateStr) {
-  if (!dateStr) return new Date();
-  const [y, m, d] = dateStr.split('-').map(Number);
+  const norm = toDateStr(dateStr);
+  if (!norm) return new Date();
+  const [y, m, d] = norm.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d));
 }
 
-function formatUTCDate(d) {
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-}
-
-function isTaskScheduledOnDay(task, dateStr, dayOfWeekStr) {
+function isTaskScheduledOnDay(task, targetDateStr) {
   if (!task) return false;
-  const endDate = task.end_date || task.endDate;
-  if (endDate && dateStr > endDate) return false;
+  const taskDate = toDateStr(task.date);
+  const endDate = toDateStr(task.end_date || task.endDate);
 
-  const recurrenceType = task.recurrence_type || task.recurrenceType || 'once';
-  const activeDays = task.active_days || task.activeDays;
-  const cadenceDays = task.cadence_days || task.cadenceDays || 7;
+  if (endDate && targetDateStr > endDate) return false;
 
-  if (recurrenceType === 'fixed') {
-    const startDate = task.date;
-    if (startDate && dateStr < startDate) return false;
-    if (!activeDays || !activeDays.includes(dayOfWeekStr)) return false;
+  const recurrenceType = (task.recurrence_type || task.recurrenceType || 'once').toLowerCase();
+  const cadenceDays = Number(task.cadence_days || task.cadenceDays) || 7;
+
+  const targetDateObj = parseDateToUTC(targetDateStr);
+  const targetDayIdx = targetDateObj.getUTCDay();
+  const shortDayStr = daysOfWeek[targetDayIdx].toLowerCase();
+  const fullDayStr = fullDaysOfWeek[targetDayIdx];
+
+  if (recurrenceType === 'daily') return true;
+
+  if (recurrenceType === 'weekdays') {
+    return targetDayIdx >= 1 && targetDayIdx <= 5;
+  }
+
+  if (recurrenceType === 'fixed' || recurrenceType === 'weekly') {
+    if (taskDate && targetDateStr < taskDate) return false;
+
+    let activeDays = task.active_days || task.activeDays;
+    if (typeof activeDays === 'string') {
+      try { activeDays = JSON.parse(activeDays); } catch (e) { activeDays = [activeDays]; }
+    }
+
+    if (Array.isArray(activeDays) && activeDays.length > 0) {
+      const matchesDay = activeDays.some(ad => {
+        const s = String(ad).toLowerCase().trim();
+        return s === shortDayStr || s === fullDayStr || s === String(targetDayIdx);
+      });
+      if (!matchesDay) return false;
+    }
 
     const intervalWeeks = Math.max(1, Math.round(cadenceDays / 7));
-    if (intervalWeeks > 1 && startDate) {
-      const sDate = parseDateToUTC(startDate);
+    if (intervalWeeks > 1 && taskDate) {
+      const sDate = parseDateToUTC(taskDate);
       const sSunday = new Date(sDate);
       sSunday.setUTCDate(sDate.getUTCDate() - sDate.getUTCDay());
 
-      const cDate = parseDateToUTC(dateStr);
-      const cSunday = new Date(cDate);
-      cSunday.setUTCDate(cDate.getUTCDate() - cDate.getUTCDay());
+      const cSunday = new Date(targetDateObj);
+      cSunday.setUTCDate(targetDateObj.getUTCDate() - targetDateObj.getUTCDay());
 
       const msPerWeek = 7 * 24 * 60 * 60 * 1000;
       const weeksDiff = Math.round((cSunday.getTime() - sSunday.getTime()) / msPerWeek);
@@ -44,61 +77,74 @@ function isTaskScheduledOnDay(task, dateStr, dayOfWeekStr) {
     }
     return true;
   }
-  return task.date === dateStr;
+
+  return taskDate === targetDateStr;
 }
 
 function isTaskPastDue(task, targetDateStr) {
-  if (!task.date || task.date.trim() === '') return false;
-  if (task.status === 'completed') return false;
+  const taskDate = toDateStr(task.date);
+  if (!taskDate) return false;
+  
+  const status = (task.status || '').toLowerCase();
+  if (status === 'completed' || status === 'done') return false;
 
-  const recurrenceType = task.recurrence_type || task.recurrenceType || 'once';
-  const cadenceDays = task.cadence_days || task.cadenceDays || 7;
+  const recurrenceType = (task.recurrence_type || task.recurrenceType || 'once').toLowerCase();
 
-  if (recurrenceType === 'once' || recurrenceType === 'completion') {
-    return task.date < targetDateStr;
+  if (recurrenceType === 'once' || recurrenceType === 'completion' || !recurrenceType) {
+    return taskDate < targetDateStr;
   }
 
-  if (recurrenceType === 'fixed') {
-    let missedDate = null;
+  if (recurrenceType === 'fixed' || recurrenceType === 'weekly') {
+    const cadenceDays = Number(task.cadence_days || task.cadenceDays) || 7;
     const maxLookback = Math.max(7, cadenceDays);
+    let missedDate = null;
+
     for (let i = 1; i <= maxLookback; i++) {
       const d = parseDateToUTC(targetDateStr);
       d.setUTCDate(d.getUTCDate() - i);
-      const checkDateStr = formatUTCDate(d);
-      const dayOfWeekStr = daysOfWeek[d.getUTCDay()];
+      const checkDateStr = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 
-      if (isTaskScheduledOnDay(task, checkDateStr, dayOfWeekStr)) {
+      if (isTaskScheduledOnDay(task, checkDateStr)) {
         missedDate = checkDateStr;
         break;
       }
     }
 
     if (missedDate && missedDate < targetDateStr) {
-      const completedDates = task.completed_dates || task.completedDates || [];
-      const exceptionDates = task.exception_dates || task.exceptionDates || [];
-      if (completedDates.includes(missedDate)) return false;
-      if (exceptionDates.includes(missedDate)) return false;
+      let completedDates = task.completed_dates || task.completedDates || [];
+      if (typeof completedDates === 'string') {
+        try { completedDates = JSON.parse(completedDates); } catch (e) { completedDates = []; }
+      }
+      let exceptionDates = task.exception_dates || task.exceptionDates || [];
+      if (typeof exceptionDates === 'string') {
+        try { exceptionDates = JSON.parse(exceptionDates); } catch (e) { exceptionDates = []; }
+      }
+      if (completedDates.includes(missedDate) || exceptionDates.includes(missedDate)) return false;
       return true;
     }
-    return false;
   }
+
   return false;
 }
 
-function matchesAssignee(taskAssignees, targetName) {
-  if (!taskAssignees || !targetName) return false;
-  const list = Array.isArray(taskAssignees) ? taskAssignees : [taskAssignees];
-  
-  const cleanTarget = targetName.toLowerCase().replace(/\s*\(.*?\)/g, '').trim();
+function checkAssigneeMatch(taskAssignees, allowedAliases) {
+  if (!taskAssignees || !allowedAliases || allowedAliases.length === 0) return false;
 
-  return list.some(rawAssignee => {
-    const name = typeof rawAssignee === 'string' ? rawAssignee : (rawAssignee?.name || rawAssignee?.full_name || '');
-    const cleanName = name.toLowerCase().replace(/\s*\(.*?\)/g, '').trim();
-    if (!cleanName) return false;
+  let list = taskAssignees;
+  if (typeof list === 'string') {
+    try { list = JSON.parse(list); } catch (e) { list = list.split(','); }
+  }
+  if (!Array.isArray(list)) list = [list];
 
-    return cleanName === cleanTarget || 
-           cleanName.startsWith(cleanTarget) || 
-           cleanTarget.startsWith(cleanName);
+  return list.some(raw => {
+    let name = typeof raw === 'string' ? raw : (raw?.name || raw?.full_name || raw?.id || '');
+    name = name.toLowerCase().replace(/\s*\(.*?\)/g, '').trim();
+    if (!name) return false;
+
+    return allowedAliases.some(alias => {
+      const cleanAlias = alias.toLowerCase().replace(/\s*\(.*?\)/g, '').trim();
+      return name === cleanAlias || name.startsWith(cleanAlias) || cleanAlias.startsWith(name);
+    });
   });
 }
 
@@ -107,7 +153,6 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Allow manual runs in development or with CRON_SECRET if set
   const authHeader = req.headers.authorization;
   if (process.env.CRON_SECRET && authHeader && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized cron execution' });
@@ -123,14 +168,13 @@ export default async function handler(req, res) {
 
   const supabase = createClient(supabaseUrl, supabaseKey);
 
-  const azDate = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Phoenix' }));
-  const targetDate = azDate.toISOString().split('T')[0];
-  const targetDayStr = daysOfWeek[azDate.getDay()];
+  // Compute Arizona date
+  const targetDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Phoenix' }).format(new Date());
 
   try {
     const { data: profiles, error: profileError } = await supabase
       .from('profiles')
-      .select('slack_user_id, name, full_name, dispatch_target_name, dispatch_priority_only')
+      .select('id, slack_user_id, name, full_name, dispatch_target_name, dispatch_priority_only')
       .eq('dispatch_enabled', true)
       .not('slack_user_id', 'is', null);
 
@@ -150,26 +194,41 @@ export default async function handler(req, res) {
 
     for (const profile of profiles) {
       const targetName = profile.dispatch_target_name || profile.name || profile.full_name;
-      const firstFirstName = targetName.split(' ')[0];
+      const cleanTarget = (targetName || '').replace(/\s*\(.*?\)/g, '').trim();
+      const firstWord = cleanTarget.toLowerCase().split(' ')[0];
+
+      const aliases = new Set([targetName, cleanTarget]);
+      if (profile.name) aliases.add(profile.name);
+      if (profile.full_name) aliases.add(profile.full_name);
+      if (profile.dispatch_target_name) aliases.add(profile.dispatch_target_name);
+      if (profile.id) aliases.add(profile.id);
+      if (firstWord) aliases.add(firstWord);
+
+      const aliasList = Array.from(aliases);
 
       const filteredTasks = (allTasks || []).filter(task => {
-        if (!matchesAssignee(task.assignees, targetName)) return false;
+        if (!checkAssigneeMatch(task.assignees, aliasList)) return false;
         if (profile.dispatch_priority_only && task.priority !== 'High') return false;
 
-        const isScheduledToday = isTaskScheduledOnDay(task, targetDate, targetDayStr);
-        const isPastDue = isTaskPastDue(task, targetDate);
+        const isScheduled = isTaskScheduledOnDay(task, targetDate);
+        const isPast = isTaskPastDue(task, targetDate);
 
-        return isScheduledToday || isPastDue;
+        return isScheduled || isPast;
       });
 
-      const parsedDate = new Date(targetDate + 'T12:00:00Z');
-      const options = { weekday: 'long', month: 'short', day: 'numeric' };
-      const dateFormatted = isNaN(parsedDate.getTime()) ? targetDate : parsedDate.toLocaleDateString('en-US', options);
+      const parsedDate = parseDateToUTC(targetDate);
+      const dateFormatted = parsedDate.toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'short',
+        day: 'numeric'
+      });
+
+      const displayName = cleanTarget.charAt(0).toUpperCase() + cleanTarget.slice(1).split(' ')[0];
 
       let blocks = [
         {
           type: 'header',
-          text: { type: 'plain_text', text: `☀️ Dispatch: ${firstFirstName}'s Agenda`, emoji: true }
+          text: { type: 'plain_text', text: `☀️ Dispatch: ${displayName}'s Agenda`, emoji: true }
         },
         {
           type: 'context',
@@ -190,8 +249,8 @@ export default async function handler(req, res) {
         });
 
         filteredTasks.forEach(t => {
-          const isPastDue = isTaskPastDue(t, targetDate);
-          const overdueBadge = isPastDue ? ' 🚨 *OVERDUE*' : '';
+          const isPast = isTaskPastDue(t, targetDate);
+          const overdueBadge = isPast ? ' 🚨 *OVERDUE*' : '';
           const priorityBadge = t.priority === 'High' ? ' 🔴 *HIGH PRIORITY*' : '';
           const timeBadge = t.time_label || t.timeLabel || 'All-Day';
           const companyBadge = t.company ? ` • [${t.company}]` : '';
