@@ -248,6 +248,11 @@ export default function App() {
   const [requiresComment, setRequiresComment] = useState(false);
   const [allowAssigneeDeadlineChange, setAllowAssigneeDeadlineChange] = useState(true);
 
+  // NEW: Checklist State
+  const [requireChecklist, setRequireChecklist] = useState(false);
+  const [checklist, setChecklist] = useState([]);
+  const [checklistException, setChecklistException] = useState('');
+
   const [notifyOnComplete, setNotifyOnComplete] = useState(true); 
   const [notifyOnComment, setNotifyOnComment] = useState(true);   
   const [notifyOnDeadlineChange, setNotifyOnDeadlineChange] = useState(true); 
@@ -389,7 +394,15 @@ export default function App() {
       if (error) {
         console.error('Error fetching tasks from cloud:', error);
       } else if (data) {
-        const mapped = data.map(mapFromDb);
+        // Map from DB, injecting the new checklist properties explicitly
+        const mapped = data.map(d => {
+           const mappedItem = mapFromDb(d);
+           return {
+             ...mappedItem,
+             requireChecklist: d.require_checklist || false,
+             checklist: typeof d.checklist === 'string' ? JSON.parse(d.checklist) : (d.checklist || [])
+           };
+        });
         setTasks(mapped);
 
         const missingCompanies = [...new Set(mapped.map(t => t.company).filter(c => c && !companies.includes(c)))];
@@ -804,6 +817,7 @@ export default function App() {
             const currentExceptions = t.exceptionDates || [];
             const updatedExceptions = effectiveSourceDate && !currentExceptions.includes(effectiveSourceDate) ? [...currentExceptions, effectiveSourceDate] : currentExceptions;
             const updatedMaster = { ...t, exceptionDates: updatedExceptions };
+            // Injecting explicitly for standalone clone mapping safety
             dbPayloads.push({ action: 'update', payload: updatedMaster });
             dbPayloads.push({ action: 'insert', payload: standaloneTask });
             return updatedMaster;
@@ -871,7 +885,11 @@ export default function App() {
     });
 
     for (const job of dbPayloads) {
-      const dbData = mapToDb(job.payload);
+      const dbData = {
+        ...mapToDb(job.payload),
+        require_checklist: job.payload.requireChecklist,
+        checklist: job.payload.checklist
+      };
       if (job.action === 'update') await supabase.from('tasks').update(dbData).eq('id', job.payload.id);
       if (job.action === 'insert') await supabase.from('tasks').insert(dbData);
     }
@@ -1079,6 +1097,51 @@ export default function App() {
     setNotifyOnComment(true);   
     setNotifyOnDeadlineChange(true);
     setNotifyOnTaskCreated(true);
+    
+    // Checklist reset
+    setRequireChecklist(false);
+    setChecklist([]);
+    setChecklistException('');
+  };
+
+  // CHECKLIST BUILDER HANDLERS
+  const handleAddChecklistItem = () => {
+    setChecklist([...checklist, { id: crypto.randomUUID(), text: '', completedDates: [] }]);
+  };
+
+  const handleUpdateChecklistItem = (id, text) => {
+    setChecklist(checklist.map(i => i.id === id ? { ...i, text } : i));
+  };
+
+  const handleRemoveChecklistItem = (id) => {
+    setChecklist(checklist.filter(i => i.id !== id));
+  };
+
+  // IMMEDIATE CHECKLIST SAVING
+  const handleToggleChecklistItem = async (taskId, itemId, instanceDate) => {
+    const target = tasks.find(t => t.id === taskId);
+    if (!target) return;
+    
+    const newChecklist = target.checklist.map(item => {
+      if (item.id === itemId) {
+        const dates = item.completedDates || [];
+        const isDone = dates.includes(instanceDate);
+        return { 
+          ...item, 
+          completedDates: isDone ? dates.filter(d => d !== instanceDate) : [...dates, instanceDate] 
+        };
+      }
+      return item;
+    });
+
+    const updatedTask = { ...target, checklist: newChecklist };
+    
+    // Optimistic UI update
+    setTasks(tasks.map(t => t.id === taskId ? updatedTask : t));
+    if (selectedTask?.id === taskId) setSelectedTask(updatedTask);
+    
+    // Fire & forget to cloud
+    await supabase.from('tasks').update({ checklist: newChecklist }).eq('id', taskId);
   };
 
   const handleAddChainedStep = () => {
@@ -1138,6 +1201,9 @@ export default function App() {
     const startDec = timeToDecimal(startTime);
     const endDec = timeToDecimal(endTime);
     const dur = Math.max(0.5, endDec - startDec);
+    
+    // Purge empty checklist items
+    const validChecklist = checklist.filter(i => i.text.trim() !== '');
 
     const newTask = {
       id: Date.now().toString(),
@@ -1152,6 +1218,8 @@ export default function App() {
       duration: hasSpecificTime ? dur : null,
       timeLabel: hasSpecificTime ? formatTimeLabel(startTime, endTime) : 'All-Day',
       priority: taskPriority,
+      requireChecklist,
+      checklist: validChecklist,
       requiresPhoto,
       requiresComment,
       allowAssigneeDeadlineChange,
@@ -1188,7 +1256,13 @@ export default function App() {
     resetForm();
     setCurrentView(previousView === 'create' ? 'list' : previousView);
 
-    const { error } = await supabase.from('tasks').insert(mapToDb(newTask));
+    const dbPayload = {
+      ...mapToDb(newTask),
+      require_checklist: newTask.requireChecklist,
+      checklist: newTask.checklist
+    };
+
+    const { error } = await supabase.from('tasks').insert(dbPayload);
     if (error) {
       console.error('Supabase Insert Error:', error);
       alert(`Cloud sync error: ${error.message}`);
@@ -1221,6 +1295,11 @@ export default function App() {
     setRecurrenceType(task.recurrenceType || 'once');
     setActiveDays(task.activeDays || []);
     setCadenceDays(task.cadenceDays || 7);
+    
+    setRequireChecklist(task.requireChecklist || false);
+    setChecklist(task.checklist || []);
+    setChecklistException('');
+
     setRequiresPhoto(task.requiresPhoto || false);
     setRequiresComment(task.requiresComment || false);
     setAllowAssigneeDeadlineChange(task.allowAssigneeDeadlineChange || false);
@@ -1241,6 +1320,7 @@ export default function App() {
     const dur = Math.max(0.5, endDec - startDec);
     const todayStr = formatDateKey(new Date());
     
+    const validChecklist = checklist.filter(i => i.text.trim() !== '');
     const isStillOverdue = Boolean(taskDate && taskDate.trim() !== '' && taskDate < todayStr && selectedTask.status !== 'completed' && recurrenceType === 'once');
 
     const editNote = `✏️ Task details modified by ${currentUserName} [${getCurrentTimestamp()}]`;
@@ -1262,6 +1342,8 @@ export default function App() {
       recurrenceType,
       activeDays: recurrenceType === 'fixed' ? activeDays : [],
       cadenceDays: Number(cadenceDays),
+      requireChecklist,
+      checklist: validChecklist,
       requiresPhoto,
       requiresComment,
       allowAssigneeDeadlineChange,
@@ -1278,7 +1360,13 @@ export default function App() {
 
     setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t));
 
-    const { error } = await supabase.from('tasks').update(mapToDb(updatedTask)).eq('id', updatedTask.id);
+    const dbPayload = {
+      ...mapToDb(updatedTask),
+      require_checklist: updatedTask.requireChecklist,
+      checklist: updatedTask.checklist
+    };
+
+    const { error } = await supabase.from('tasks').update(dbPayload).eq('id', updatedTask.id);
     if (error) {
       console.error('Supabase Update Error:', error);
       alert(`Cloud sync error: ${error.message}`);
@@ -1442,6 +1530,13 @@ export default function App() {
     if (selectedTask.requiresComment && !openCommentInput.trim() && (!selectedTask.comments || selectedTask.comments.length === 0)) {
       return alert('Execution notes required to complete this task.');
     }
+
+    if (selectedTask.requireChecklist) {
+      const hasIncomplete = selectedTask.checklist?.some(item => !(item.completedDates || []).includes(selectedInstanceDate));
+      if (hasIncomplete && !checklistException.trim()) {
+        return alert('Mandatory checklist items are unchecked. Please complete them or provide an exception reason below the checklist.');
+      }
+    }
     
     setCompletionPrompt({
       showForm: false,
@@ -1465,11 +1560,14 @@ export default function App() {
 
     const todayStrForCompletion = formatDateKey(new Date());
 
+    const hasIncompleteChecklist = selectedTask.requireChecklist && selectedTask.checklist?.some(item => !(item.completedDates || []).includes(selectedInstanceDate));
+    const exceptionNote = (hasIncompleteChecklist && checklistException.trim()) ? `\n⚠️ Checklist Exception: ${checklistException.trim()}` : '';
+    const completionNote = `✅ Marked Complete by ${currentUserName} [${getCurrentTimestamp()}]${exceptionNote}`;
+
     let updatedTasks = tasks.map(t => {
       if (t.id === selectedTask.id) {
         if (t.status === 'completed' && t.recurrenceType === 'once') return t;
 
-        const completionNote = `✅ Marked Complete by ${currentUserName} [${getCurrentTimestamp()}]`;
         const newComments = noteText 
           ? [...(t.comments || []), noteText, completionNote] 
           : [...(t.comments || []), completionNote];
@@ -1514,6 +1612,8 @@ export default function App() {
         duration: null,
         timeLabel: 'All-Day',
         priority: selectedTask.priority || 'Standard',
+        requireChecklist: false,
+        checklist: [],
         requiresPhoto: false,
         requiresComment: false,
         allowAssigneeDeadlineChange: selectedTask.allowAssigneeDeadlineChange || false,
@@ -1589,6 +1689,8 @@ export default function App() {
         duration: 1,
         timeLabel: '09:00 AM - 10:00 AM',
         priority: nextStep.priority || 'Standard',
+        requireChecklist: false,
+        checklist: [],
         requiresPhoto: nextStep.requiresPhoto || false,
         requiresComment: nextStep.requiresComment || false,
         allowAssigneeDeadlineChange: false,
@@ -1623,11 +1725,17 @@ export default function App() {
     }
 
     for (let p of payloadQueue) {
-      await supabase.from('tasks').insert(mapToDb(p.data));
+      const dbPayload = {
+        ...mapToDb(p.data),
+        require_checklist: p.data.requireChecklist,
+        checklist: p.data.checklist
+      };
+      await supabase.from('tasks').insert(dbPayload);
     }
 
     setCompletionPrompt(null);
     setSelectedTask(null);
+    setChecklistException('');
   };
 
   const handleAppendNote = async (id) => {
@@ -2063,6 +2171,9 @@ export default function App() {
             setNotifyOnComment={setNotifyOnComment} notifyOnDeadlineChange={notifyOnDeadlineChange} 
             setNotifyOnDeadlineChange={setNotifyOnDeadlineChange} notifyOnTaskCreated={notifyOnTaskCreated} 
             setNotifyOnTaskCreated={setNotifyOnTaskCreated} handleDeployTask={handleDeployTask}
+            requireChecklist={requireChecklist} setRequireChecklist={setRequireChecklist} 
+            checklist={checklist} handleAddChecklistItem={handleAddChecklistItem} 
+            handleUpdateChecklistItem={handleUpdateChecklistItem} handleRemoveChecklistItem={handleRemoveChecklistItem}
           />
         )}
 
@@ -2089,6 +2200,10 @@ export default function App() {
           handleAppendNote={handleAppendNote} handleSaveChanges={handleSaveChanges} handleDeleteTask={handleDeleteTask} handleReopenTask={handleReopenTask}
           handleInitiateCompletion={handleInitiateCompletion} handleOpenModal={handleOpenModal} isTaskPastDue={isTaskPastDue}
           getCurrentTimestamp={getCurrentTimestamp} tasks={tasks} setTasks={setTasks} dispatchNotification={dispatchNotification} renderComment={renderComment}
+          requireChecklist={requireChecklist} setRequireChecklist={setRequireChecklist} checklist={checklist} 
+          handleAddChecklistItem={handleAddChecklistItem} handleUpdateChecklistItem={handleUpdateChecklistItem} 
+          handleRemoveChecklistItem={handleRemoveChecklistItem} handleToggleChecklistItem={handleToggleChecklistItem}
+          checklistException={checklistException} setChecklistException={setChecklistException}
         />
 
         {/* SUB-TASK COMPLETION MODAL */}

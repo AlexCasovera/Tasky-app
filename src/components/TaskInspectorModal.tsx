@@ -4,7 +4,8 @@ import { formatDateKey, formatTimeLabel, mapToDb, daysOfWeek } from '../utils';
 import { supabase } from '../supabaseClient';
 
 export default function TaskInspectorModal({
-  selectedTask, setSelectedTask, selectedInstanceDate, isCurrentInstanceCompleted, userRole, currentUserName, teamMembers, masterCompanyList, isEditing, setIsEditing, taskTitle, setTaskTitle, taskDesc, setTaskDesc, taskCompany, setTaskCompany, taskPriority, setTaskPriority, taskDate, setTaskDate, hasSpecificTime, setHasSpecificTime, startTime, setStartTime, endTime, setEndTime, isLongTerm, setIsLongTerm, selectedAssignees, handleAddAssignee, handleRemoveAssignee, recurrenceType, setRecurrenceType, activeDays, toggleDay, cadenceDays, setCadenceDays, chainedSteps, handleAddChainedStep, handleUpdateChainedStep, handleRemoveChainedStep, requiresPhoto, setRequiresPhoto, requiresComment, setRequiresComment, allowAssigneeDeadlineChange, setAllowAssigneeDeadlineChange, notifyOnComplete, setNotifyOnComplete, notifyOnComment, setNotifyOnComment, notifyOnDeadlineChange, setNotifyOnDeadlineChange, notifyOnTaskCreated, setNotifyOnTaskCreated, openCommentInput, setExecutionComment, handlePostOpenComment, isDraggingFile, setIsDraggingFile, handleFileUpload, additionalNote, setAdditionalNote, handleAppendNote, handleSaveChanges, handleDeleteTask, handleReopenTask, handleInitiateCompletion, handleOpenModal, isTaskPastDue, getCurrentTimestamp, tasks, setTasks, dispatchNotification, renderComment
+  selectedTask, setSelectedTask, selectedInstanceDate, isCurrentInstanceCompleted, userRole, currentUserName, teamMembers, masterCompanyList, isEditing, setIsEditing, taskTitle, setTaskTitle, taskDesc, setTaskDesc, taskCompany, setTaskCompany, taskPriority, setTaskPriority, taskDate, setTaskDate, hasSpecificTime, setHasSpecificTime, startTime, setStartTime, endTime, setEndTime, isLongTerm, setIsLongTerm, selectedAssignees, handleAddAssignee, handleRemoveAssignee, recurrenceType, setRecurrenceType, activeDays, toggleDay, cadenceDays, setCadenceDays, chainedSteps, handleAddChainedStep, handleUpdateChainedStep, handleRemoveChainedStep, requiresPhoto, setRequiresPhoto, requiresComment, setRequiresComment, allowAssigneeDeadlineChange, setAllowAssigneeDeadlineChange, notifyOnComplete, setNotifyOnComplete, notifyOnComment, setNotifyOnComment, notifyOnDeadlineChange, setNotifyOnDeadlineChange, notifyOnTaskCreated, setNotifyOnTaskCreated, openCommentInput, setExecutionComment, handlePostOpenComment, isDraggingFile, setIsDraggingFile, handleFileUpload, additionalNote, setAdditionalNote, handleAppendNote, handleSaveChanges, handleDeleteTask, handleReopenTask, handleInitiateCompletion, handleOpenModal, isTaskPastDue, getCurrentTimestamp, tasks, setTasks, dispatchNotification, renderComment,
+  requireChecklist, setRequireChecklist, checklist, handleAddChecklistItem, handleUpdateChecklistItem, handleRemoveChecklistItem, handleToggleChecklistItem, checklistException, setChecklistException
 }) {
   if (!selectedTask) return null;
 
@@ -78,32 +79,31 @@ export default function TaskInspectorModal({
                       await supabase.from('tasks').update(mapToDb(updated)).eq('id', selectedTask.id);
 
                       if (userRole === 'employee' && selectedTask?.notifyOnDeadlineChange !== false) {
-          dispatchNotification(
-            'role',
-            'admin',
-            'deadline',
-            `📅 Employee Rescheduled: "${selectedTask.title}" deadline changed to ${newDate}`,
-            '📅 Employee Changed Deadline',
-            `${currentUserName} moved deadline for "${selectedTask.title}" to ${newDate}`,
-            selectedTask.id,
-            newDate
-          );
-        } else if (userRole === 'admin') {
-          // If admin changes the date, notify all assigned employees
-          (selectedTask.assignees || []).forEach(assigneeName => {
-            dispatchNotification(
-              'userName',
-              assigneeName,
-              'schedule',
-              `📅 Schedule Update: "${selectedTask.title}" deadline changed to ${newDate}`,
-              '📅 Deadline Adjusted',
-              `Admin ${currentUserName} moved the deadline for "${selectedTask.title}" to ${newDate}`,
-              selectedTask.id,
-              newDate
-            );
-          });
-        }
-      }}
+                        dispatchNotification(
+                          'role',
+                          'admin',
+                          'deadline',
+                          `📅 Employee Rescheduled: "${selectedTask.title}" deadline changed to ${newDate}`,
+                          '📅 Employee Changed Deadline',
+                          `${currentUserName} moved deadline for "${selectedTask.title}" to ${newDate}`,
+                          selectedTask.id,
+                          newDate
+                        );
+                      } else if (userRole === 'admin') {
+                        (selectedTask.assignees || []).forEach(assigneeName => {
+                          dispatchNotification(
+                            'userName',
+                            assigneeName,
+                            'schedule',
+                            `📅 Schedule Update: "${selectedTask.title}" deadline changed to ${newDate}`,
+                            '📅 Deadline Adjusted',
+                            `Admin ${currentUserName} moved the deadline for "${selectedTask.title}" to ${newDate}`,
+                            selectedTask.id,
+                            newDate
+                          );
+                        });
+                      }
+                    }}
                     className={`p-1.5 text-xs border rounded font-bold text-gray-800 focus:outline-none ${selectedTask.recurrenceType !== 'once' ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-pointer'}`}
                   />
                   {selectedTask.recurrenceType !== 'once' ? (
@@ -112,6 +112,44 @@ export default function TaskInspectorModal({
                     <span className="text-[11px] text-gray-500 italic ml-2">(Reschedules task on dispatch board)</span>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* INTERACTIVE CHECKLIST VIEW */}
+            {selectedTask.requireChecklist && selectedTask.checklist?.length > 0 && (
+              <div className="bg-white p-3 rounded border border-gray-200 mb-1 mt-1">
+                <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500 mb-2">Required Checklist</h4>
+                <div className="flex flex-col gap-1.5">
+                  {selectedTask.checklist.map((item) => {
+                    const isChecked = (item.completedDates || []).includes(selectedInstanceDate);
+                    return (
+                      <label key={item.id} className={`flex items-start gap-2 p-2 rounded border cursor-pointer transition ${isChecked ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200 hover:bg-gray-100'}`}>
+                        <input 
+                          type="checkbox" 
+                          checked={isChecked} 
+                          disabled={isCurrentInstanceCompleted}
+                          onChange={() => handleToggleChecklistItem(selectedTask.id, item.id, selectedInstanceDate)} 
+                          className="accent-green-600 w-4 h-4 mt-0.5" 
+                        />
+                        <span className={`text-sm ${isChecked ? 'line-through text-green-700 opacity-70' : 'text-gray-800 font-medium'}`}>{item.text}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                
+                {/* DYNAMIC EXCEPTION REASON RENDER */}
+                {!isCurrentInstanceCompleted && selectedTask.checklist.some(i => !(i.completedDates || []).includes(selectedInstanceDate)) && (
+                   <div className="mt-3 bg-red-50 p-2.5 rounded border border-red-200">
+                     <label className="text-[10px] font-bold text-red-800 uppercase flex items-center gap-1"><span className="text-sm">⚠️</span> Reason for incomplete items (Required if completing task)</label>
+                     <textarea 
+                       value={checklistException} 
+                       onChange={(e) => setChecklistException(e.target.value)} 
+                       className="w-full text-xs p-1.5 border border-red-300 rounded mt-1.5 bg-white focus:outline-none" 
+                       rows={2} 
+                       placeholder="If you cannot complete every item above, explain why here to unlock completion..." 
+                     />
+                   </div>
+                )}
               </div>
             )}
 
@@ -344,40 +382,28 @@ export default function TaskInspectorModal({
                   </div>
                 </div>
               )}
-
-              {recurrenceType === 'completion' && (
-                <div className="flex items-center gap-2 mt-2">
-                  <span>Re-deploy</span>
-                  <input type="number" value={cadenceDays} onChange={(e) => setCadenceDays(Number(e.target.value))} className="w-12 p-1 border rounded text-center font-bold" />
-                  <span>days after completion</span>
-                </div>
-              )}
             </div>
 
-            {recurrenceType === 'completion' && (
-              <div className="bg-white p-3 rounded border border-gray-200">
-                <div className="flex justify-between items-center mb-2">
-                  <h4 className="font-bold text-gray-700">Chained Workflow Steps ({chainedSteps.length})</h4>
-                  <button type="button" onClick={handleAddChainedStep} className="text-[10px] font-bold bg-[#A9B1A6] text-white px-2 py-0.5 rounded">+ Step</button>
-                </div>
-
-                {chainedSteps.map((step, idx) => (
-                  <div key={idx} className="bg-gray-50 p-2 rounded border border-gray-200 mb-2 flex flex-col gap-1.5">
-                    <div className="flex justify-between font-bold text-gray-600">
-                      <span>Step {idx + 1} Sub Task</span>
-                      <button type="button" onClick={() => handleRemoveChainedStep(idx)} className="text-red-600">Remove</button>
-                    </div>
-                    <input type="text" value={step.title} onChange={(e) => handleUpdateChainedStep(idx, 'title', e.target.value)} placeholder="Step Title" className="p-1 border rounded bg-white" />
-                    <div className="flex gap-2">
-                      <input type="number" value={step.relativeDays} onChange={(e) => handleUpdateChainedStep(idx, 'relativeDays', Number(e.target.value))} className="w-12 p-1 border rounded bg-white text-center font-bold" />
-                      <span className="self-center">days after</span>
-                    </div>
+            {/* EDIT MODE CHECKLIST */}
+            <div className="bg-white p-3 rounded border border-gray-200 flex flex-col gap-1.5 mt-1">
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer border-b pb-2 mb-1 border-gray-100 font-bold">
+                <input type="checkbox" checked={requireChecklist} onChange={(e) => setRequireChecklist(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require Checklist Completion (Mandatory items)
+              </label>
+              {requireChecklist && (
+                <div className="flex flex-col gap-2 mb-2 bg-gray-50 p-3 rounded border border-gray-200">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Sub-Checklist Items</span>
+                    <button type="button" onClick={handleAddChecklistItem} className="text-[10px] font-bold bg-[#A9B1A6] text-white px-2 py-0.5 rounded">+ Add Item</button>
                   </div>
-                ))}
-              </div>
-            )}
-
-            <div className="bg-white p-3 rounded border border-gray-200 flex flex-col gap-1.5">
+                  {checklist.map((item, idx) => (
+                    <div key={item.id} className="flex gap-2">
+                      <input type="text" value={item.text} onChange={(e) => handleUpdateChecklistItem(item.id, e.target.value)} placeholder={`Item ${idx + 1}...`} className="flex-1 p-1.5 text-xs border rounded bg-white" />
+                      <button type="button" onClick={() => handleRemoveChecklistItem(item.id)} className="text-red-600 font-bold px-1 hover:text-red-800">✕</button>
+                    </div>
+                  ))}
+                  {checklist.length === 0 && <span className="text-[10px] text-gray-400 italic">No items added.</span>}
+                </div>
+              )}
               <label className="flex items-center gap-1.5 font-bold cursor-pointer">
                 <input type="checkbox" checked={requiresPhoto} onChange={(e) => setRequiresPhoto(e.target.checked)} className="accent-[#A9B1A6]" /> Require proof of work upload (Mandatory to complete)
               </label>

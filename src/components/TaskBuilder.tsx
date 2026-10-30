@@ -13,7 +13,9 @@ export default function TaskBuilder({
   requiresComment, setRequiresComment, allowAssigneeDeadlineChange, setAllowAssigneeDeadlineChange, 
   notifyOnComplete, setNotifyOnComplete, notifyOnComment, setNotifyOnComment, 
   notifyOnDeadlineChange, setNotifyOnDeadlineChange, notifyOnTaskCreated, 
-  setNotifyOnTaskCreated, handleDeployTask
+  setNotifyOnTaskCreated, handleDeployTask,
+  requireChecklist, setRequireChecklist, checklist, handleAddChecklistItem, 
+  handleUpdateChecklistItem, handleRemoveChecklistItem
 }) {
   return (
     <div className="flex flex-col h-full animate-fade-in">
@@ -216,6 +218,28 @@ export default function TaskBuilder({
           <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
             <h4 className="font-bold text-sm mb-2">Proof of Work & Permissions</h4>
             <div className="flex flex-col gap-2">
+              
+              {/* CHECKLIST ENGINE */}
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer border-b pb-2 mb-2 border-gray-100">
+                <input type="checkbox" checked={requireChecklist} onChange={(e) => setRequireChecklist(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require Checklist Completion (Mandatory items)
+              </label>
+              
+              {requireChecklist && (
+                <div className="flex flex-col gap-2 mb-3 bg-gray-50 p-3 rounded border border-gray-200">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Sub-Checklist Items</span>
+                    <button type="button" onClick={handleAddChecklistItem} className="text-[10px] font-bold bg-[#A9B1A6] text-white px-2 py-0.5 rounded">+ Add Item</button>
+                  </div>
+                  {checklist.map((item, idx) => (
+                    <div key={item.id} className="flex gap-2">
+                      <input type="text" value={item.text} onChange={(e) => handleUpdateChecklistItem(item.id, e.target.value)} placeholder={`Item ${idx + 1}...`} className="flex-1 p-1.5 text-xs border rounded bg-white" />
+                      <button type="button" onClick={() => handleRemoveChecklistItem(item.id)} className="text-red-600 font-bold px-1 hover:text-red-800">✕</button>
+                    </div>
+                  ))}
+                  {checklist.length === 0 && <span className="text-[10px] text-gray-400 italic">No items added.</span>}
+                </div>
+              )}
+
               <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                 <input type="checkbox" checked={requiresPhoto} onChange={(e) => setRequiresPhoto(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require proof of work upload (Mandatory to complete)
               </label>
