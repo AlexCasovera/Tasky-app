@@ -146,18 +146,40 @@ export default async function handler(req, res) {
         text: { type: 'mrkdwn', text: `🎉 *All clear!* No pending tasks found for ${targetMemberName} today.` }
       });
     } else {
-      const taskLines = filteredTasks.map(t => {
+      blocks.push({
+        type: 'section',
+        text: { type: 'mrkdwn', text: `*Here is the agenda for today (${filteredTasks.length} task${filteredTasks.length > 1 ? 's' : ''}):*` }
+      });
+
+      filteredTasks.forEach(t => {
         const isPastDue = isTaskPastDue(t, targetDate);
         const overdueBadge = isPastDue ? ' 🚨 *OVERDUE*' : '';
         const priorityBadge = t.priority === 'High' ? ' 🔴 *HIGH PRIORITY*' : '';
         const timeBadge = t.time_label || 'All-Day';
         const companyBadge = t.company ? ` • [${t.company}]` : '';
-        return `• *${timeBadge}* — ${t.title}${companyBadge}${overdueBadge}${priorityBadge}`;
-      });
 
-      blocks.push({
-        type: 'section',
-        text: { type: 'mrkdwn', text: `*Here is the agenda for today (${filteredTasks.length} task${filteredTasks.length > 1 ? 's' : ''}):*\n\n` + taskLines.join('\n') }
+        blocks.push({
+          type: 'section',
+          block_id: `task_${t.id}`,
+          text: {
+            type: 'mrkdwn',
+            text: `• *${timeBadge}* — *${t.title}*${companyBadge}${overdueBadge}${priorityBadge}`
+          },
+          accessory: {
+            type: 'button',
+            action_id: 'complete_task',
+            text: {
+              type: 'plain_text',
+              text: 'Done ✅',
+              emoji: true
+            },
+            style: 'primary',
+            value: JSON.stringify({
+              taskId: t.id,
+              date: targetDate
+            })
+          }
+        });
       });
     }
 

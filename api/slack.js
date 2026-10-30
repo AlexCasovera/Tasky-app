@@ -7,22 +7,21 @@ export default async function handler(req, res) {
   try {
     let rawPayload = req.body.payload;
     if (!rawPayload && typeof req.body === 'string') {
-        const params = new URLSearchParams(req.body);
-        rawPayload = params.get('payload');
+      const params = new URLSearchParams(req.body);
+      rawPayload = params.get('payload');
     }
     if (!rawPayload) return res.status(400).send('No payload');
 
     const payload = JSON.parse(rawPayload);
 
     const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://pjnuhzdzvxojudkfnofh.supabase.co';
-    const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+    const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_PBUZMbHEPkkpjDoDd7m18g_C_6c3cZW';
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // ACTION 1: USER CLICKS SHORTCUT -> CHECK ADMIN PERMISSION -> OPEN SLACK MODAL
     if (payload.type === 'message_action' && payload.callback_id === 'send_to_tasky') {
       const slackUserId = payload.user?.id;
 
-      // Verify that this Slack user has Admin privileges in Tasky
       const { data: requestingProfile, error: authError } = await supabase
         .from('profiles')
         .select('*')
@@ -73,7 +72,7 @@ export default async function handler(req, res) {
       let companyOptions = [];
       if (!companyError && companies && companies.length > 0) {
         companyOptions = companies
-          .filter(c => c.name) 
+          .filter(c => c.name)
           .map(c => ({
             text: { type: 'plain_text', text: c.name.substring(0, 70) },
             value: c.name.substring(0, 70)
@@ -92,7 +91,7 @@ export default async function handler(req, res) {
           trigger_id: payload.trigger_id,
           view: {
             type: 'modal',
-            callback_id: 'tasky_modal_submit', 
+            callback_id: 'tasky_modal_submit',
             title: { type: 'plain_text', text: 'Create Tasky Task' },
             submit: { type: 'plain_text', text: 'Create Task' },
             blocks: [
@@ -105,7 +104,7 @@ export default async function handler(req, res) {
               {
                 type: 'input',
                 block_id: 'desc_block',
-                optional: true, 
+                optional: true,
                 element: { type: 'plain_text_input', multiline: true, action_id: 'desc_input' },
                 label: { type: 'plain_text', text: 'Description' }
               },
@@ -115,7 +114,7 @@ export default async function handler(req, res) {
                 element: {
                   type: 'static_select',
                   action_id: 'company_input',
-                  options: companyOptions 
+                  options: companyOptions
                 },
                 label: { type: 'plain_text', text: 'Company' }
               },
@@ -125,9 +124,9 @@ export default async function handler(req, res) {
                 element: {
                   type: 'static_select',
                   action_id: 'assignee_input',
-                  options: assigneeOptions 
+                  options: assigneeOptions
                 },
-                label: { type: 'plain_text', text: 'Employee' } 
+                label: { type: 'plain_text', text: 'Employee' }
               },
               {
                 type: 'input',
@@ -171,7 +170,7 @@ export default async function handler(req, res) {
       });
 
       if (taskError) {
-        console.error("Supabase Rejected Task Insert:", JSON.stringify(taskError));
+        console.error('Supabase Rejected Task Insert:', JSON.stringify(taskError));
         return res.status(500).end();
       }
 
@@ -207,16 +206,88 @@ export default async function handler(req, res) {
             })
           });
         } catch (pushError) {
-          console.error("Failed to ping /api/notify endpoint:", pushError);
+          console.error('Failed to ping /api/notify endpoint:', pushError);
         }
       }
 
       return res.status(200).end();
     }
 
+    // ACTION 3: USER CLICKS 'Done ✅' IN SLACK DISPATCH
+    if (payload.type === 'block_actions') {
+      const action = payload.actions?.[0];
+      if (action && action.action_id === 'complete_task') {
+        let taskData = {};
+        try {
+          taskData = JSON.parse(action.value);
+        } catch (e) {
+          taskData = { taskId: action.value };
+        }
+
+        const { taskId, date } = taskData;
+        const completedDate = date || new Date().toISOString().split('T')[0];
+
+        // Fetch task to determine whether it is fixed recurrence or single
+        const { data: currentTask } = await supabase
+          .from('tasks')
+          .select('*')
+          .eq('id', taskId)
+          .single();
+
+        if (currentTask) {
+          const isFixed = (currentTask.recurrence_type || currentTask.recurrenceType) === 'fixed';
+
+          if (isFixed) {
+            const dateCol = currentTask.completed_dates !== undefined ? 'completed_dates' : 'completedDates';
+            const existingDates = currentTask[dateCol] || [];
+            if (!existingDates.includes(completedDate)) {
+              await supabase
+                .from('tasks')
+                .update({ [dateCol]: [...existingDates, completedDate] })
+                .eq('id', taskId);
+            }
+          } else {
+            await supabase
+              .from('tasks')
+              .update({ status: 'completed' })
+              .eq('id', taskId);
+          }
+        }
+
+        // Update the Slack message to cross off the completed task and remove the button
+        if (payload.response_url && payload.message?.blocks) {
+          const updatedBlocks = payload.message.blocks.map(block => {
+            if (block.block_id === `task_${taskId}`) {
+              const originalText = block.text?.text || '';
+              return {
+                type: 'section',
+                block_id: block.block_id,
+                text: {
+                  type: 'mrkdwn',
+                  text: `~${originalText}~  *✅ Completed*`
+                }
+              };
+            }
+            return block;
+          });
+
+          await fetch(payload.response_url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              replace_original: true,
+              blocks: updatedBlocks
+            })
+          });
+        }
+
+        return res.status(200).end();
+      }
+    }
+
     return res.status(200).end();
   } catch (err) {
-    console.error("Syntax/Parse Error:", err);
+    console.error('Syntax/Parse Error:', err);
     return res.status(500).end();
   }
 }
