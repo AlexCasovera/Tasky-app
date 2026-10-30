@@ -193,7 +193,11 @@ export default async function handler(req, res) {
 
       if (profile?.push_subscription) {
         try {
-          await fetch(`${req.headers.origin || 'https://tasky-app-gilt.vercel.app'}/api/notify`, {
+          const appBaseUrl = process.env.VERCEL_URL
+            ? `https://${process.env.VERCEL_URL}`
+            : 'https://tasky-app-5gkh-alpha.vercel.app';
+
+          await fetch(`${appBaseUrl}/api/notify`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
