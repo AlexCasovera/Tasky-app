@@ -1,13 +1,10 @@
 // api/cron-dispatch.js
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://pjnuhzdzvxojudkfnofh.supabase.co';
-  const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_PBUZMbHEPkkpjDoDd7m18g_C_6c3cZW';
-  const slackBotToken = process.env.SLACK_BOT_TOKEN;
-
 const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function parseDateToUTC(dateStr) {
+  if (!dateStr) return new Date();
   const [y, m, d] = dateStr.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d));
 }
@@ -18,14 +15,19 @@ function formatUTCDate(d) {
 
 function isTaskScheduledOnDay(task, dateStr, dayOfWeekStr) {
   if (!task) return false;
-  if (task.endDate && dateStr > task.endDate) return false;
+  const endDate = task.end_date || task.endDate;
+  if (endDate && dateStr > endDate) return false;
 
-  if (task.recurrenceType === 'fixed') {
+  const recurrenceType = task.recurrence_type || task.recurrenceType || 'once';
+  const activeDays = task.active_days || task.activeDays;
+  const cadenceDays = task.cadence_days || task.cadenceDays || 7;
+
+  if (recurrenceType === 'fixed') {
     const startDate = task.date;
     if (startDate && dateStr < startDate) return false;
-    if (!task.activeDays || !task.activeDays.includes(dayOfWeekStr)) return false;
+    if (!activeDays || !activeDays.includes(dayOfWeekStr)) return false;
 
-    const intervalWeeks = Math.max(1, Math.round((task.cadenceDays || 7) / 7));
+    const intervalWeeks = Math.max(1, Math.round(cadenceDays / 7));
     if (intervalWeeks > 1 && startDate) {
       const sDate = parseDateToUTC(startDate);
       const sSunday = new Date(sDate);
@@ -49,35 +51,55 @@ function isTaskPastDue(task, targetDateStr) {
   if (!task.date || task.date.trim() === '') return false;
   if (task.status === 'completed') return false;
 
-  if (task.recurrenceType === 'once' || task.recurrenceType === 'completion') {
+  const recurrenceType = task.recurrence_type || task.recurrenceType || 'once';
+  const cadenceDays = task.cadence_days || task.cadenceDays || 7;
+
+  if (recurrenceType === 'once' || recurrenceType === 'completion') {
     return task.date < targetDateStr;
   }
 
-  if (task.recurrenceType === 'fixed') {
-      let missedDate = null;
-      const maxLookback = Math.max(7, task.cadenceDays || 7);
-      for (let i = 1; i <= maxLookback; i++) {
-        const d = parseDateToUTC(targetDateStr);
-        d.setUTCDate(d.getUTCDate() - i);
-        const checkDateStr = formatUTCDate(d);
-        const dayOfWeekStr = daysOfWeek[d.getUTCDay()];
-        
-        if (isTaskScheduledOnDay(task, checkDateStr, dayOfWeekStr)) {
-            missedDate = checkDateStr;
-            break;
-        }
-      }
+  if (recurrenceType === 'fixed') {
+    let missedDate = null;
+    const maxLookback = Math.max(7, cadenceDays);
+    for (let i = 1; i <= maxLookback; i++) {
+      const d = parseDateToUTC(targetDateStr);
+      d.setUTCDate(d.getUTCDate() - i);
+      const checkDateStr = formatUTCDate(d);
+      const dayOfWeekStr = daysOfWeek[d.getUTCDay()];
 
-      if (missedDate && missedDate < targetDateStr) {
-        const completedDates = task.completedDates || [];
-        const exceptionDates = task.exceptionDates || [];
-        if (completedDates.includes(missedDate)) return false;
-        if (exceptionDates.includes(missedDate)) return false;
-        return true;
+      if (isTaskScheduledOnDay(task, checkDateStr, dayOfWeekStr)) {
+        missedDate = checkDateStr;
+        break;
       }
-      return false;
+    }
+
+    if (missedDate && missedDate < targetDateStr) {
+      const completedDates = task.completed_dates || task.completedDates || [];
+      const exceptionDates = task.exception_dates || task.exceptionDates || [];
+      if (completedDates.includes(missedDate)) return false;
+      if (exceptionDates.includes(missedDate)) return false;
+      return true;
+    }
+    return false;
   }
   return false;
+}
+
+function matchesAssignee(taskAssignees, targetName) {
+  if (!taskAssignees || !targetName) return false;
+  const list = Array.isArray(taskAssignees) ? taskAssignees : [taskAssignees];
+  
+  const cleanTarget = targetName.toLowerCase().replace(/\s*\(.*?\)/g, '').trim();
+
+  return list.some(rawAssignee => {
+    const name = typeof rawAssignee === 'string' ? rawAssignee : (rawAssignee?.name || rawAssignee?.full_name || '');
+    const cleanName = name.toLowerCase().replace(/\s*\(.*?\)/g, '').trim();
+    if (!cleanName) return false;
+
+    return cleanName === cleanTarget || 
+           cleanName.startsWith(cleanTarget) || 
+           cleanTarget.startsWith(cleanName);
+  });
 }
 
 export default async function handler(req, res) {
@@ -85,13 +107,14 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  // Allow manual runs in development or with CRON_SECRET if set
   const authHeader = req.headers.authorization;
-  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (process.env.CRON_SECRET && authHeader && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized cron execution' });
   }
 
   const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://pjnuhzdzvxojudkfnofh.supabase.co';
-  const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_PBUZMbHEPkkpjDoDd7m18g_C_6c3cZW';
   const slackBotToken = process.env.SLACK_BOT_TOKEN;
 
   if (!supabaseKey || !slackBotToken) {
@@ -99,8 +122,8 @@ export default async function handler(req, res) {
   }
 
   const supabase = createClient(supabaseUrl, supabaseKey);
-  
-  const azDate = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Phoenix" }));
+
+  const azDate = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Phoenix' }));
   const targetDate = azDate.toISOString().split('T')[0];
   const targetDayStr = daysOfWeek[azDate.getDay()];
 
@@ -130,9 +153,7 @@ export default async function handler(req, res) {
       const firstFirstName = targetName.split(' ')[0];
 
       const filteredTasks = (allTasks || []).filter(task => {
-        const isAssigned = (task.assignees || []).includes(targetName);
-        if (!isAssigned) return false;
-        
+        if (!matchesAssignee(task.assignees, targetName)) return false;
         if (profile.dispatch_priority_only && task.priority !== 'High') return false;
 
         const isScheduledToday = isTaskScheduledOnDay(task, targetDate, targetDayStr);
@@ -163,18 +184,40 @@ export default async function handler(req, res) {
           text: { type: 'mrkdwn', text: `🎉 *All clear!* No pending tasks found for ${targetName} today.` }
         });
       } else {
-        const taskLines = filteredTasks.map(t => {
+        blocks.push({
+          type: 'section',
+          text: { type: 'mrkdwn', text: `*Here is the agenda for today (${filteredTasks.length} task${filteredTasks.length > 1 ? 's' : ''}):*` }
+        });
+
+        filteredTasks.forEach(t => {
           const isPastDue = isTaskPastDue(t, targetDate);
           const overdueBadge = isPastDue ? ' 🚨 *OVERDUE*' : '';
           const priorityBadge = t.priority === 'High' ? ' 🔴 *HIGH PRIORITY*' : '';
-          const timeBadge = t.time_label || 'All-Day';
+          const timeBadge = t.time_label || t.timeLabel || 'All-Day';
           const companyBadge = t.company ? ` • [${t.company}]` : '';
-          return `• *${timeBadge}* — ${t.title}${companyBadge}${overdueBadge}${priorityBadge}`;
-        });
 
-        blocks.push({
-          type: 'section',
-          text: { type: 'mrkdwn', text: `*Here is the agenda for today (${filteredTasks.length} task${filteredTasks.length > 1 ? 's' : ''}):*\n\n` + taskLines.join('\n') }
+          blocks.push({
+            type: 'section',
+            block_id: `task_${t.id}`,
+            text: {
+              type: 'mrkdwn',
+              text: `• *${timeBadge}* — *${t.title}*${companyBadge}${overdueBadge}${priorityBadge}`
+            },
+            accessory: {
+              type: 'button',
+              action_id: 'complete_task',
+              text: {
+                type: 'plain_text',
+                text: 'Done ✅',
+                emoji: true
+              },
+              style: 'primary',
+              value: JSON.stringify({
+                taskId: t.id,
+                date: targetDate
+              })
+            }
+          });
         });
       }
 
