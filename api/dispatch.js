@@ -1,10 +1,6 @@
 // api/dispatch.js
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://pjnuhzdzvxojudkfnofh.supabase.co';
-  const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_PBUZMbHEPkkpjDoDd7m18g_C_6c3cZW';
-  const slackBotToken = process.env.SLACK_BOT_TOKEN;
-
 const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function parseDateToUTC(dateStr) {
@@ -54,28 +50,28 @@ function isTaskPastDue(task, targetDateStr) {
   }
 
   if (task.recurrenceType === 'fixed') {
-      let missedDate = null;
-      const maxLookback = Math.max(7, task.cadenceDays || 7);
-      for (let i = 1; i <= maxLookback; i++) {
-        const d = parseDateToUTC(targetDateStr);
-        d.setUTCDate(d.getUTCDate() - i);
-        const checkDateStr = formatUTCDate(d);
-        const dayOfWeekStr = daysOfWeek[d.getUTCDay()];
-        
-        if (isTaskScheduledOnDay(task, checkDateStr, dayOfWeekStr)) {
-            missedDate = checkDateStr;
-            break;
-        }
-      }
+    let missedDate = null;
+    const maxLookback = Math.max(7, task.cadenceDays || 7);
+    for (let i = 1; i <= maxLookback; i++) {
+      const d = parseDateToUTC(targetDateStr);
+      d.setUTCDate(d.getUTCDate() - i);
+      const checkDateStr = formatUTCDate(d);
+      const dayOfWeekStr = daysOfWeek[d.getUTCDay()];
 
-      if (missedDate && missedDate < targetDateStr) {
-        const completedDates = task.completedDates || [];
-        const exceptionDates = task.exceptionDates || [];
-        if (completedDates.includes(missedDate)) return false;
-        if (exceptionDates.includes(missedDate)) return false;
-        return true;
+      if (isTaskScheduledOnDay(task, checkDateStr, dayOfWeekStr)) {
+        missedDate = checkDateStr;
+        break;
       }
-      return false;
+    }
+
+    if (missedDate && missedDate < targetDateStr) {
+      const completedDates = task.completedDates || [];
+      const exceptionDates = task.exceptionDates || [];
+      if (completedDates.includes(missedDate)) return false;
+      if (exceptionDates.includes(missedDate)) return false;
+      return true;
+    }
+    return false;
   }
   return false;
 }
@@ -92,7 +88,7 @@ export default async function handler(req, res) {
   }
 
   const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://pjnuhzdzvxojudkfnofh.supabase.co';
-  const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_PBUZMbHEPkkpjDoDd7m18g_C_6c3cZW';
   const slackBotToken = process.env.SLACK_BOT_TOKEN;
 
   if (!supabaseKey || !slackBotToken) {
@@ -102,7 +98,7 @@ export default async function handler(req, res) {
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   const targetDate = date || new Date().toISOString().split('T')[0];
-  
+
   const parsedTargetDate = parseDateToUTC(targetDate);
   const targetDayStr = daysOfWeek[parsedTargetDate.getUTCDay()];
 
@@ -117,7 +113,7 @@ export default async function handler(req, res) {
     const filteredTasks = (allTasks || []).filter(task => {
       const isAssigned = (task.assignees || []).includes(targetMemberName);
       if (!isAssigned) return false;
-      
+
       if (onlyHighPriority && task.priority !== 'High') return false;
 
       const isScheduledToday = isTaskScheduledOnDay(task, targetDate, targetDayStr);
