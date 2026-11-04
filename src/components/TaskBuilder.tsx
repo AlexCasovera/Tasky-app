@@ -1,6 +1,7 @@
 // @ts-nocheck
-import React from 'react';
-import { formatDateKey, daysOfWeek } from '../utils';
+import React, { useState, useEffect } from 'react';
+import { formatDateKey, daysOfWeek, timeToDecimal, formatTimeLabel } from '../utils';
+import { supabase } from '../supabaseClient';
 
 export default function TaskBuilder({
   setCurrentView, previousView, taskTitle, setTaskTitle, taskDesc, setTaskDesc, 
@@ -17,10 +18,164 @@ export default function TaskBuilder({
   requireChecklist, setRequireChecklist, checklist, handleAddChecklistItem, 
   handleUpdateChecklistItem, handleRemoveChecklistItem
 }) {
+  const [templates, setTemplates] = useState([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+
+  // Fetch templates from Supabase
+  useEffect(() => {
+    async function fetchTemplates() {
+      try {
+        const { data, error } = await supabase
+          .from('task_templates')
+          .select('*')
+          .order('name');
+        if (!error && data) {
+          setTemplates(data);
+        }
+      } catch (err) {
+        console.error('Failed to load templates:', err);
+      }
+    }
+    fetchTemplates();
+  }, []);
+
+  // Prepopulate form fields with template values
+  const handleApplyTemplate = (templateId) => {
+    const tmpl = templates.find(t => t.id === templateId);
+    if (!tmpl) return;
+
+    if (tmpl.title !== undefined) setTaskTitle(tmpl.title || '');
+    if (tmpl.description !== undefined) setTaskDesc(tmpl.description || '');
+    if (tmpl.company !== undefined) setTaskCompany(tmpl.company || '');
+    if (tmpl.priority !== undefined) setTaskPriority(tmpl.priority || 'Standard');
+    if (tmpl.type !== undefined) setHasSpecificTime(tmpl.type === 'timed');
+    if (tmpl.start_time) setStartTime(tmpl.start_time.substring(0, 5));
+    if (tmpl.end_time) setEndTime(tmpl.end_time.substring(0, 5));
+    if (tmpl.requires_photo !== undefined) setRequiresPhoto(Boolean(tmpl.requires_photo));
+    if (tmpl.requires_comment !== undefined) setRequiresComment(Boolean(tmpl.requires_comment));
+    if (tmpl.require_checklist !== undefined) setRequireChecklist(Boolean(tmpl.require_checklist));
+    if (tmpl.allow_deadline_change !== undefined) setAllowAssigneeDeadlineChange(Boolean(tmpl.allow_deadline_change));
+    if (tmpl.recurrence_type) setRecurrenceType(tmpl.recurrence_type);
+    if (tmpl.active_days) setActiveDays(Array.isArray(tmpl.active_days) ? tmpl.active_days : []);
+    if (tmpl.cadence_days) setCadenceDays(Number(tmpl.cadence_days) || 7);
+    if (tmpl.notify_on_complete !== undefined) setNotifyOnComplete(Boolean(tmpl.notify_on_complete));
+    if (tmpl.notify_on_comment !== undefined) setNotifyOnComment(Boolean(tmpl.notify_on_comment));
+    if (tmpl.notify_on_deadline_change !== undefined) setNotifyOnDeadlineChange(Boolean(tmpl.notify_on_deadline_change));
+    if (tmpl.notify_on_task_created !== undefined) setNotifyOnTaskCreated(Boolean(tmpl.notify_on_task_created));
+
+    if (tmpl.checklist) {
+      let parsed = tmpl.checklist;
+      if (typeof parsed === 'string') {
+        try { parsed = JSON.parse(parsed); } catch (e) { parsed = []; }
+      }
+      if (Array.isArray(parsed)) {
+        setChecklist(parsed.map(item => ({
+          id: crypto.randomUUID(),
+          text: typeof item === 'string' ? item : (item.text || ''),
+          completedDates: []
+        })));
+      }
+    }
+  };
+
+  // Save current form blueprint into task_templates table
+  const handleSaveAsTemplate = async () => {
+    if (!taskTitle.trim()) {
+      return alert('Please enter a task title first before saving as a template.');
+    }
+    const templateName = window.prompt('Enter a template name (e.g., "Regular Maintenance", "Cleaning Checklist"):', taskTitle);
+    if (!templateName || !templateName.trim()) return;
+
+    const startDec = timeToDecimal ? timeToDecimal(startTime) : null;
+    const endDec = timeToDecimal ? timeToDecimal(endTime) : null;
+    const dur = (startDec !== null && endDec !== null) ? Math.max(0.5, endDec - startDec) : null;
+    const validChecklist = checklist.filter(i => i.text && i.text.trim() !== '');
+
+    const newTemplate = {
+      id: Date.now().toString(),
+      name: templateName.trim(),
+      title: taskTitle,
+      description: taskDesc,
+      company: taskCompany,
+      priority: taskPriority,
+      type: hasSpecificTime ? 'timed' : 'flexible',
+      start_time: hasSpecificTime ? startTime : null,
+      end_time: hasSpecificTime ? endTime : null,
+      start_hour: hasSpecificTime ? startDec : null,
+      duration: hasSpecificTime ? dur : null,
+      time_label: hasSpecificTime ? (formatTimeLabel ? formatTimeLabel(startTime, endTime) : `${startTime} - ${endTime}`) : 'All-Day',
+      requires_photo: requiresPhoto,
+      requires_comment: requiresComment,
+      require_checklist: requireChecklist,
+      checklist: validChecklist,
+      allow_deadline_change: allowAssigneeDeadlineChange,
+      recurrence_type: recurrenceType,
+      active_days: activeDays,
+      cadence_days: Number(cadenceDays) || 7,
+      chained_steps: (chainedSteps || []).filter(s => s.title && s.title.trim() !== ''),
+      notify_on_complete: notifyOnComplete,
+      notify_on_comment: notifyOnComment,
+      notify_on_deadline_change: notifyOnDeadlineChange,
+      notify_on_task_created: notifyOnTaskCreated
+    };
+
+    const { error } = await supabase.from('task_templates').insert(newTemplate);
+    if (error) {
+      alert(`Error saving template: ${error.message}\nMake sure you have created the task_templates table in Supabase.`);
+    } else {
+      setTemplates(prev => [...prev, newTemplate]);
+      setSelectedTemplateId(newTemplate.id);
+      alert(`Template "${templateName}" saved successfully.`);
+    }
+  };
+
+  // Delete an existing template
+  const handleDeleteTemplate = async (templateId) => {
+    const tmpl = templates.find(t => t.id === templateId);
+    if (!tmpl) return;
+    if (!window.confirm(`Are you sure you want to delete the "${tmpl.name}" template?`)) return;
+
+    const { error } = await supabase.from('task_templates').delete().eq('id', templateId);
+    if (error) {
+      alert(`Error deleting template: ${error.message}`);
+    } else {
+      setTemplates(prev => prev.filter(t => t.id !== templateId));
+      setSelectedTemplateId('');
+    }
+  };
+
   return (
     <div className="flex flex-col h-full animate-fade-in">
       <div className="flex justify-between items-center mb-6 border-b border-gray-300 pb-4">
-        <h1 className="text-3xl font-serif font-bold">Task Builder</h1>
+        <div className="flex items-center gap-4">
+          <h1 className="text-3xl font-serif font-bold">Task Builder</h1>
+          <div className="flex items-center gap-2">
+            <select
+              value={selectedTemplateId}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedTemplateId(val);
+                if (val) handleApplyTemplate(val);
+              }}
+              className="px-3 py-1.5 text-xs font-semibold bg-white border border-gray-300 rounded shadow-xs hover:border-gray-400 focus:outline-none"
+            >
+              <option value="">⚡ Load Template...</option>
+              {templates.map(tmpl => (
+                <option key={tmpl.id} value={tmpl.id}>{tmpl.name || tmpl.title}</option>
+              ))}
+            </select>
+            {selectedTemplateId && (
+              <button
+                type="button"
+                onClick={() => handleDeleteTemplate(selectedTemplateId)}
+                title="Delete this template"
+                className="text-xs text-red-500 hover:text-red-700 font-bold px-2 py-1 rounded hover:bg-red-50 border border-transparent hover:border-red-200 transition"
+              >
+                🗑️
+              </button>
+            )}
+          </div>
+        </div>
         <button onClick={() => setCurrentView(previousView === 'create' ? 'list' : previousView)} className="text-gray-500 hover:text-gray-800 font-semibold text-sm">✕ Cancel</button>
       </div>
 
@@ -273,7 +428,14 @@ export default function TaskBuilder({
         </div>
       </div>
 
-      <div className="mt-auto pt-6 border-t border-gray-300 flex justify-end">
+      <div className="mt-auto pt-6 border-t border-gray-300 flex justify-end gap-3">
+        <button 
+          type="button" 
+          onClick={handleSaveAsTemplate} 
+          className="bg-gray-200 text-gray-800 px-6 py-3 rounded font-bold shadow-xs hover:bg-gray-300 transition text-sm flex items-center gap-2"
+        >
+          💾 Save as Template
+        </button>
         <button onClick={handleDeployTask} className="bg-[#333333] text-white px-8 py-3 rounded font-bold shadow-sm hover:bg-black transition">Deploy Task</button>
       </div>
     </div>
