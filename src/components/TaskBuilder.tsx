@@ -15,70 +15,110 @@ export default function TaskBuilder({
   notifyOnComplete, setNotifyOnComplete, notifyOnComment, setNotifyOnComment, 
   notifyOnDeadlineChange, setNotifyOnDeadlineChange, notifyOnTaskCreated, 
   setNotifyOnTaskCreated, handleDeployTask,
-  requireChecklist, setRequireChecklist, checklist, handleAddChecklistItem, 
+  requireChecklist, setRequireChecklist, checklist, setChecklist, handleAddChecklistItem, 
   handleUpdateChecklistItem, handleRemoveChecklistItem
 }) {
   const [templates, setTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
 
-  // Fetch templates from Supabase
-  useEffect(() => {
-    async function fetchTemplates() {
-      try {
-        const { data, error } = await supabase
-          .from('task_templates')
-          .select('*')
-          .order('name');
-        if (!error && data) {
-          setTemplates(data);
-        }
-      } catch (err) {
-        console.error('Failed to load templates:', err);
+  const fetchTemplates = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('task_templates')
+        .select('*')
+        .order('name');
+      if (!error && data) {
+        setTemplates(data);
       }
-    }
-    fetchTemplates();
-  }, []);
-
-  // Prepopulate form fields with template values
-  const handleApplyTemplate = (templateId) => {
-    const tmpl = templates.find(t => t.id === templateId);
-    if (!tmpl) return;
-
-    if (tmpl.title !== undefined) setTaskTitle(tmpl.title || '');
-    if (tmpl.description !== undefined) setTaskDesc(tmpl.description || '');
-    if (tmpl.company !== undefined) setTaskCompany(tmpl.company || '');
-    if (tmpl.priority !== undefined) setTaskPriority(tmpl.priority || 'Standard');
-    if (tmpl.type !== undefined) setHasSpecificTime(tmpl.type === 'timed');
-    if (tmpl.start_time) setStartTime(tmpl.start_time.substring(0, 5));
-    if (tmpl.end_time) setEndTime(tmpl.end_time.substring(0, 5));
-    if (tmpl.requires_photo !== undefined) setRequiresPhoto(Boolean(tmpl.requires_photo));
-    if (tmpl.requires_comment !== undefined) setRequiresComment(Boolean(tmpl.requires_comment));
-    if (tmpl.require_checklist !== undefined) setRequireChecklist(Boolean(tmpl.require_checklist));
-    if (tmpl.allow_deadline_change !== undefined) setAllowAssigneeDeadlineChange(Boolean(tmpl.allow_deadline_change));
-    if (tmpl.recurrence_type) setRecurrenceType(tmpl.recurrence_type);
-    if (tmpl.active_days) setActiveDays(Array.isArray(tmpl.active_days) ? tmpl.active_days : []);
-    if (tmpl.cadence_days) setCadenceDays(Number(tmpl.cadence_days) || 7);
-    if (tmpl.notify_on_complete !== undefined) setNotifyOnComplete(Boolean(tmpl.notify_on_complete));
-    if (tmpl.notify_on_comment !== undefined) setNotifyOnComment(Boolean(tmpl.notify_on_comment));
-    if (tmpl.notify_on_deadline_change !== undefined) setNotifyOnDeadlineChange(Boolean(tmpl.notify_on_deadline_change));
-    if (tmpl.notify_on_task_created !== undefined) setNotifyOnTaskCreated(Boolean(tmpl.notify_on_task_created));
-
-    if (tmpl.checklist) {
-      let parsed = tmpl.checklist;
-      if (typeof parsed === 'string') {
-        try { parsed = JSON.parse(parsed); } catch (e) { parsed = []; }
-      }
-      if (Array.isArray(parsed)) {
-        setChecklist(parsed.map(item => ({
-          id: crypto.randomUUID(),
-          text: typeof item === 'string' ? item : (item.text || ''),
-          completedDates: []
-        })));
-      }
+    } catch (err) {
+      console.error('Failed to load templates:', err);
     }
   };
 
-  // Save current form blueprint into task_templates table
+  useEffect(() => {
+    fetchTemplates();
+  }, []);
+
+  const handleApplyTemplate = async (templateId) => {
+    try {
+      const { data: freshTmpl, error } = await supabase
+        .from('task_templates')
+        .select('*')
+        .eq('id', templateId)
+        .single();
+
+      const tmpl = (!error && freshTmpl) ? freshTmpl : templates.find(t => String(t.id) === String(templateId));
+      if (!tmpl) return;
+
+      if (tmpl.title !== undefined && typeof setTaskTitle === 'function') setTaskTitle(tmpl.title || '');
+      if (tmpl.description !== undefined && typeof setTaskDesc === 'function') setTaskDesc(tmpl.description || '');
+      if (tmpl.company !== undefined && typeof setTaskCompany === 'function') setTaskCompany(tmpl.company || '');
+      if (tmpl.priority !== undefined && typeof setTaskPriority === 'function') setTaskPriority(tmpl.priority || 'Standard');
+      if (tmpl.type !== undefined && typeof setHasSpecificTime === 'function') setHasSpecificTime(tmpl.type === 'timed');
+      if (tmpl.start_time && typeof setStartTime === 'function') setStartTime(tmpl.start_time.substring(0, 5));
+      if (tmpl.end_time && typeof setEndTime === 'function') setEndTime(tmpl.end_time.substring(0, 5));
+      if (tmpl.requires_photo !== undefined && typeof setRequiresPhoto === 'function') setRequiresPhoto(Boolean(tmpl.requires_photo));
+      if (tmpl.requires_comment !== undefined && typeof setRequiresComment === 'function') setRequiresComment(Boolean(tmpl.requires_comment));
+      if (tmpl.allow_deadline_change !== undefined && typeof setAllowAssigneeDeadlineChange === 'function') setAllowAssigneeDeadlineChange(Boolean(tmpl.allow_deadline_change));
+      if (tmpl.recurrence_type && typeof setRecurrenceType === 'function') setRecurrenceType(tmpl.recurrence_type);
+      if (tmpl.cadence_days && typeof setCadenceDays === 'function') setCadenceDays(Number(tmpl.cadence_days) || 7);
+      if (tmpl.notify_on_complete !== undefined && typeof setNotifyOnComplete === 'function') setNotifyOnComplete(Boolean(tmpl.notify_on_complete));
+      if (tmpl.notify_on_comment !== undefined && typeof setNotifyOnComment === 'function') setNotifyOnComment(Boolean(tmpl.notify_on_comment));
+      if (tmpl.notify_on_deadline_change !== undefined && typeof setNotifyOnDeadlineChange === 'function') setNotifyOnDeadlineChange(Boolean(tmpl.notify_on_deadline_change));
+      if (tmpl.notify_on_task_created !== undefined && typeof setNotifyOnTaskCreated === 'function') setNotifyOnTaskCreated(Boolean(tmpl.notify_on_task_created));
+
+      // Synchronize active days safely through toggleDay without throwing ReferenceError
+      if (Array.isArray(tmpl.active_days) && typeof toggleDay === 'function') {
+        const targetDays = tmpl.active_days;
+        const currentActive = Array.isArray(activeDays) ? activeDays : [];
+        daysOfWeek.forEach(day => {
+          const isCurrentlyActive = currentActive.includes(day);
+          const shouldBeActive = targetDays.includes(day);
+          if (isCurrentlyActive !== shouldBeActive) {
+            toggleDay(day);
+          }
+        });
+      }
+
+      // Parse checklist directly from Supabase JSON
+      let parsedChecklist = [];
+      if (tmpl.checklist !== undefined && tmpl.checklist !== null) {
+        let raw = tmpl.checklist;
+        while (typeof raw === 'string') {
+          try {
+            raw = JSON.parse(raw);
+          } catch (e) {
+            break;
+          }
+        }
+        if (Array.isArray(raw)) {
+          parsedChecklist = raw.map(item => {
+            if (typeof item === 'string') {
+              return { id: crypto.randomUUID(), text: item, completedDates: [] };
+            }
+            return {
+              id: item.id || crypto.randomUUID(),
+              text: String(item.text || item.label || ''),
+              completedDates: []
+            };
+          }).filter(i => i.text.trim() !== '');
+        }
+      }
+
+      // Open the checklist container
+      if (typeof setRequireChecklist === 'function') {
+        setRequireChecklist(parsedChecklist.length > 0 || Boolean(tmpl.require_checklist));
+      }
+
+      // Apply the checklist items
+      if (typeof setChecklist === 'function') {
+        setChecklist(parsedChecklist);
+      }
+    } catch (err) {
+      console.error('Error applying template:', err);
+    }
+  };
+
   const handleSaveAsTemplate = async () => {
     if (!taskTitle.trim()) {
       return alert('Please enter a task title first before saving as a template.');
@@ -89,7 +129,14 @@ export default function TaskBuilder({
     const startDec = timeToDecimal ? timeToDecimal(startTime) : null;
     const endDec = timeToDecimal ? timeToDecimal(endTime) : null;
     const dur = (startDec !== null && endDec !== null) ? Math.max(0.5, endDec - startDec) : null;
-    const validChecklist = checklist.filter(i => i.text && i.text.trim() !== '');
+
+    const validChecklist = (checklist || [])
+      .filter(i => i && i.text && String(i.text).trim() !== '')
+      .map(i => ({
+        id: i.id || crypto.randomUUID(),
+        text: String(i.text).trim(),
+        completedDates: []
+      }));
 
     const newTemplate = {
       id: Date.now().toString(),
@@ -104,34 +151,33 @@ export default function TaskBuilder({
       start_hour: hasSpecificTime ? startDec : null,
       duration: hasSpecificTime ? dur : null,
       time_label: hasSpecificTime ? (formatTimeLabel ? formatTimeLabel(startTime, endTime) : `${startTime} - ${endTime}`) : 'All-Day',
-      requires_photo: requiresPhoto,
-      requires_comment: requiresComment,
-      require_checklist: requireChecklist,
+      requires_photo: Boolean(requiresPhoto),
+      requires_comment: Boolean(requiresComment),
+      require_checklist: Boolean(requireChecklist || validChecklist.length > 0),
       checklist: validChecklist,
-      allow_deadline_change: allowAssigneeDeadlineChange,
+      allow_deadline_change: Boolean(allowAssigneeDeadlineChange),
       recurrence_type: recurrenceType,
       active_days: activeDays,
       cadence_days: Number(cadenceDays) || 7,
       chained_steps: (chainedSteps || []).filter(s => s.title && s.title.trim() !== ''),
-      notify_on_complete: notifyOnComplete,
-      notify_on_comment: notifyOnComment,
-      notify_on_deadline_change: notifyOnDeadlineChange,
-      notify_on_task_created: notifyOnTaskCreated
+      notify_on_complete: Boolean(notifyOnComplete),
+      notify_on_comment: Boolean(notifyOnComment),
+      notify_on_deadline_change: Boolean(notifyOnDeadlineChange),
+      notify_on_task_created: Boolean(notifyOnTaskCreated)
     };
 
     const { error } = await supabase.from('task_templates').insert(newTemplate);
     if (error) {
-      alert(`Error saving template: ${error.message}\nMake sure you have created the task_templates table in Supabase.`);
+      alert(`Error saving template: ${error.message}`);
     } else {
-      setTemplates(prev => [...prev, newTemplate]);
+      await fetchTemplates();
       setSelectedTemplateId(newTemplate.id);
-      alert(`Template "${templateName}" saved successfully.`);
+      alert(`Template "${templateName}" saved with ${validChecklist.length} checklist item(s)!`);
     }
   };
 
-  // Delete an existing template
   const handleDeleteTemplate = async (templateId) => {
-    const tmpl = templates.find(t => t.id === templateId);
+    const tmpl = templates.find(t => String(t.id) === String(templateId));
     if (!tmpl) return;
     if (!window.confirm(`Are you sure you want to delete the "${tmpl.name}" template?`)) return;
 
@@ -139,7 +185,7 @@ export default function TaskBuilder({
     if (error) {
       alert(`Error deleting template: ${error.message}`);
     } else {
-      setTemplates(prev => prev.filter(t => t.id !== templateId));
+      setTemplates(prev => prev.filter(t => String(t.id) !== String(templateId)));
       setSelectedTemplateId('');
     }
   };
@@ -386,8 +432,8 @@ export default function TaskBuilder({
                     <button type="button" onClick={handleAddChecklistItem} className="text-[10px] font-bold bg-[#A9B1A6] text-white px-2 py-0.5 rounded">+ Add Item</button>
                   </div>
                   {checklist.map((item, idx) => (
-                    <div key={item.id} className="flex gap-2">
-                      <input type="text" value={item.text} onChange={(e) => handleUpdateChecklistItem(item.id, e.target.value)} placeholder={`Item ${idx + 1}...`} className="flex-1 p-1.5 text-xs border rounded bg-white" />
+                    <div key={item.id || idx} className="flex gap-2">
+                      <input type="text" value={item.text || ''} onChange={(e) => handleUpdateChecklistItem(item.id, e.target.value)} placeholder={`Item ${idx + 1}...`} className="flex-1 p-1.5 text-xs border rounded bg-white" />
                       <button type="button" onClick={() => handleRemoveChecklistItem(item.id)} className="text-red-600 font-bold px-1 hover:text-red-800">✕</button>
                     </div>
                   ))}

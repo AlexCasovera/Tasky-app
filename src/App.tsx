@@ -248,7 +248,7 @@ export default function App() {
   const [requiresComment, setRequiresComment] = useState(false);
   const [allowAssigneeDeadlineChange, setAllowAssigneeDeadlineChange] = useState(true);
 
-  // NEW: Checklist State
+  // Checklist State
   const [requireChecklist, setRequireChecklist] = useState(false);
   const [checklist, setChecklist] = useState([]);
   const [checklistException, setChecklistException] = useState('');
@@ -394,7 +394,6 @@ export default function App() {
       if (error) {
         console.error('Error fetching tasks from cloud:', error);
       } else if (data) {
-        // Map from DB, injecting the new checklist properties explicitly
         const mapped = data.map(d => {
            const mappedItem = mapFromDb(d);
            return {
@@ -817,7 +816,6 @@ export default function App() {
             const currentExceptions = t.exceptionDates || [];
             const updatedExceptions = effectiveSourceDate && !currentExceptions.includes(effectiveSourceDate) ? [...currentExceptions, effectiveSourceDate] : currentExceptions;
             const updatedMaster = { ...t, exceptionDates: updatedExceptions };
-            // Injecting explicitly for standalone clone mapping safety
             dbPayloads.push({ action: 'update', payload: updatedMaster });
             dbPayloads.push({ action: 'insert', payload: standaloneTask });
             return updatedMaster;
@@ -1098,13 +1096,11 @@ export default function App() {
     setNotifyOnDeadlineChange(true);
     setNotifyOnTaskCreated(true);
     
-    // Checklist reset
     setRequireChecklist(false);
     setChecklist([]);
     setChecklistException('');
   };
 
-  // CHECKLIST BUILDER HANDLERS
   const handleAddChecklistItem = () => {
     setChecklist([...checklist, { id: crypto.randomUUID(), text: '', completedDates: [] }]);
   };
@@ -1117,7 +1113,6 @@ export default function App() {
     setChecklist(checklist.filter(i => i.id !== id));
   };
 
-  // IMMEDIATE CHECKLIST SAVING
   const handleToggleChecklistItem = async (taskId, itemId, instanceDate) => {
     const target = tasks.find(t => t.id === taskId);
     if (!target) return;
@@ -1136,11 +1131,9 @@ export default function App() {
 
     const updatedTask = { ...target, checklist: newChecklist };
     
-    // Optimistic UI update
     setTasks(tasks.map(t => t.id === taskId ? updatedTask : t));
     if (selectedTask?.id === taskId) setSelectedTask(updatedTask);
     
-    // Fire & forget to cloud
     await supabase.from('tasks').update({ checklist: newChecklist }).eq('id', taskId);
   };
 
@@ -1202,7 +1195,6 @@ export default function App() {
     const endDec = timeToDecimal(endTime);
     const dur = Math.max(0.5, endDec - startDec);
     
-    // Purge empty checklist items
     const validChecklist = checklist.filter(i => i.text.trim() !== '');
 
     const newTask = {
@@ -2172,7 +2164,7 @@ export default function App() {
             setNotifyOnDeadlineChange={setNotifyOnDeadlineChange} notifyOnTaskCreated={notifyOnTaskCreated} 
             setNotifyOnTaskCreated={setNotifyOnTaskCreated} handleDeployTask={handleDeployTask}
             requireChecklist={requireChecklist} setRequireChecklist={setRequireChecklist} 
-            checklist={checklist} handleAddChecklistItem={handleAddChecklistItem} 
+            checklist={checklist} setChecklist={setChecklist} handleAddChecklistItem={handleAddChecklistItem} 
             handleUpdateChecklistItem={handleUpdateChecklistItem} handleRemoveChecklistItem={handleRemoveChecklistItem}
           />
         )}
