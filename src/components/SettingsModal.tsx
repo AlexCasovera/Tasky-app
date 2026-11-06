@@ -45,11 +45,12 @@ export default function SettingsModal({
   setEditingCompany,
   handleDeleteCompany,
   formatDateKey,
-  currentDate
+  currentDate,
+  companiesData,
+  setCompaniesData
 }) {
   if (!isSettingsOpen) return null;
 
-  // Initialize objects early so we can use their DB values as default states
   const loggedInUserObj = teamMembers.find(m => m.name === currentUserName) || teamMembers[0];
 
   const [dispatchEnabled, setDispatchEnabled] = useState(loggedInUserObj?.dispatch_enabled || false);
@@ -62,13 +63,19 @@ export default function SettingsModal({
   const [dispatchStatusMessage, setDispatchStatusMessage] = useState('');
   const [isSavingSlackId, setIsSavingSlackId] = useState(false);
 
+  // Inventory Access state for the currently edited member
+  const [memberInventoryAccess, setMemberInventoryAccess] = useState(false);
+
   const targetMemberObj = teamMembers.find(m => m.name === selectedDispatchMember) || teamMembers[0];
 
- // Instantly sync dispatch settings to Supabase when toggled
+  const handleOpenEditMemberWithInventory = (member) => {
+    handleOpenEditMember(member);
+    setMemberInventoryAccess(Boolean(member.inventoryAccess));
+  };
+
   const handleDispatchPreferenceChange = async (field, value) => {
     if (!loggedInUserObj) return;
 
-    // Optimistic UI update for instantaneous feel
     if (field === 'dispatch_enabled') setDispatchEnabled(value);
     if (field === 'dispatch_target_name') setSelectedDispatchMember(value);
     if (field === 'dispatch_priority_only') setOnlyHighPriority(value);
@@ -81,7 +88,6 @@ export default function SettingsModal({
     if (error) {
       alert(`Error saving ${field}: ${error.message}`);
     } else {
-      // FIX: Update the master teamMembers array so the data persists when the modal reopens
       setTeamMembers(prev => prev.map(m => 
         m.id === loggedInUserObj.id ? { ...m, [field]: value } : m
       ));
@@ -158,6 +164,103 @@ export default function SettingsModal({
       alert(`Error sending test: ${err.message}`);
     } finally {
       setIsSendingTest(false);
+    }
+  };
+
+  // Save Member Profile including inventory_access
+  const handleSaveMemberWithInventory = async () => {
+    if (!memberName.trim()) return alert('Please enter a name.');
+
+    const initials = memberName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+
+    if (editingMemberId) {
+      const { error } = await supabase.from('profiles').update({
+        name: memberName,
+        initials,
+        role: memberRole,
+        color: memberColor,
+        slack_user_id: memberSlackId.trim() || null,
+        inventory_access: memberInventoryAccess
+      }).eq('id', editingMemberId);
+
+      if (error) {
+        return alert(`Error updating team member: ${error.message}`);
+      }
+    } else {
+      if (!memberEmail.trim()) return alert('Please enter an email address.');
+
+      const newId = crypto.randomUUID();
+      const { error } = await supabase.from('profiles').insert({
+        id: newId,
+        name: memberName,
+        initials,
+        email: memberEmail,
+        role: memberRole,
+        color: memberColor,
+        slack_user_id: memberSlackId.trim() || null,
+        inventory_access: memberInventoryAccess
+      });
+
+      if (error) {
+        return alert(`Error creating team member: ${error.message}`);
+      }
+    }
+
+    const { data: updatedProfiles } = await supabase.from('profiles').select('*');
+    if (updatedProfiles) {
+      setTeamMembers(updatedProfiles.map(p => ({
+        id: p.id,
+        name: p.name || p.email.split('@')[0],
+        initials: p.initials || p.email.substring(0, 2).toUpperCase(),
+        email: p.email,
+        role: p.role || 'employee',
+        color: p.color || '#2A9D8F',
+        slackUserId: p.slack_user_id || '',
+        inventoryAccess: Boolean(p.inventory_access)
+      })));
+    }
+
+    resetMemberForm();
+    setMemberInventoryAccess(false);
+  };
+
+  // Immediate toggle for company inventory with optimistic state updates
+  const toggleCompanyInventory = async (companyName, currentStatus) => {
+    const newStatus = !currentStatus;
+
+    // 1. Optimistic UI update across App.tsx and InventoryDashboard immediately
+    if (typeof setCompaniesData === 'function') {
+      setCompaniesData(prev => {
+        const exists = prev.some(c => c.name === companyName);
+        if (exists) {
+          return prev.map(c => c.name === companyName ? { ...c, inventory_enabled: newStatus } : c);
+        }
+        return [...prev, { name: companyName, inventory_enabled: newStatus }];
+      });
+    }
+
+    // 2. Persist to Supabase
+    try {
+      const { data, error } = await supabase
+        .from('companies')
+        .update({ inventory_enabled: newStatus })
+        .eq('name', companyName)
+        .select();
+
+      if (error) {
+        alert(`Error updating company inventory: ${error.message}`);
+        // Revert optimistic state on failure
+        if (typeof setCompaniesData === 'function') {
+          setCompaniesData(prev => prev.map(c => c.name === companyName ? { ...c, inventory_enabled: currentStatus } : c));
+        }
+      } else if (!data || data.length === 0) {
+        // Fallback upsert if name row wasn't present
+        await supabase
+          .from('companies')
+          .upsert({ name: companyName, inventory_enabled: newStatus });
+      }
+    } catch (err) {
+      console.error('Failed to toggle company inventory:', err);
     }
   };
 
@@ -333,7 +436,10 @@ export default function SettingsModal({
               <div className="flex justify-between items-center mb-2">
                 <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500">Active Team Members</h4>
                 <button 
-                  onClick={resetMemberForm} 
+                  onClick={() => {
+                    resetMemberForm();
+                    setMemberInventoryAccess(false);
+                  }} 
                   className="text-xs font-bold bg-[#A9B1A6] text-white px-2 py-0.5 rounded hover:bg-gray-600 transition">
                   + Add New
                 </button>
@@ -345,7 +451,14 @@ export default function SettingsModal({
                     <div className="flex items-center gap-2">
                       <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: member.color }}></span>
                       <div>
-                        <span className="font-bold text-xs text-gray-800 block">{member.name} ({member.role.toUpperCase()})</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-xs text-gray-800">{member.name} ({member.role.toUpperCase()})</span>
+                          {member.inventoryAccess && (
+                            <span className="text-[9px] font-bold bg-blue-100 text-blue-800 px-1 py-0.2 rounded uppercase">
+                              📦 Inventory
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2 text-[10px] text-gray-500">
                           <span>{member.email}</span>
                           {member.slackUserId && (
@@ -357,7 +470,7 @@ export default function SettingsModal({
                       </div>
                     </div>
                     <button 
-                      onClick={() => handleOpenEditMember(member)} 
+                      onClick={() => handleOpenEditMemberWithInventory(member)} 
                       className="text-xs font-bold text-blue-700 hover:underline shrink-0">
                       Edit
                     </button>
@@ -447,6 +560,20 @@ export default function SettingsModal({
                 </div>
               </div>
 
+              {/* EMPLOYEE INVENTORY ACCESS TOGGLE */}
+              <div className="mt-2 pt-2 border-t border-gray-100">
+                <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={memberInventoryAccess} 
+                    onChange={(e) => setMemberInventoryAccess(e.target.checked)} 
+                    className="accent-blue-600 w-3.5 h-3.5 cursor-pointer" 
+                  />
+                  <span className="font-bold">Grant Access to Inventory System</span>
+                </label>
+                <p className="text-[10px] text-gray-500 ml-5 mt-0.5">Allows this employee to see the inventory tab and manage items for enabled companies.</p>
+              </div>
+
               <div className="flex justify-between items-center pt-2 mt-1 border-t border-gray-200">
                 {editingMemberId && (
                   <button 
@@ -457,12 +584,15 @@ export default function SettingsModal({
                 )}
                 <div className="flex gap-2 ml-auto">
                   <button 
-                    onClick={resetMemberForm}
+                    onClick={() => {
+                      resetMemberForm();
+                      setMemberInventoryAccess(false);
+                    }}
                     className="px-3 py-1.5 rounded text-xs font-bold text-gray-500 hover:bg-gray-100">
                     Cancel
                   </button>
                   <button 
-                    onClick={handleSaveMember}
+                    onClick={handleSaveMemberWithInventory}
                     className="bg-[#333333] text-white px-4 py-1.5 rounded text-xs font-bold hover:bg-black transition">
                     {editingMemberId ? 'Update Profile' : 'Add Member'}
                   </button>
@@ -470,9 +600,9 @@ export default function SettingsModal({
               </div>
             </div>
 
-            {/* COMPANY MANAGEMENT */}
+            {/* COMPANY MANAGEMENT WITH INVENTORY MODULE TOGGLES */}
             <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3 mt-2">
-              <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Company Management</h4>
+              <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Company Management & Inventory</h4>
               <div className="flex gap-2">
                 <input 
                   type="text" 
@@ -486,44 +616,69 @@ export default function SettingsModal({
                   className="bg-[#333333] text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-black transition">
                   Add
                 </button>
-
               </div>
-              <div className="flex flex-col gap-1 mt-2">
-                {masterCompanyList.map(comp => (
-                  <div key={comp} className="flex justify-between items-center bg-gray-50 p-2 rounded border border-gray-100 text-xs">
-                    {editingCompany === comp ? (
-                      <div className="flex items-center gap-2 w-full">
-                        <input 
-                          type="text" 
-                          value={editingCompanyInput} 
-                          onChange={(e) => setEditingCompanyInput(e.target.value)}
-                          className="flex-1 p-1 text-xs border border-gray-300 rounded focus:outline-none bg-white font-bold"
-                        />
-                        <button 
-                          onClick={() => handleRenameCompany(comp, editingCompanyInput)}
-                          className="text-green-700 font-bold hover:underline">Save</button>
-                        <button 
-                          onClick={() => setEditingCompany(null)}
-                          className="text-gray-500 font-bold hover:underline">Cancel</button>
+
+              <div className="flex flex-col gap-2 mt-2">
+                {masterCompanyList.map(comp => {
+                  const companyObj = (companiesData || []).find(c => c.name === comp);
+                  const isInventoryEnabled = Boolean(companyObj?.inventory_enabled);
+
+                  return (
+                    <div key={comp} className="flex flex-col bg-gray-50 p-2.5 rounded border border-gray-200 text-xs gap-2">
+                      <div className="flex justify-between items-center">
+                        {editingCompany === comp ? (
+                          <div className="flex items-center gap-2 w-full">
+                            <input 
+                              type="text" 
+                              value={editingCompanyInput} 
+                              onChange={(e) => setEditingCompanyInput(e.target.value)}
+                              className="flex-1 p-1 text-xs border border-gray-300 rounded focus:outline-none bg-white font-bold"
+                            />
+                            <button 
+                              onClick={() => handleRenameCompany(comp, editingCompanyInput)}
+                              className="text-green-700 font-bold hover:underline">Save</button>
+                            <button 
+                              onClick={() => setEditingCompany(null)}
+                              className="text-gray-500 font-bold hover:underline">Cancel</button>
+                          </div>
+                        ) : (
+                          <>
+                            <span className="font-bold text-gray-800 text-sm">{comp}</span>
+                            <div className="flex items-center gap-3">
+                              <button 
+                                onClick={() => {
+                                  setEditingCompany(comp);
+                                  setEditingCompanyInput(comp);
+                                }}
+                                className="text-blue-600 font-bold hover:underline">Edit</button>
+                              <button 
+                                onClick={() => handleDeleteCompany(comp)}
+                                className="text-red-500 font-bold hover:underline">Remove</button>
+                            </div>
+                          </>
+                        )}
                       </div>
-                    ) : (
-                      <>
-                        <span className="font-bold text-gray-700">{comp}</span>
-                        <div className="flex items-center gap-3">
-                          <button 
-                            onClick={() => {
-                              setEditingCompany(comp);
-                              setEditingCompanyInput(comp);
-                            }}
-                            className="text-blue-600 font-bold hover:underline">Edit</button>
-                          <button 
-                            onClick={() => handleDeleteCompany(comp)}
-                            className="text-red-500 font-bold hover:underline">Remove</button>
+
+                      {/* INVENTORY TOGGLE SWITCH */}
+                      {!editingCompany && (
+                        <div className="flex justify-between items-center pt-2 border-t border-gray-200/60">
+                          <span className="text-[11px] text-gray-600 font-semibold">Inventory Module:</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleCompanyInventory(comp, isInventoryEnabled)}
+                            className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition border ${
+                              isInventoryEnabled
+                                ? 'bg-emerald-100 text-emerald-800 border-emerald-300 shadow-2xs hover:bg-emerald-200'
+                                : 'bg-gray-200 text-gray-500 border-gray-300 hover:bg-gray-300'
+                            }`}
+                          >
+                            {isInventoryEnabled ? '✓ Enabled' : '○ Disabled'}
+                          </button>
                         </div>
-                      </>
-                    )}
-                  </div>
-                ))}
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </>

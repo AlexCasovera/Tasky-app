@@ -1,3 +1,4 @@
+// src/components/Header.tsx
 // @ts-nocheck
 import React, { useRef, useEffect } from 'react';
 
@@ -34,8 +35,7 @@ export default function Header({
   setIsSettingsOpen,
   handleOpenCreateView
 }) {
-    
-    const notifRef = useRef(null);
+  const notifRef = useRef(null);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -61,6 +61,21 @@ export default function Header({
 
         <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
           
+          {/* INVENTORY BUTTON - TO THE LEFT OF THE SEARCH BAR */}
+          {(userRole === 'admin' || currentProfile?.inventoryAccess) && (
+            <button
+              onClick={() => setCurrentView(currentView === 'inventory' ? 'list' : 'inventory')}
+              className={`px-3 py-1.5 font-bold rounded text-xs transition flex items-center gap-1.5 shrink-0 ${
+                currentView === 'inventory'
+                  ? 'bg-[#A9B1A6] text-white shadow-sm ring-1 ring-white/30'
+                  : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+              }`}
+            >
+              <span>📦</span>
+              <span>{currentView === 'inventory' ? '← Task Board' : 'Inventory'}</span>
+            </button>
+          )}
+
           {/* HCP OVERLAY SEARCH INPUT & DROPDOWN */}
           <div className="relative w-full sm:w-80" ref={searchRef}>
             <div className="flex items-center bg-gray-800 rounded border border-gray-700 focus-within:border-[#A9B1A6] px-2.5 py-1">
@@ -172,6 +187,16 @@ export default function Header({
             )}
           </div>
 
+          {/* SETTINGS GEAR IN TOP BAR (ACCESSIBLE IN INVENTORY VIEW) */}
+          {currentView === 'inventory' && (
+            <button 
+              onClick={() => { resetMemberForm(); setIsSettingsOpen(true); }}
+              className="bg-gray-800 hover:bg-gray-700 text-white p-1.5 rounded border border-gray-700 transition font-bold text-xs shrink-0"
+              title="Settings & Preferences">
+              ⚙️
+            </button>
+          )}
+
           <button 
             onClick={handleLogout} 
             className="px-3 py-1 font-bold text-white transition bg-red-600 rounded hover:bg-red-700 shrink-0"
@@ -181,87 +206,86 @@ export default function Header({
         </div>
       </div>
 
-      {/* CONTROLS HEADER */}
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4 border-b border-gray-300 pb-4">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1 bg-white border border-gray-300 rounded-lg p-1 shadow-2xs">
-            <button onClick={handlePrevDate} className="px-2.5 py-1 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded transition">‹</button>
-            <button onClick={handleToday} className="px-3 py-1 text-xs font-bold text-gray-700 hover:bg-gray-100 rounded transition border-x border-gray-200">Today</button>
-            <button onClick={handleNextDate} className="px-2.5 py-1 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded transition">›</button>
+      {/* CONTROLS HEADER (ONLY VISIBLE IN TASK VIEWS) */}
+      {currentView !== 'inventory' && (
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4 border-b border-gray-300 pb-4">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1 bg-white border border-gray-300 rounded-lg p-1 shadow-2xs">
+              <button onClick={handlePrevDate} className="px-2.5 py-1 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded transition">‹</button>
+              <button onClick={handleToday} className="px-3 py-1 text-xs font-bold text-gray-700 hover:bg-gray-100 rounded transition border-x border-gray-200">Today</button>
+              <button onClick={handleNextDate} className="px-2.5 py-1 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded transition">›</button>
+            </div>
+
+            <div>
+              <h1 className="text-2xl font-serif font-bold text-gray-900 leading-tight">{getHeaderTitle()}</h1>
+              <p className="text-[11px] text-gray-500 font-bold uppercase tracking-wider">Command Center Queue</p>
+            </div>
           </div>
 
-          <div>
-            <h1 className="text-2xl font-serif font-bold text-gray-900 leading-tight">{getHeaderTitle()}</h1>
-            <p className="text-[11px] text-gray-500 font-bold uppercase tracking-wider">Command Center Queue</p>
-          </div>
-        </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="bg-gray-200 p-1 rounded-lg flex items-center gap-1 border border-gray-300">
+              <button onClick={() => setCurrentView('completed')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'completed' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Completed</button>
+              <button onClick={() => setCurrentView('list')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'list' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>List</button>
+              <button onClick={() => setCurrentView('day')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'day' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Day</button>
+              <button onClick={() => setCurrentView('week')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'week' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Week</button>
+              <button onClick={() => setCurrentView('month')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'month' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Month</button>
+            </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="bg-gray-200 p-1 rounded-lg flex items-center gap-1 border border-gray-300">
-            <button onClick={() => setCurrentView('completed')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'completed' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Completed</button>
-            <button onClick={() => setCurrentView('list')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'list' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>List</button>
-            <button onClick={() => setCurrentView('day')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'day' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Day</button>
-            <button onClick={() => setCurrentView('week')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'week' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Week</button>
-            <button onClick={() => setCurrentView('month')} className={`px-3 py-1.5 text-xs font-bold rounded transition ${currentView === 'month' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>Month</button>
-          </div>
+            <div className="relative" ref={notifRef}>
+              <button 
+                onClick={() => setIsNotifOpen(!isNotifOpen)}
+                className="bg-white p-2 rounded-lg border border-gray-300 relative hover:bg-gray-50 transition">
+                🔔
+                {unreadNotifCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+                    {unreadNotifCount}
+                  </span>
+                )}
+              </button>
 
-          <div className="relative" ref={notifRef}>
-            <button 
-              onClick={() => setIsNotifOpen(!isNotifOpen)}
-              className="bg-white p-2 rounded-lg border border-gray-300 relative hover:bg-gray-50 transition">
-              🔔
-              {unreadNotifCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
-                  {unreadNotifCount}
-                </span>
+              {isNotifOpen && (
+                <div className="absolute -left-[4px] sm:left-auto sm:right-0 mt-2 w-72 sm:w-80 bg-white rounded-lg shadow-xl border border-gray-300 z-50 p-3 animate-fade-in">
+                  <div className="flex justify-between items-center border-b pb-2 mb-2">
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700">Notification Center</h4>
+                    <button onClick={markAllNotifsRead} className="text-[10px] text-blue-600 font-bold hover:underline">Mark all read</button>
+                  </div>
+                  <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+                    {notifications.map(n => (
+                      <div 
+                        key={n.id} 
+                        onClick={() => handleNotificationClick(n)}
+                        className={`p-2 rounded text-xs border cursor-pointer hover:brightness-95 transition ${n.read ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-blue-50 border-blue-200 text-blue-900 shadow-2xs font-bold'}`}> <div className="flex justify-between items-start gap-2"> <span className="leading-tight">{n.text}</span> <span className={`text-[9px] shrink-0 ${n.read ? 'text-gray-400' : 'text-blue-500 font-bold'}`}>{n.time}</span>
+                        </div>
+                        {n.taskId && (
+                          <div className="mt-1 text-[9px] text-gray-400 font-bold uppercase">
+                            Click to View ↗
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {notifications.length === 0 && (
+                      <p className="text-xs text-gray-400 italic text-center py-2">No notifications for {currentUserName}.</p>
+                    )}
+                  </div>
+                </div>
               )}
+            </div>
+
+            <button 
+              onClick={() => { resetMemberForm(); setIsSettingsOpen(true); }}
+              className="bg-white p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition font-bold text-sm"
+              title="Settings & Preferences">
+              ⚙️
             </button>
 
-            {isNotifOpen && (
-              <div className="absolute -left-[4px] sm:left-auto sm:right-0 mt-2 w-72 sm:w-80 bg-white rounded-lg shadow-xl border border-gray-300 z-50 p-3 animate-fade-in">
-                <div className="flex justify-between items-center border-b pb-2 mb-2">
-                  <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700">Notification Center</h4>
-                  <button onClick={markAllNotifsRead} className="text-[10px] text-blue-600 font-bold hover:underline">Mark all read</button>
-                </div>
-                <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
-                  {notifications.map(n => (
-                    <div 
-                      key={n.id} 
-                      onClick={() => handleNotificationClick(n)}
-                      className={`p-2 rounded text-xs border cursor-pointer hover:brightness-95 transition ${n.read ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-blue-50 border-blue-200 text-blue-900 shadow-2xs font-bold'}`}>
-                      <div className="flex justify-between items-start gap-2">
-                        <span className="leading-tight">{n.text}</span>
-                        <span className={`text-[9px] shrink-0 ${n.read ? 'text-gray-400' : 'text-blue-500 font-bold'}`}>{n.time}</span>
-                      </div>
-                      {n.taskId && (
-                        <div className="mt-1 text-[9px] text-gray-400 font-bold uppercase">
-                          Click to View ↗
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  {notifications.length === 0 && (
-                    <p className="text-xs text-gray-400 italic text-center py-2">No notifications for {currentUserName}.</p>
-                  )}
-                </div>
-              </div>
+            {userRole === 'admin' && currentView !== 'create' && (
+              <button onClick={handleOpenCreateView} className="bg-[#5B7049] text-white px-4 py-2 rounded text-xs font-bold shadow-sm hover:bg-[#465638] transition">
+                + New Task
+              </button>
             )}
           </div>
-
-          <button 
-            onClick={() => { resetMemberForm(); setIsSettingsOpen(true); }}
-            className="bg-white p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition font-bold text-sm"
-            title="Settings & Preferences">
-            ⚙️
-          </button>
-
-          {userRole === 'admin' && currentView !== 'create' && (
-            <button onClick={handleOpenCreateView} className="bg-[#5B7049] text-white px-4 py-2 rounded text-xs font-bold shadow-sm hover:bg-[#465638] transition">
-              + New Task
-            </button>
-          )}
         </div>
-      </div>
+      )}
     </>
   );
 }

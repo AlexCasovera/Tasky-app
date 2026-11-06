@@ -28,6 +28,7 @@ import Header from './components/Header';
 import FilterBar from './components/FilterBar';
 import DashboardTrays from './components/DashboardTrays';
 import ListAndCompletedViews from './components/ListAndCompletedViews';
+import InventoryDashboard from './components/InventoryDashboard';
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
@@ -74,6 +75,7 @@ export default function App() {
   }, []);
 
   const [companies, setCompanies] = useState([]);
+  const [companiesData, setCompaniesData] = useState([]);
   const [activeCompanyFilters, setActiveCompanyFilters] = useState([]);
 
   useEffect(() => {
@@ -82,6 +84,7 @@ export default function App() {
       if (companyData && !compErr) {
         const compNames = companyData.map(c => c.name);
         setCompanies(compNames);
+        setCompaniesData(companyData);
         if (activeCompanyFilters.length === 0) setActiveCompanyFilters(compNames);
       }
 
@@ -94,7 +97,8 @@ export default function App() {
           email: p.email,
           role: p.role || 'employee',
           color: p.color || '#2A9D8F',
-          slackUserId: p.slack_user_id || ''
+          slackUserId: p.slack_user_id || '',
+          inventoryAccess: p.inventory_access || false
         }));
         setTeamMembers(mappedMembers);
         if (activeEmployeeFilters.length === 0) setActiveEmployeeFilters(mappedMembers.map(m => m.name));
@@ -116,7 +120,8 @@ export default function App() {
             email: myProfile.email,
             role: myProfile.role || 'employee',
             color: myProfile.color || '#2A9D8F',
-            slackUserId: myProfile.slack_user_id || ''
+            slackUserId: myProfile.slack_user_id || '',
+            inventoryAccess: myProfile.inventory_access || false
           });
         }
       }
@@ -1003,7 +1008,8 @@ export default function App() {
         email: p.email,
         role: p.role || 'employee',
         color: p.color || '#2A9D8F',
-        slackUserId: p.slack_user_id || ''
+        slackUserId: p.slack_user_id || '',
+        inventoryAccess: p.inventory_access || false
       })));
     }
 
@@ -1027,6 +1033,7 @@ export default function App() {
     const trimmed = newName.trim();
 
     setCompanies(prev => prev.map(c => c === oldName ? trimmed : c));
+    setCompaniesData(prev => prev.map(c => c.name === oldName ? { ...c, name: trimmed } : c));
     setActiveCompanyFilters(prev => prev.map(c => c === oldName ? trimmed : c));
     setTasks(prev => prev.map(t => t.company === oldName ? { ...t, company: trimmed } : t));
 
@@ -1049,6 +1056,7 @@ export default function App() {
     }
 
     setCompanies(prev => prev.filter(c => c !== nameToDelete));
+    setCompaniesData(prev => prev.filter(c => c.name !== nameToDelete));
     setActiveCompanyFilters(prev => prev.filter(c => c !== nameToDelete));
     
     const { error } = await supabase.from('companies').delete().eq('name', nameToDelete);
@@ -1059,16 +1067,20 @@ export default function App() {
     const newName = newCompanyInput.trim();
     if (!newName || companies.includes(newName)) return;
 
+    const newId = crypto.randomUUID();
+    const newCompObj = { id: newId, name: newName, inventory_enabled: false };
+
     setCompanies(prev => [...prev, newName]);
+    setCompaniesData(prev => [...prev, newCompObj]);
     setActiveCompanyFilters(prev => [...prev, newName]);
     setNewCompanyInput('');
 
-    const newId = crypto.randomUUID();
-    const { error } = await supabase.from('companies').insert({ id: newId, name: newName });
+    const { error } = await supabase.from('companies').insert(newCompObj);
     
     if (error) {
       alert(`Database Error: ${error.message}`);
       setCompanies(prev => prev.filter(c => c !== newName));
+      setCompaniesData(prev => prev.filter(c => c.name !== newName));
       setActiveCompanyFilters(prev => prev.filter(c => c !== newName));
     }
   };
@@ -1994,41 +2006,45 @@ export default function App() {
           setIsSettingsOpen={setIsSettingsOpen} handleOpenCreateView={handleOpenCreateView} 
         />
 
-        {/* TEAM MEMBER & COMPANY FILTER BAR */}
-        <FilterBar 
-          currentView={currentView}
-          masterCompanyList={masterCompanyList}
-          hiddenCompanies={hiddenCompanies}
-          activeCompanyFilters={activeCompanyFilters}
-          toggleCompanyFilter={toggleCompanyFilter}
-          userRole={userRole}
-          teamMembers={teamMembers}
-          hiddenMembers={hiddenMembers}
-          activeEmployeeFilters={activeEmployeeFilters}
-          toggleEmployeeFilter={toggleEmployeeFilter}
-          setActiveCompanyFilters={setActiveCompanyFilters}
-          setActiveEmployeeFilters={setActiveEmployeeFilters}
-        />
+        {/* TEAM MEMBER & COMPANY FILTER BAR (HIDDEN IN INVENTORY VIEW) */}
+        {currentView !== 'inventory' && (
+          <FilterBar 
+            currentView={currentView}
+            masterCompanyList={masterCompanyList}
+            hiddenCompanies={hiddenCompanies}
+            activeCompanyFilters={activeCompanyFilters}
+            toggleCompanyFilter={toggleCompanyFilter}
+            userRole={userRole}
+            teamMembers={teamMembers}
+            hiddenMembers={hiddenMembers}
+            activeEmployeeFilters={activeEmployeeFilters}
+            toggleEmployeeFilter={toggleEmployeeFilter}
+            setActiveCompanyFilters={setActiveCompanyFilters}
+            setActiveEmployeeFilters={setActiveEmployeeFilters}
+          />
+        )}
 
-        {/* CONDITIONAL DASHBOARD TRAYS */}
-        <DashboardTrays 
-          userRole={userRole}
-          currentView={currentView}
-          overdueTasks={overdueTasks}
-          getMissedDate={getMissedDate}
-          handleOpenModal={handleOpenModal}
-          renderPriorityPill={renderPriorityPill}
-          getMemberConfig={getMemberConfig}
-          longTermTasks={longTermTasks}
-          resizingTaskId={resizingTaskId}
-          handleDragStart={handleDragStart}
-          handleDragEnd={handleDragEnd}
-          formatDateKey={formatDateKey}
-          currentDate={currentDate}
-          isTaskPastDue={isTaskPastDue}
-          backlogTasks={backlogTasks}
-          listScope={listScope}
-        />
+        {/* CONDITIONAL DASHBOARD TRAYS (HIDDEN IN INVENTORY VIEW) */}
+        {currentView !== 'inventory' && (
+          <DashboardTrays 
+            userRole={userRole}
+            currentView={currentView}
+            overdueTasks={overdueTasks}
+            getMissedDate={getMissedDate}
+            handleOpenModal={handleOpenModal}
+            renderPriorityPill={renderPriorityPill}
+            getMemberConfig={getMemberConfig}
+            longTermTasks={longTermTasks}
+            resizingTaskId={resizingTaskId}
+            handleDragStart={handleDragStart}
+            handleDragEnd={handleDragEnd}
+            formatDateKey={formatDateKey}
+            currentDate={currentDate}
+            isTaskPastDue={isTaskPastDue}
+            backlogTasks={backlogTasks}
+            listScope={listScope}
+          />
+        )}
 
         {/* LIST & COMPLETED VIEWS */}
         {(currentView === 'list' || currentView === 'completed') && (
@@ -2137,6 +2153,14 @@ export default function App() {
             handleDragEnd={handleDragEnd}
             handleOpenModal={handleOpenModal}
             isTaskPastDue={isTaskPastDue}
+          />
+        )}
+
+        {/* INVENTORY VIEW */}
+        {currentView === 'inventory' && (
+          <InventoryDashboard 
+            companiesData={companiesData} 
+            currentProfile={currentProfile} 
           />
         )}
 
@@ -2257,6 +2281,8 @@ export default function App() {
           handleDeleteCompany={handleDeleteCompany}
           formatDateKey={formatDateKey}
           currentDate={currentDate}
+          companiesData={companiesData}
+          setCompaniesData={setCompaniesData}
         />
 
       </div>
