@@ -435,47 +435,7 @@ export default function App() {
       supabase.removeChannel(channel);
     };
   }, [session, companies]);
-
-  useEffect(() => {
-    if (tasks.length === 0) return;
-
-    const localNotified = JSON.parse(localStorage.getItem('localNotifiedTasks') || '[]');
-    const tasksToAlert = tasks.filter(t => isTaskPastDue(t) && !t.overdueNotified && !localNotified.includes(t.id));
-
-    if (tasksToAlert.length > 0) {
-      const newlyNotifiedIds = [];
-      
-      tasksToAlert.forEach(async (task) => {
-        newlyNotifiedIds.push(task.id);
-        const assigneeLabel = task.assignees && task.assignees.length > 0 ? task.assignees.join(', ') : 'Unassigned';
-        const alertDate = getMissedDate(task);
-        
-        dispatchNotification(
-          'role',
-          'admin',
-          'overdue',
-          `⚠️ OVERDUE: "${task.title}" (${assigneeLabel}) was not completed by ${alertDate}`,
-          '⚠️ Task Overdue Alert',
-          `"${task.title}" (${assigneeLabel}) was not completed by ${alertDate}`,
-          task.id,
-          alertDate
-        );
-
-        const { error } = await supabase.from('tasks').update({ is_overdue: true, overdue_notified: true }).eq('id', task.id);
-        if (error) console.error("Could not save overdue state to DB:", error);
-      });
-
-      localStorage.setItem('localNotifiedTasks', JSON.stringify([...localNotified, ...newlyNotifiedIds]));
-
-      setTasks(prev => prev.map(p => {
-        if (tasksToAlert.some(t => t.id === p.id)) {
-          return { ...p, isOverdue: true, overdueNotified: true };
-        }
-        return p;
-      }));
-    }
-  }, [tasks.length]);
-
+  
   const masterCompanyList = [...new Set([...companies, ...tasks.map(t => t.company).filter(Boolean)])];
 
   const getCurrentTimestamp = () => {

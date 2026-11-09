@@ -231,6 +231,70 @@ export default async function handler(req, res) {
       const errorData = await slackResponse.json();
       throw new Error(`Slack API error: ${errorData.error}`);
     }
+// --- PART 2: OVERDUE TASK AUDIT & BATCHED ADMIN PUSH ---
+try {
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  // 1. Fetch uncompleted tasks with past dates
+  const { data: overdueTasks } = await supabase
+    .from('tasks')
+    .select('id, title, date, assignees')
+    .neq('status', 'completed')
+    .lt('date', todayStr)
+    .not('date', 'is', null);
+
+  const newlyOverdue = [];
+  if (overdueTasks && overdueTasks.length > 0) {
+    for (const t of overdueTasks) {
+      // Idempotent insert: only succeeds if not already logged today
+      const { error: insErr } = await supabase
+        .from('overdue_alerts_log')
+        .insert({ task_id: String(t.id), alert_date: todayStr, recipient_role: 'admin' });
+
+      if (!insErr) newlyOverdue.push(t);
+    }
+  }
+
+  // 2. If there are new overdue tasks, send ONE batched summary push
+  if (newlyOverdue.length > 0) {
+    const summaryTitle = `⚠️ Overdue Task Alert (${newlyOverdue.length})`;
+    const summaryMessage = newlyOverdue.length === 1 
+      ? `"${newlyOverdue[0].title}" was due before today.` 
+      : `${newlyOverdue.length} tasks remain uncompleted from previous days.`;
+
+    // Write to in-app notifications
+    await supabase.from('notifications').insert({
+      text: `${summaryTitle}: ${summaryMessage}`,
+      type: 'overdue',
+      target_type: 'role',
+      target_value: 'admin',
+      read: false
+    });
+
+    // Send single web push to all admins with a 4-hour expiration TTL
+    const { data: adminSubs } = await supabase
+      .from('push_subscriptions')
+      .select('*')
+      .eq('role', 'admin');
+
+    if (adminSubs && adminSubs.length > 0) {
+      const payload = JSON.stringify({
+        title: summaryTitle,
+        body: summaryMessage,
+        url: '/',
+        tag: 'overdue-summary'
+      });
+
+      await Promise.allSettled(
+        adminSubs.map(s => 
+          webpush.sendNotification(JSON.parse(s.subscription), payload, { TTL: 14400 })
+        )
+      );
+    }
+  }
+} catch (overdueErr) {
+  console.error("Overdue check failed during dispatch:", overdueErr);
+}
 
     return res.status(200).json({ success: true, count: filteredTasks.length });
   } catch (error) {
