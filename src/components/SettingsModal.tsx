@@ -63,7 +63,6 @@ export default function SettingsModal({
   const [dispatchStatusMessage, setDispatchStatusMessage] = useState('');
   const [isSavingSlackId, setIsSavingSlackId] = useState(false);
 
-  // Inventory Access state for the currently edited member
   const [memberInventoryAccess, setMemberInventoryAccess] = useState(false);
 
   const targetMemberObj = teamMembers.find(m => m.name === selectedDispatchMember) || teamMembers[0];
@@ -167,7 +166,6 @@ export default function SettingsModal({
     }
   };
 
-  // Save Member Profile including inventory_access
   const handleSaveMemberWithInventory = async () => {
     if (!memberName.trim()) return alert('Please enter a name.');
 
@@ -224,22 +222,19 @@ export default function SettingsModal({
     setMemberInventoryAccess(false);
   };
 
-  // Immediate toggle for company inventory with optimistic state updates
   const toggleCompanyInventory = async (companyName, currentStatus) => {
     const newStatus = !currentStatus;
 
-    // 1. Optimistic UI update across App.tsx and InventoryDashboard immediately
     if (typeof setCompaniesData === 'function') {
       setCompaniesData(prev => {
         const exists = prev.some(c => c.name === companyName);
         if (exists) {
           return prev.map(c => c.name === companyName ? { ...c, inventory_enabled: newStatus } : c);
         }
-        return [...prev, { name: companyName, inventory_enabled: newStatus }];
+        return [...prev, { name: companyName, inventory_enabled: newStatus, inventory_manager: currentUserName }];
       });
     }
 
-    // 2. Persist to Supabase
     try {
       const { data, error } = await supabase
         .from('companies')
@@ -249,18 +244,34 @@ export default function SettingsModal({
 
       if (error) {
         alert(`Error updating company inventory: ${error.message}`);
-        // Revert optimistic state on failure
         if (typeof setCompaniesData === 'function') {
           setCompaniesData(prev => prev.map(c => c.name === companyName ? { ...c, inventory_enabled: currentStatus } : c));
         }
       } else if (!data || data.length === 0) {
-        // Fallback upsert if name row wasn't present
         await supabase
           .from('companies')
-          .upsert({ name: companyName, inventory_enabled: newStatus });
+          .upsert({ name: companyName, inventory_enabled: newStatus, inventory_manager: currentUserName });
       }
     } catch (err) {
       console.error('Failed to toggle company inventory:', err);
+    }
+  };
+
+  // Assign who receives low-stock Slack notifications for a company
+  const handleCompanyManagerChange = async (companyName, managerName) => {
+    if (typeof setCompaniesData === 'function') {
+      setCompaniesData(prev => prev.map(c => 
+        c.name === companyName ? { ...c, inventory_manager: managerName } : c
+      ));
+    }
+
+    const { error } = await supabase
+      .from('companies')
+      .update({ inventory_manager: managerName || null })
+      .eq('name', companyName);
+
+    if (error) {
+      alert(`Error saving inventory manager: ${error.message}`);
     }
   };
 
@@ -523,7 +534,6 @@ export default function SettingsModal({
                 </div>
               </div>
 
-              {/* SLACK USER ID FIELD */}
               <div>
                 <label className="block text-xs font-bold text-gray-700 mb-1">Slack User ID</label>
                 <input 
@@ -532,7 +542,7 @@ export default function SettingsModal({
                   onChange={(e) => setMemberSlackId(e.target.value)} 
                   placeholder="e.g. U08S5KMHT08" 
                   className="w-full p-2 text-xs font-mono border border-gray-300 rounded focus:outline-none" />
-                <span className="text-[10px] text-gray-500 mt-0.5 block">Find in Slack: Member profile &gt; Three Dots (...) &gt; Copy Member ID</span>
+                <span className="text-[10px] text-gray-500 mt-0.5 block">Find in Slack: Member profile - Three Dots (...) - Copy Member ID</span>
               </div>
 
               <div className="flex gap-3">
@@ -560,7 +570,6 @@ export default function SettingsModal({
                 </div>
               </div>
 
-              {/* EMPLOYEE INVENTORY ACCESS TOGGLE */}
               <div className="mt-2 pt-2 border-t border-gray-100">
                 <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
                   <input 
@@ -600,7 +609,7 @@ export default function SettingsModal({
               </div>
             </div>
 
-            {/* COMPANY MANAGEMENT WITH INVENTORY MODULE TOGGLES */}
+            {/* COMPANY MANAGEMENT WITH INVENTORY MODULE & MANAGER SELECTOR */}
             <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3 mt-2">
               <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Company Management & Inventory</h4>
               <div className="flex gap-2">
@@ -622,6 +631,7 @@ export default function SettingsModal({
                 {masterCompanyList.map(comp => {
                   const companyObj = (companiesData || []).find(c => c.name === comp);
                   const isInventoryEnabled = Boolean(companyObj?.inventory_enabled);
+                  const currentManager = companyObj?.inventory_manager || currentUserName || '';
 
                   return (
                     <div key={comp} className="flex flex-col bg-gray-50 p-2.5 rounded border border-gray-200 text-xs gap-2">
@@ -659,21 +669,43 @@ export default function SettingsModal({
                         )}
                       </div>
 
-                      {/* INVENTORY TOGGLE SWITCH */}
+                      {/* INVENTORY TOGGLE SWITCH & ALERT MANAGER */}
                       {!editingCompany && (
-                        <div className="flex justify-between items-center pt-2 border-t border-gray-200/60">
-                          <span className="text-[11px] text-gray-600 font-semibold">Inventory Module:</span>
-                          <button
-                            type="button"
-                            onClick={() => toggleCompanyInventory(comp, isInventoryEnabled)}
-                            className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition border ${
-                              isInventoryEnabled
-                                ? 'bg-emerald-100 text-emerald-800 border-emerald-300 shadow-2xs hover:bg-emerald-200'
-                                : 'bg-gray-200 text-gray-500 border-gray-300 hover:bg-gray-300'
-                            }`}
-                          >
-                            {isInventoryEnabled ? '✓ Enabled' : '○ Disabled'}
-                          </button>
+                        <div className="flex flex-col gap-2 pt-2 border-t border-gray-200/60">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[11px] text-gray-600 font-semibold">Inventory Module:</span>
+                            <button
+                              type="button"
+                              onClick={() => toggleCompanyInventory(comp, isInventoryEnabled)}
+                              className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition border ${
+                                isInventoryEnabled
+                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300 shadow-2xs hover:bg-emerald-200'
+                                  : 'bg-gray-200 text-gray-500 border-gray-300 hover:bg-gray-300'
+                              }`}
+                            >
+                              {isInventoryEnabled ? '✓ Enabled' : '○ Disabled'}
+                            </button>
+                          </div>
+
+                          {isInventoryEnabled && (
+                            <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded border border-gray-200">
+                              <span className="text-[10px] font-bold text-gray-600 uppercase tracking-wider">
+                                🔔 Low-Stock Slack Manager:
+                              </span>
+                              <select
+                                value={currentManager}
+                                onChange={(e) => handleCompanyManagerChange(comp, e.target.value)}
+                                className="text-xs font-bold p-1 border border-gray-300 rounded bg-gray-50 focus:outline-none"
+                              >
+                                <option value="">Select Manager...</option>
+                                {teamMembers.map(m => (
+                                  <option key={m.id} value={m.name}>
+                                    {m.name} {m.slackUserId ? '✓' : '(No Slack ID)'}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

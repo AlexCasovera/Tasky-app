@@ -2120,7 +2120,8 @@ export default function App() {
         {currentView === 'inventory' && (
           <InventoryDashboard 
             companiesData={companiesData} 
-            currentProfile={currentProfile} 
+            currentProfile={currentProfile}
+            userRole={userRole} 
           />
         )}
 

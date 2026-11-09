@@ -4,17 +4,31 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import { compressImage } from '../utils';
 
-export default function InventoryItemModal({ isOpen, onClose, editingItem, activeCompanies, refreshInventory }) {
+export default function InventoryItemModal({
+  isOpen,
+  onClose,
+  editingItem,
+  activeCompanies,
+  refreshInventory,
+  currentProfile,
+  userRole,
+  onTriggerLowStockAlert
+}) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [company, setCompany] = useState('');
   const [quantity, setQuantity] = useState(0);
+  const [minQuantity, setMinQuantity] = useState(0);
   const [imageUrl, setImageUrl] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
   const fileInputRef = useRef(null);
+
+  // Case-insensitive admin verification
+  const normalizedRole = String(userRole || currentProfile?.role || '').toLowerCase().trim();
+  const isAdmin = normalizedRole === 'admin';
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -29,13 +43,15 @@ export default function InventoryItemModal({ isOpen, onClose, editingItem, activ
       setName(editingItem.name || '');
       setDescription(editingItem.description || '');
       setCompany(editingItem.company || '');
-      setQuantity(editingItem.quantity || 0);
+      setQuantity(editingItem.quantity ?? 0);
+      setMinQuantity(editingItem.min_quantity ?? 0);
       setImageUrl(editingItem.image_url || '');
     } else {
       setName('');
       setDescription('');
       setCompany(activeCompanies[0] || '');
       setQuantity(0);
+      setMinQuantity(0);
       setImageUrl('');
     }
     setIsDragging(false);
@@ -100,11 +116,20 @@ export default function InventoryItemModal({ isOpen, onClose, editingItem, activ
     if (!company) return alert('Company is required.');
 
     setIsSaving(true);
+    const numQty = Number(quantity);
+    const numMin = Number(minQuantity);
+    const isAtOrBelowMin = numMin > 0 && numQty <= numMin;
+
+    const minWasChanged = !editingItem || Number(editingItem.min_quantity || 0) !== numMin;
+    const shouldFireAlert = isAtOrBelowMin && (!editingItem?.low_stock_notified || minWasChanged);
+
     const payload = {
       name: name.trim(),
       description: description.trim(),
       company,
-      quantity: Number(quantity),
+      quantity: numQty,
+      min_quantity: numMin,
+      low_stock_notified: isAtOrBelowMin,
       image_url: imageUrl,
       updated_at: new Date().toISOString()
     };
@@ -117,6 +142,16 @@ export default function InventoryItemModal({ isOpen, onClose, editingItem, activ
         const { error } = await supabase.from('inventory').insert(payload);
         if (error) throw error;
       }
+
+      if (shouldFireAlert && typeof onTriggerLowStockAlert === 'function') {
+        await onTriggerLowStockAlert({
+          name: payload.name,
+          company: payload.company,
+          quantity: numQty,
+          min_quantity: numMin
+        });
+      }
+
       refreshInventory();
       onClose();
     } catch (err) {
@@ -161,13 +196,13 @@ export default function InventoryItemModal({ isOpen, onClose, editingItem, activ
               type="text" 
               value={name} 
               onChange={(e) => setName(e.target.value)} 
-              placeholder="e.g., Heavy Duty Filter Cartridge"
+              placeholder="e.g., La's Totally Awesome"
               className="w-full p-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#A9B1A6] bg-white" 
             />
           </div>
 
           <div className="flex gap-3">
-            <div className="w-2/3">
+            <div className="w-1/2">
               <label className="block text-xs font-bold text-gray-700 mb-1">Company</label>
               <select 
                 value={company} 
@@ -176,7 +211,7 @@ export default function InventoryItemModal({ isOpen, onClose, editingItem, activ
                 {activeCompanies.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
-            <div className="w-1/3">
+            <div className="w-1/4">
               <label className="block text-xs font-bold text-gray-700 mb-1">Quantity</label>
               <input 
                 type="number" 
@@ -185,7 +220,36 @@ export default function InventoryItemModal({ isOpen, onClose, editingItem, activ
                 className="w-full p-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#A9B1A6] text-center font-bold bg-white" 
               />
             </div>
+            <div className="w-1/4">
+              <label className="block text-xs font-bold text-amber-800 mb-1" title="Sends a Slack alert when stock is at or below this number">
+                Min Alert 🔔
+              </label>
+              <input 
+                type="number" 
+                min="0"
+                value={minQuantity} 
+                disabled={!isAdmin}
+                onChange={(e) => setMinQuantity(e.target.value)} 
+                title={isAdmin ? "Set minimum required stock before a Slack reorder alert is sent" : "Only Admins can adjust minimum stock thresholds"}
+                className={`w-full p-2 text-sm border rounded focus:outline-none text-center font-bold transition ${
+                  isAdmin 
+                    ? 'border-amber-300 bg-amber-50/60 text-amber-900 focus:ring-2 focus:ring-amber-400 cursor-text' 
+                    : 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
+                }`} 
+              />
+            </div>
           </div>
+
+          {Number(minQuantity) > 0 && (
+            <div className="text-[11px] bg-amber-50 border border-amber-200 text-amber-900 px-2.5 py-1.5 rounded flex items-center justify-between">
+              <span>
+                🔔 Reorder alert triggers when stock is <strong>{minQuantity} or fewer</strong>.
+              </span>
+              {Number(quantity) <= Number(minQuantity) && (
+                <span className="font-bold text-red-600 uppercase text-[10px]">⚠️ At or Below Min</span>
+              )}
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-bold text-gray-700 mb-1">Description (Optional)</label>
