@@ -19,6 +19,9 @@ export default function InventoryItemModal({
   const [company, setCompany] = useState('');
   const [quantity, setQuantity] = useState(0);
   const [minQuantity, setMinQuantity] = useState(0);
+  const [isBulkRefill, setIsBulkRefill] = useState(false);
+  const [refillUnitLabel, setRefillUnitLabel] = useState('8oz Bottle Refill');
+  const [refillsPerJug, setRefillsPerJug] = useState(0);
   const [imageUrl, setImageUrl] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -26,9 +29,8 @@ export default function InventoryItemModal({
 
   const fileInputRef = useRef(null);
 
-  // Case-insensitive admin verification
   const normalizedRole = String(userRole || currentProfile?.role || '').toLowerCase().trim();
-  const isAdmin = normalizedRole === 'admin';
+  const isAdmin = normalizedRole === 'admin' || Boolean(currentProfile?.inventoryAccess);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -45,6 +47,9 @@ export default function InventoryItemModal({
       setCompany(editingItem.company || '');
       setQuantity(editingItem.quantity ?? 0);
       setMinQuantity(editingItem.min_quantity ?? 0);
+      setIsBulkRefill(Boolean(editingItem.is_bulk_refill));
+      setRefillUnitLabel(editingItem.refill_unit_label || '8oz Bottle Refill');
+      setRefillsPerJug(editingItem.refills_per_jug ?? 0);
       setImageUrl(editingItem.image_url || '');
     } else {
       setName('');
@@ -52,6 +57,9 @@ export default function InventoryItemModal({
       setCompany(activeCompanies[0] || '');
       setQuantity(0);
       setMinQuantity(0);
+      setIsBulkRefill(false);
+      setRefillUnitLabel('8oz Bottle Refill');
+      setRefillsPerJug(0);
       setImageUrl('');
     }
     setIsDragging(false);
@@ -129,6 +137,9 @@ export default function InventoryItemModal({
       company,
       quantity: numQty,
       min_quantity: numMin,
+      is_bulk_refill: isBulkRefill,
+      refill_unit_label: isBulkRefill ? (refillUnitLabel.trim() || 'Bottle Refill') : null,
+      refills_per_jug: isBulkRefill ? Math.max(0, Number(refillsPerJug || 0)) : 0,
       low_stock_notified: isAtOrBelowMin,
       image_url: imageUrl,
       updated_at: new Date().toISOString()
@@ -179,7 +190,7 @@ export default function InventoryItemModal({
       onMouseDown={onClose}
     >
       <div 
-        className="bg-[#F4F3ED] max-w-md w-full rounded-lg shadow-2xl p-6 flex flex-col gap-4 animate-fade-in"
+        className="bg-[#F4F3ED] max-w-md w-full max-h-[92vh] overflow-y-auto rounded-lg shadow-2xl p-6 flex flex-col gap-4 animate-fade-in"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center border-b border-gray-300 pb-3">
@@ -196,7 +207,7 @@ export default function InventoryItemModal({
               type="text" 
               value={name} 
               onChange={(e) => setName(e.target.value)} 
-              placeholder="e.g., La's Totally Awesome"
+              placeholder="e.g., Dawn Soap"
               className="w-full p-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#A9B1A6] bg-white" 
             />
           </div>
@@ -212,7 +223,9 @@ export default function InventoryItemModal({
               </select>
             </div>
             <div className="w-1/4">
-              <label className="block text-xs font-bold text-gray-700 mb-1">Quantity</label>
+              <label className="block text-xs font-bold text-gray-700 mb-1">
+                {isBulkRefill ? 'Full Jugs' : 'Backstock'}
+              </label>
               <input 
                 type="number" 
                 value={quantity} 
@@ -230,7 +243,6 @@ export default function InventoryItemModal({
                 value={minQuantity} 
                 disabled={!isAdmin}
                 onChange={(e) => setMinQuantity(e.target.value)} 
-                title={isAdmin ? "Set minimum required stock before a Slack reorder alert is sent" : "Only Admins can adjust minimum stock thresholds"}
                 className={`w-full p-2 text-sm border rounded focus:outline-none text-center font-bold transition ${
                   isAdmin 
                     ? 'border-amber-300 bg-amber-50/60 text-amber-900 focus:ring-2 focus:ring-amber-400 cursor-text' 
@@ -240,10 +252,66 @@ export default function InventoryItemModal({
             </div>
           </div>
 
+          {/* BULK REFILL / SMALL BOTTLE CONFIGURATION */}
+          <div className="bg-white p-3 rounded-lg border border-gray-200 flex flex-col gap-2.5">
+            <div className="flex items-start gap-2.5">
+              <input 
+                type="checkbox"
+                id="isBulkRefillCheck"
+                checked={isBulkRefill}
+                onChange={(e) => setIsBulkRefill(e.target.checked)}
+                className="accent-blue-600 w-4 h-4 mt-0.5 cursor-pointer"
+              />
+              <label htmlFor="isBulkRefillCheck" className="text-xs cursor-pointer">
+                <span className="font-bold text-gray-800 block">Dispensed into Smaller Refill Bottles (e.g., Dawn, Bona, Vinegar)</span>
+                <span className="text-[11px] text-gray-500">
+                  Cleaners request small bottle refills on their Supply Sheet while you track large backstock jugs here.
+                </span>
+              </label>
+            </div>
+
+            {isBulkRefill && (
+              <div className="pt-2 border-t border-gray-100 grid grid-cols-2 gap-2.5 text-xs bg-blue-50/40 p-2 rounded">
+                <div>
+                  <label className="block text-[10px] font-bold text-blue-900 uppercase mb-1">
+                    Cleaner Request Unit
+                  </label>
+                  <input 
+                    type="text"
+                    value={refillUnitLabel}
+                    onChange={(e) => setRefillUnitLabel(e.target.value)}
+                    placeholder="e.g., 8oz Bottle Refill"
+                    className="w-full p-1.5 text-xs border border-blue-200 rounded bg-white font-semibold"
+                  />
+                  <span className="text-[9px] text-gray-500 block mt-0.5">Shown on the cleaner's Supply Sheet</span>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-blue-900 uppercase mb-1">
+                    Refills Per 1 Big Jug
+                  </label>
+                  <input 
+                    type="number"
+                    min="0"
+                    value={refillsPerJug}
+                    onChange={(e) => setRefillsPerJug(e.target.value)}
+                    placeholder="0 = Manual Jug Count"
+                    className="w-full p-1.5 text-xs border border-blue-200 rounded bg-white font-bold text-center"
+                  />
+                  <span className="text-[9px] text-gray-500 block mt-0.5">
+                    {Number(refillsPerJug) > 0 
+                      ? `Auto-deducts 1 jug every ${refillsPerJug} refills` 
+                      : '0 = Log usage only (manual jug count)'}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
           {Number(minQuantity) > 0 && (
             <div className="text-[11px] bg-amber-50 border border-amber-200 text-amber-900 px-2.5 py-1.5 rounded flex items-center justify-between">
               <span>
-                🔔 Reorder alert triggers when stock is <strong>{minQuantity} or fewer</strong>.
+                🔔 Reorder alert triggers when backstock is <strong>{minQuantity} or fewer</strong>.
               </span>
               {Number(quantity) <= Number(minQuantity) && (
                 <span className="font-bold text-red-600 uppercase text-[10px]">⚠️ At or Below Min</span>
@@ -280,7 +348,7 @@ export default function InventoryItemModal({
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
                 onClick={() => !isUploading && fileInputRef.current?.click()}
-                className={`w-full h-32 rounded-lg border-2 border-dashed flex flex-col items-center justify-center p-3 text-center cursor-pointer transition select-none ${
+                className={`w-full h-28 rounded-lg border-2 border-dashed flex flex-col items-center justify-center p-3 text-center cursor-pointer transition select-none ${
                   isDragging
                     ? 'border-[#5B7049] bg-[#A9B1A6]/20 ring-2 ring-[#5B7049]/40'
                     : 'border-gray-300 bg-white hover:border-[#A9B1A6] hover:bg-gray-50/70'

@@ -29,6 +29,7 @@ import FilterBar from './components/FilterBar';
 import DashboardTrays from './components/DashboardTrays';
 import ListAndCompletedViews from './components/ListAndCompletedViews';
 import InventoryDashboard from './components/InventoryDashboard';
+import SupplyRequestModal from './components/SupplyRequestModal';
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
@@ -52,6 +53,8 @@ export default function App() {
   const [teamMembers, setTeamMembers] = useState([]);
   const [activeEmployeeFilters, setActiveEmployeeFilters] = useState([]);
   const [listScope, setListScope] = useState('day');
+  const [isSupplyModalOpen, setIsSupplyModalOpen] = useState(false);
+  const [allInventory, setAllInventory] = useState([]);
 
   useEffect(() => {
     setListScope(userRole === 'admin' ? 'week' : 'day');
@@ -98,7 +101,9 @@ export default function App() {
           role: p.role || 'employee',
           color: p.color || '#2A9D8F',
           slackUserId: p.slack_user_id || '',
-          inventoryAccess: p.inventory_access || false
+          inventoryAccess: Boolean(p.inventory_access),
+          supplySheetAccess: Boolean(p.supply_sheet_access),
+          supplySheetCompanies: p.supply_sheet_companies || []
         }));
         setTeamMembers(mappedMembers);
         if (activeEmployeeFilters.length === 0) setActiveEmployeeFilters(mappedMembers.map(m => m.name));
@@ -121,10 +126,16 @@ export default function App() {
             role: myProfile.role || 'employee',
             color: myProfile.color || '#2A9D8F',
             slackUserId: myProfile.slack_user_id || '',
-            inventoryAccess: myProfile.inventory_access || false
+            inventoryAccess: Boolean(myProfile.inventory_access),
+            supplySheetAccess: Boolean(myProfile.supply_sheet_access),
+            supplySheetCompanies: myProfile.supply_sheet_companies || []
           });
         }
       }
+
+      // Preload inventory items for Supply Sheet Modal
+      const { data: invData } = await supabase.from('inventory').select('*').order('name');
+      if (invData) setAllInventory(invData);
     }
 
     if (session) loadData();
@@ -920,60 +931,6 @@ export default function App() {
     setMemberSlackId(member.slackUserId || '');
     setMemberRole(member.role);
     setMemberColor(member.color || '#2A9D8F');
-  };
-
-  const handleSaveMember = async () => {
-    if (!memberName.trim()) return alert('Please enter a name.');
-
-    const initials = memberName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-
-    if (editingMemberId) {
-      const { error } = await supabase.from('profiles').update({
-        name: memberName,
-        initials,
-        role: memberRole,
-        color: memberColor,
-        slack_user_id: memberSlackId.trim() || null
-      }).eq('id', editingMemberId);
-
-      if (error) {
-        return alert(`Error updating team member: ${error.message}`);
-      }
-    } else {
-      if (!memberEmail.trim()) return alert('Please enter an email address.');
-
-      const newId = crypto.randomUUID();
-      const { error } = await supabase.from('profiles').insert({
-        id: newId,
-        name: memberName,
-        initials,
-        email: memberEmail,
-        role: memberRole,
-        color: memberColor,
-        slack_user_id: memberSlackId.trim() || null
-      });
-
-      if (error) {
-        console.error('Error creating profile:', error);
-        return alert(`Error creating team member: ${error.message}`);
-      }
-    }
-
-    const { data: updatedProfiles } = await supabase.from('profiles').select('*');
-    if (updatedProfiles) {
-      setTeamMembers(updatedProfiles.map(p => ({
-        id: p.id,
-        name: p.name || p.email.split('@')[0],
-        initials: p.initials || p.email.substring(0, 2).toUpperCase(),
-        email: p.email,
-        role: p.role || 'employee',
-        color: p.color || '#2A9D8F',
-        slackUserId: p.slack_user_id || '',
-        inventoryAccess: p.inventory_access || false
-      })));
-    }
-
-    resetMemberForm();
   };
 
   const handleDeleteMember = async (id, name) => {
@@ -1963,7 +1920,8 @@ export default function App() {
           unreadNotifCount={unreadNotifCount} markAllNotifsRead={markAllNotifsRead} 
           notifications={notifications} handleNotificationClick={handleNotificationClick} 
           currentUserName={currentUserName} resetMemberForm={resetMemberForm} 
-          setIsSettingsOpen={setIsSettingsOpen} handleOpenCreateView={handleOpenCreateView} 
+          setIsSettingsOpen={setIsSettingsOpen} handleOpenCreateView={handleOpenCreateView}
+          onOpenSupplySheet={() => setIsSupplyModalOpen(true)}
         />
 
         {/* TEAM MEMBER & COMPANY FILTER BAR (HIDDEN IN INVENTORY VIEW) */}
@@ -2230,7 +2188,6 @@ export default function App() {
           memberColor={memberColor}
           setMemberColor={setMemberColor}
           handleDeleteMember={handleDeleteMember}
-          handleSaveMember={handleSaveMember}
           newCompanyInput={newCompanyInput}
           setNewCompanyInput={setNewCompanyInput}
           handleAddCompany={handleAddCompany}
@@ -2244,6 +2201,16 @@ export default function App() {
           currentDate={currentDate}
           companiesData={companiesData}
           setCompaniesData={setCompaniesData}
+        />
+
+        {/* GLOBAL SUPPLY REQUEST MODAL (LAUNCHABLE FROM ANY VIEW) */}
+        <SupplyRequestModal 
+          isOpen={isSupplyModalOpen}
+          onClose={() => setIsSupplyModalOpen(false)}
+          inventory={allInventory}
+          activeCompanies={companiesData.filter(c => c.inventory_enabled).map(c => c.name)}
+          currentProfile={currentProfile}
+          onSubmitted={() => {}}
         />
 
       </div>

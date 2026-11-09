@@ -33,7 +33,8 @@ export default function Header({
   currentUserName,
   resetMemberForm,
   setIsSettingsOpen,
-  handleOpenCreateView
+  handleOpenCreateView,
+  onOpenSupplySheet
 }) {
   const notifRef = useRef(null);
 
@@ -47,6 +48,11 @@ export default function Header({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [setIsNotifOpen]);
 
+  const normalizedRole = String(userRole || currentProfile?.role || '').toLowerCase().trim();
+  const isAdmin = normalizedRole === 'admin';
+  const hasSupplyAccess = isAdmin || Boolean(currentProfile?.supplySheetAccess);
+  const hasInventoryAccess = isAdmin || Boolean(currentProfile?.inventoryAccess);
+
   return (
     <>
       {/* REAL USER SESSION HEADER WITH HCP GLOBAL SEARCH */}
@@ -59,10 +65,22 @@ export default function Header({
           <span className="text-amber-400 font-bold uppercase">{userRole}</span>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+        <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end flex-wrap">
           
-          {/* INVENTORY BUTTON - TO THE LEFT OF THE SEARCH BAR */}
-          {(userRole === 'admin' || currentProfile?.inventoryAccess) && (
+          {/* SUPPLY SHEET BUTTON - VISIBLE ON ALL PAGES ONLY IF AUTHORIZED */}
+          {hasSupplyAccess && (
+            <button
+              onClick={onOpenSupplySheet}
+              className="bg-[#5B7049] hover:bg-[#465638] text-white px-3 py-1.5 font-bold rounded text-xs transition flex items-center gap-1.5 shrink-0 shadow-sm"
+              title="Daily Supply Request (Hoja de Químicos)"
+            >
+              <span>🧴</span>
+              <span>Supply Sheet</span>
+            </button>
+          )}
+
+          {/* INVENTORY NAVIGATION TOGGLE */}
+          {hasInventoryAccess && (
             <button
               onClick={() => setCurrentView(currentView === 'inventory' ? 'list' : 'inventory')}
               className={`px-3 py-1.5 font-bold rounded text-xs transition flex items-center gap-1.5 shrink-0 ${
@@ -96,13 +114,11 @@ export default function Header({
               )}
             </div>
 
-            {/* HCP STYLE OVERLAY DROPDOWN PANEL */}
+            {/* SEARCH RESULTS DROPDOWN */}
             {isSearchFocused && searchQuery.trim().length > 0 && (
               <div className="absolute left-0 right-0 mt-2 bg-white rounded-lg shadow-2xl border border-gray-300 text-gray-800 z-50 overflow-hidden animate-fade-in max-h-96 overflow-y-auto">
                 {hasSearchResults ? (
                   <div className="flex flex-col">
-                    
-                    {/* TASKS SECTION */}
                     {searchResults.tasks.length > 0 && (
                       <div className="p-2 border-b border-gray-100">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 px-2 block mb-1">📋 Jobs & Tasks</span>
@@ -132,7 +148,6 @@ export default function Header({
                       </div>
                     )}
 
-                    {/* COMPANIES SECTION */}
                     {searchResults.companies.length > 0 && (
                       <div className="p-2 border-b border-gray-100 bg-gray-50/50">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 px-2 block mb-1">🏢 Companies</span>
@@ -153,7 +168,6 @@ export default function Header({
                       </div>
                     )}
 
-                    {/* TEAM MEMBERS SECTION */}
                     {searchResults.members.length > 0 && (
                       <div className="p-2">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 px-2 block mb-1">👤 Team Members</span>
@@ -176,7 +190,6 @@ export default function Header({
                         ))}
                       </div>
                     )}
-
                   </div>
                 ) : (
                   <div className="p-4 text-center text-xs text-gray-400 italic">
@@ -187,7 +200,6 @@ export default function Header({
             )}
           </div>
 
-          {/* SETTINGS GEAR IN TOP BAR (ACCESSIBLE IN INVENTORY VIEW) */}
           {currentView === 'inventory' && (
             <button 
               onClick={() => { resetMemberForm(); setIsSettingsOpen(true); }}
@@ -206,7 +218,7 @@ export default function Header({
         </div>
       </div>
 
-      {/* CONTROLS HEADER (ONLY VISIBLE IN TASK VIEWS) */}
+      {/* CONTROLS HEADER (VISIBLE IN TASK VIEWS) */}
       {currentView !== 'inventory' && (
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4 border-b border-gray-300 pb-4">
           <div className="flex items-center gap-4">
@@ -254,7 +266,10 @@ export default function Header({
                       <div 
                         key={n.id} 
                         onClick={() => handleNotificationClick(n)}
-                        className={`p-2 rounded text-xs border cursor-pointer hover:brightness-95 transition ${n.read ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-blue-50 border-blue-200 text-blue-900 shadow-2xs font-bold'}`}> <div className="flex justify-between items-start gap-2"> <span className="leading-tight">{n.text}</span> <span className={`text-[9px] shrink-0 ${n.read ? 'text-gray-400' : 'text-blue-500 font-bold'}`}>{n.time}</span>
+                        className={`p-2 rounded text-xs border cursor-pointer hover:brightness-95 transition ${n.read ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-blue-50 border-blue-200 text-blue-900 shadow-2xs font-bold'}`}>
+                        <div className="flex justify-between items-start gap-2">
+                          <span className="leading-tight">{n.text}</span>
+                          <span className={`text-[9px] shrink-0 ${n.read ? 'text-gray-400' : 'text-blue-500 font-bold'}`}>{n.time}</span>
                         </div>
                         {n.taskId && (
                           <div className="mt-1 text-[9px] text-gray-400 font-bold uppercase">
@@ -278,7 +293,7 @@ export default function Header({
               ⚙️
             </button>
 
-            {userRole === 'admin' && currentView !== 'create' && (
+            {isAdmin && currentView !== 'create' && (
               <button onClick={handleOpenCreateView} className="bg-[#5B7049] text-white px-4 py-2 rounded text-xs font-bold shadow-sm hover:bg-[#465638] transition">
                 + New Task
               </button>

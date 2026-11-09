@@ -34,7 +34,6 @@ export default function SettingsModal({
   memberColor,
   setMemberColor,
   handleDeleteMember,
-  handleSaveMember,
   newCompanyInput,
   setNewCompanyInput,
   handleAddCompany,
@@ -63,13 +62,26 @@ export default function SettingsModal({
   const [dispatchStatusMessage, setDispatchStatusMessage] = useState('');
   const [isSavingSlackId, setIsSavingSlackId] = useState(false);
 
+  // Permissions state for the profile form
   const [memberInventoryAccess, setMemberInventoryAccess] = useState(false);
+  const [memberSupplyAccess, setMemberSupplyAccess] = useState(false);
+  const [memberSupplyCompanies, setMemberSupplyCompanies] = useState([]);
 
   const targetMemberObj = teamMembers.find(m => m.name === selectedDispatchMember) || teamMembers[0];
 
-  const handleOpenEditMemberWithInventory = (member) => {
+  const handleOpenEditMemberCustom = (member) => {
     handleOpenEditMember(member);
     setMemberInventoryAccess(Boolean(member.inventoryAccess));
+    setMemberSupplyAccess(Boolean(member.supplySheetAccess));
+    const rawComps = member.supplySheetCompanies || [];
+    setMemberSupplyCompanies(Array.isArray(rawComps) ? rawComps : JSON.parse(rawComps || '[]'));
+  };
+
+  const handleResetMemberCustom = () => {
+    resetMemberForm();
+    setMemberInventoryAccess(false);
+    setMemberSupplyAccess(false);
+    setMemberSupplyCompanies([]);
   };
 
   const handleDispatchPreferenceChange = async (field, value) => {
@@ -166,42 +178,34 @@ export default function SettingsModal({
     }
   };
 
-  const handleSaveMemberWithInventory = async () => {
+  const handleSaveMemberWithPermissions = async () => {
     if (!memberName.trim()) return alert('Please enter a name.');
 
     const initials = memberName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
 
-    if (editingMemberId) {
-      const { error } = await supabase.from('profiles').update({
-        name: memberName,
-        initials,
-        role: memberRole,
-        color: memberColor,
-        slack_user_id: memberSlackId.trim() || null,
-        inventory_access: memberInventoryAccess
-      }).eq('id', editingMemberId);
+    const payload = {
+      name: memberName,
+      initials,
+      role: memberRole,
+      color: memberColor,
+      slack_user_id: memberSlackId.trim() || null,
+      inventory_access: memberInventoryAccess,
+      supply_sheet_access: memberSupplyAccess,
+      supply_sheet_companies: memberSupplyCompanies
+    };
 
-      if (error) {
-        return alert(`Error updating team member: ${error.message}`);
-      }
+    if (editingMemberId) {
+      const { error } = await supabase.from('profiles').update(payload).eq('id', editingMemberId);
+      if (error) return alert(`Error updating team member: ${error.message}`);
     } else {
       if (!memberEmail.trim()) return alert('Please enter an email address.');
-
       const newId = crypto.randomUUID();
       const { error } = await supabase.from('profiles').insert({
         id: newId,
-        name: memberName,
-        initials,
         email: memberEmail,
-        role: memberRole,
-        color: memberColor,
-        slack_user_id: memberSlackId.trim() || null,
-        inventory_access: memberInventoryAccess
+        ...payload
       });
-
-      if (error) {
-        return alert(`Error creating team member: ${error.message}`);
-      }
+      if (error) return alert(`Error creating team member: ${error.message}`);
     }
 
     const { data: updatedProfiles } = await supabase.from('profiles').select('*');
@@ -214,12 +218,13 @@ export default function SettingsModal({
         role: p.role || 'employee',
         color: p.color || '#2A9D8F',
         slackUserId: p.slack_user_id || '',
-        inventoryAccess: Boolean(p.inventory_access)
+        inventoryAccess: Boolean(p.inventory_access),
+        supplySheetAccess: Boolean(p.supply_sheet_access),
+        supplySheetCompanies: p.supply_sheet_companies || []
       })));
     }
 
-    resetMemberForm();
-    setMemberInventoryAccess(false);
+    handleResetMemberCustom();
   };
 
   const toggleCompanyInventory = async (companyName, currentStatus) => {
@@ -257,7 +262,6 @@ export default function SettingsModal({
     }
   };
 
-  // Assign who receives low-stock Slack notifications for a company
   const handleCompanyManagerChange = async (companyName, managerName) => {
     if (typeof setCompaniesData === 'function') {
       setCompaniesData(prev => prev.map(c => 
@@ -270,9 +274,15 @@ export default function SettingsModal({
       .update({ inventory_manager: managerName || null })
       .eq('name', companyName);
 
-    if (error) {
-      alert(`Error saving inventory manager: ${error.message}`);
-    }
+    if (error) alert(`Error saving inventory manager: ${error.message}`);
+  };
+
+  const toggleSupplyCompany = (companyName) => {
+    setMemberSupplyCompanies(prev => 
+      prev.includes(companyName) 
+        ? prev.filter(c => c !== companyName) 
+        : [...prev, companyName]
+    );
   };
 
   return (
@@ -290,7 +300,7 @@ export default function SettingsModal({
           <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
         </div>
 
-        {/* PUSH NOTIFICATION SETTINGS CARD */}
+        {/* PUSH NOTIFICATIONS */}
         <div className="bg-white p-4 rounded-lg border border-amber-300 flex justify-between items-center shadow-2xs">
           <div>
             <h4 className="font-bold text-xs uppercase tracking-wider text-amber-900">Device Push Alerts</h4>
@@ -303,7 +313,7 @@ export default function SettingsModal({
           </button>
         </div>
 
-        {/* SLACK MORNING DISPATCH MODULE */}
+        {/* SLACK MORNING DISPATCH */}
         <div className="bg-white p-4 rounded-lg border border-emerald-300 flex flex-col gap-3 shadow-2xs">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-1.5">
@@ -399,7 +409,7 @@ export default function SettingsModal({
         {/* ADMIN ONLY CONTROLS */}
         {userRole === 'admin' && (
           <>
-            {/* DASHBOARD VISIBILITY MODULE */}
+            {/* DASHBOARD VISIBILITY */}
             <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3 shadow-2xs">
               <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Dashboard Visibility (This Device)</h4>
               <p className="text-[10px] text-gray-500">Uncheck items below to completely hide them from your personal dashboard filters and calendar views.</p>
@@ -447,10 +457,7 @@ export default function SettingsModal({
               <div className="flex justify-between items-center mb-2">
                 <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500">Active Team Members</h4>
                 <button 
-                  onClick={() => {
-                    resetMemberForm();
-                    setMemberInventoryAccess(false);
-                  }} 
+                  onClick={handleResetMemberCustom} 
                   className="text-xs font-bold bg-[#A9B1A6] text-white px-2 py-0.5 rounded hover:bg-gray-600 transition">
                   + Add New
                 </button>
@@ -462,11 +469,16 @@ export default function SettingsModal({
                     <div className="flex items-center gap-2">
                       <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: member.color }}></span>
                       <div>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-bold text-xs text-gray-800">{member.name} ({member.role.toUpperCase()})</span>
                           {member.inventoryAccess && (
                             <span className="text-[9px] font-bold bg-blue-100 text-blue-800 px-1 py-0.2 rounded uppercase">
                               📦 Inventory
+                            </span>
+                          )}
+                          {member.supplySheetAccess && (
+                            <span className="text-[9px] font-bold bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded uppercase">
+                              🧴 Supply Sheet
                             </span>
                           )}
                         </div>
@@ -481,7 +493,7 @@ export default function SettingsModal({
                       </div>
                     </div>
                     <button 
-                      onClick={() => handleOpenEditMemberWithInventory(member)} 
+                      onClick={() => handleOpenEditMemberCustom(member)} 
                       className="text-xs font-bold text-blue-700 hover:underline shrink-0">
                       Edit
                     </button>
@@ -490,7 +502,7 @@ export default function SettingsModal({
               </div>
             </div>
 
-            {/* EDIT/CREATE TEAM MEMBER PROFILE FORM */}
+            {/* EDIT/CREATE PROFILE FORM */}
             <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3">
               <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">
                 {editingMemberId ? 'Edit Team Member Profile' : 'Create New Team Member'}
@@ -570,7 +582,9 @@ export default function SettingsModal({
                 </div>
               </div>
 
-              <div className="mt-2 pt-2 border-t border-gray-100">
+              {/* PERMISSION CONTROLS */}
+              <div className="mt-2 pt-2 border-t border-gray-100 flex flex-col gap-2.5">
+                {/* 1. Inventory Module Access */}
                 <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
                   <input 
                     type="checkbox" 
@@ -578,9 +592,49 @@ export default function SettingsModal({
                     onChange={(e) => setMemberInventoryAccess(e.target.checked)} 
                     className="accent-blue-600 w-3.5 h-3.5 cursor-pointer" 
                   />
-                  <span className="font-bold">Grant Access to Inventory System</span>
+                  <span className="font-bold">Grant Access to Inventory Management Dashboard</span>
                 </label>
-                <p className="text-[10px] text-gray-500 ml-5 mt-0.5">Allows this employee to see the inventory tab and manage items for enabled companies.</p>
+
+                {/* 2. Supply Sheet Access */}
+                <div className="bg-gray-50 p-2.5 rounded border border-gray-200 flex flex-col gap-2">
+                  <label className="flex items-center gap-2 text-xs text-gray-800 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={memberSupplyAccess} 
+                      onChange={(e) => setMemberSupplyAccess(e.target.checked)} 
+                      className="accent-emerald-600 w-3.5 h-3.5 cursor-pointer" 
+                    />
+                    <span className="font-bold">Grant Access to Daily Supply Sheet (Hoja de Químicos)</span>
+                  </label>
+                  <p className="text-[10px] text-gray-500 ml-5">
+                    Shows the "🧴 Supply Sheet" button on the main navigation bar for this employee.
+                  </p>
+
+                  {/* Scoped Company Permissions for Supply Sheet */}
+                  {memberSupplyAccess && (
+                    <div className="ml-5 pt-1.5 border-t border-gray-200">
+                      <span className="text-[10px] font-bold text-gray-600 uppercase tracking-wider block mb-1">
+                        Allowed Companies for Supply Sheet:
+                      </span>
+                      <div className="flex flex-col gap-1">
+                        {masterCompanyList.map(comp => (
+                          <label key={comp} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                            <input 
+                              type="checkbox" 
+                              checked={memberSupplyCompanies.includes(comp)}
+                              onChange={() => toggleSupplyCompany(comp)}
+                              className="accent-emerald-600 w-3 h-3"
+                            />
+                            <span>{comp}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <span className="text-[9px] text-gray-400 block mt-1">
+                        If 1 company is chosen, the form locks to it automatically without showing a dropdown.
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="flex justify-between items-center pt-2 mt-1 border-t border-gray-200">
@@ -593,15 +647,12 @@ export default function SettingsModal({
                 )}
                 <div className="flex gap-2 ml-auto">
                   <button 
-                    onClick={() => {
-                      resetMemberForm();
-                      setMemberInventoryAccess(false);
-                    }}
+                    onClick={handleResetMemberCustom}
                     className="px-3 py-1.5 rounded text-xs font-bold text-gray-500 hover:bg-gray-100">
                     Cancel
                   </button>
                   <button 
-                    onClick={handleSaveMemberWithInventory}
+                    onClick={handleSaveMemberWithPermissions}
                     className="bg-[#333333] text-white px-4 py-1.5 rounded text-xs font-bold hover:bg-black transition">
                     {editingMemberId ? 'Update Profile' : 'Add Member'}
                   </button>
@@ -609,7 +660,7 @@ export default function SettingsModal({
               </div>
             </div>
 
-            {/* COMPANY MANAGEMENT WITH INVENTORY MODULE & MANAGER SELECTOR */}
+            {/* COMPANY MANAGEMENT */}
             <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3 mt-2">
               <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Company Management & Inventory</h4>
               <div className="flex gap-2">
@@ -669,7 +720,6 @@ export default function SettingsModal({
                         )}
                       </div>
 
-                      {/* INVENTORY TOGGLE SWITCH & ALERT MANAGER */}
                       {!editingCompany && (
                         <div className="flex flex-col gap-2 pt-2 border-t border-gray-200/60">
                           <div className="flex justify-between items-center">
