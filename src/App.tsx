@@ -2315,6 +2315,7 @@ const handleSaveMember = async () => {
           activeCompanies={companiesData.filter(c => c.inventory_enabled).map(c => c.name)}
           currentProfile={currentProfile}
           onSubmitted={() => {}}
+          dispatchNotification={dispatchNotification}
         />
 
       </div>

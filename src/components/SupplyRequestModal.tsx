@@ -2,6 +2,7 @@
 // @ts-nocheck
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
+import { sendNativePush } from '../utils';
 
 export default function SupplyRequestModal({
   isOpen,
@@ -9,7 +10,8 @@ export default function SupplyRequestModal({
   inventory,
   activeCompanies,
   currentProfile,
-  onSubmitted
+  onSubmitted,
+  dispatchNotification
 }) {
   const [viewMode, setViewMode] = useState('new');
   const [carNumber, setCarNumber] = useState('');
@@ -122,7 +124,7 @@ export default function SupplyRequestModal({
 
       await supabase.from('supply_request_items').insert(itemRows);
 
-      // Route notification ONLY to the designated Inventory Manager
+      // Route notification to the designated Inventory & Supply Manager
       const { data: compData } = await supabase
         .from('companies')
         .select('inventory_manager')
@@ -130,13 +132,36 @@ export default function SupplyRequestModal({
         .single();
 
       const managerName = compData?.inventory_manager;
+      const targetType = managerName ? 'userName' : 'role';
+      const targetValue = managerName || 'admin';
 
-      if (managerName) {
+      const notifBellText = `📋 Supply Request: Car #${carNumber.trim()} (${applicantName}) requested ${totalItemsSelected} items for ${selectedCompany}.${hasWarningLight ? ' ⚠️ Vehicle Light ON!' : ''}`;
+      const pushTitle = `📋 New Supply Request (${selectedCompany})`;
+      const pushBody = `Car #${carNumber.trim()} (${applicantName}) requested ${totalItemsSelected} items.${hasWarningLight ? ' ⚠️ Vehicle light reported!' : ''}`;
+
+      if (typeof dispatchNotification === 'function') {
+        await dispatchNotification(
+          targetType,
+          targetValue,
+          'supply_request',
+          notifBellText,
+          pushTitle,
+          pushBody
+        );
+      } else {
+        // Fallback: direct push + DB insert
+        sendNativePush({
+          targetType,
+          targetValue,
+          title: pushTitle,
+          message: pushBody
+        });
+
         await supabase.from('notifications').insert({
-          text: `📋 Supply Request: Car #${carNumber.trim()} (${applicantName}) requested ${totalItemsSelected} items for ${selectedCompany}.${hasWarningLight ? ' ⚠️ Vehicle Light ON!' : ''}`,
+          text: notifBellText,
           type: 'supply_request',
-          target_type: 'userName',
-          target_value: managerName,
+          target_type: targetType,
+          target_value: targetValue,
           read: false
         });
       }
@@ -270,7 +295,6 @@ export default function SupplyRequestModal({
               />
             </div>
 
-            {/* Checklist with Out-of-Stock handling */}
             <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-1.5 min-h-[220px]">
               {filteredItems.length === 0 ? (
                 <div className="text-center text-gray-400 italic text-xs py-8">
@@ -280,12 +304,9 @@ export default function SupplyRequestModal({
                 filteredItems.map(item => {
                   const qty = quantities[item.id] || 0;
                   
-                  // Out-of-stock check for both standard and bulk items
                   const isOutOfStock = (() => {
                     const jugs = Number(item.quantity || 0);
-                    if (!item.is_bulk_refill) {
-                      return jugs <= 0;
-                    }
+                    if (!item.is_bulk_refill) return jugs <= 0;
                     const cap = Number(item.refills_per_jug || 0);
                     if (cap > 0) {
                       const used = Number(item.current_refill_usage || 0);
