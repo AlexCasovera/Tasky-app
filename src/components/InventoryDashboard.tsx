@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import InventoryItemModal from './InventoryItemModal';
 
-export default function InventoryDashboard({ companiesData, currentProfile, userRole, dispatchNotification }) {
+export default function InventoryDashboard({ companiesData, currentProfile, userRole, dispatchNotification, onRequestsUpdated }) {
   const [inventory, setInventory] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -14,8 +14,6 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
 
   const [subView, setSubView] = useState('grid');
   const [allRequests, setAllRequests] = useState([]);
-  
-  // This state holds the editable copy of a request when you click "Review"
   const [editingRequest, setEditingRequest] = useState(null);
   const [isApproving, setIsApproving] = useState(false);
 
@@ -80,7 +78,10 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
       .subscribe();
 
     const reqChannel = supabase.channel('supply-requests-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'supply_requests' }, () => fetchSupplyRequests())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'supply_requests' }, () => {
+        fetchSupplyRequests();
+        if (typeof onRequestsUpdated === 'function') onRequestsUpdated();
+      })
       .subscribe();
 
     return () => {
@@ -89,7 +90,7 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
     };
   }, [companiesData]);
 
-  const triggerLowStockAlert = async (itemData) => {
+  const triggerLowStockAlert = async (itemData, isZero = false) => {
     try {
       const companyObj = (companiesData || []).find(c => c.name === itemData.company);
       const managerName = companyObj?.inventory_manager || currentProfile?.name || '';
@@ -104,30 +105,58 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
       const targetName = managerProfile?.name || managerName || 'Admin';
       const slackUserId = managerProfile?.slack_user_id;
 
+      const alertTitle = isZero 
+        ? `🚫 OUT OF STOCK: "${itemData.name}" (${itemData.company}) is at ZERO!`
+        : `🚨 Low Stock: "${itemData.name}" (${itemData.company}) is at ${itemData.quantity} (Min: ${itemData.min_quantity})`;
+
       await dispatchNotification(
         'userName',
         targetName,
         'inventory_low',
-        `🚨 Low Stock (${itemData.company}): "${itemData.name}" is at ${itemData.quantity} (Min: ${itemData.min_quantity}). Time to reorder!`,
-        '🚨 Low Stock Alert',
-        `"${itemData.name}" dropped below minimum threshold.`
+        alertTitle,
+        isZero ? '🚫 Item Out of Stock' : '🚨 Low Stock Alert',
+        `"${itemData.name}" is ${isZero ? 'completely out of stock' : 'below minimum required stock'}. Time to reorder!`
       );
 
       if (slackUserId) {
         const payload = {
-          slackUserId, managerName: targetName, itemName: itemData.name, company: itemData.company,
-          currentQuantity: itemData.quantity, minQuantity: itemData.min_quantity, triggeredBy: currentProfile?.name || 'Team Member'
+          slackUserId,
+          managerName: targetName,
+          itemName: itemData.name,
+          company: itemData.company,
+          currentQuantity: itemData.quantity,
+          minQuantity: itemData.min_quantity,
+          triggeredBy: currentProfile?.name || 'Team Member'
         };
 
+        let sent = false;
         try {
-          await fetch('https://tasky-app-gilt.vercel.app/api/inventory-alert', {
+          const res = await fetch('https://tasky-app-gilt.vercel.app/api/inventory-alert', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
-        } catch (e) {
-           await fetch('/api/inventory-alert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          if (res.ok) sent = true;
+        } catch (e) {}
+
+        if (!sent) {
+          try {
+            const localRes = await fetch('/api/inventory-alert', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            if (localRes.ok) sent = true;
+          } catch (e) {}
         }
+
+        if (sent) {
+          showToast(`🔔 Slack reorder alert sent to ${targetName}!`);
+        } else {
+          showToast(`🔔 Stock alert logged for ${targetName} (Deploy api/inventory-alert to live Vercel for Slack DMs).`);
+        }
+      } else {
+        showToast(`⚠️ Stock alert logged! (Add a Slack Member ID for ${targetName} in Settings to get Slack pings).`);
       }
     } catch (err) {
       console.error('Error sending low stock alert:', err);
@@ -151,26 +180,23 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
     try {
       const itemsToProcess = editingRequest.items || [];
       const originalRequest = allRequests.find(r => r.id === editingRequest.id);
-      
       let wasModified = false;
 
       for (const reqItem of itemsToProcess) {
-        // Check if Admin modified this quantity
         const origItem = originalRequest?.items.find(o => o.id === reqItem.id);
         if (origItem && Number(origItem.quantity) !== Number(reqItem.quantity)) {
           wasModified = true;
-          // Update DB with the approved quantity
           await supabase.from('supply_request_items').update({ quantity: reqItem.quantity }).eq('id', reqItem.id);
         }
 
         const requestedQty = Number(reqItem.quantity || 0);
-        if (requestedQty === 0) continue; // skip items adjusted to 0
+        if (requestedQty === 0) continue;
 
         const invItem = inventory.find(i => String(i.id) === String(reqItem.item_id));
         if (!invItem) continue;
         const minQty = Number(invItem.min_quantity || 0);
 
-       // Case 1: Bulk / Station Refill Item
+        // Case 1: Bulk / Station Refill Item
         if (reqItem.is_bulk_refill || invItem.is_bulk_refill) {
           const cap = Number(invItem.refills_per_jug || 0);
           if (cap > 0) {
@@ -179,7 +205,6 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
             const refillsLeftInOpenJug = Math.max(0, cap - currentUsed);
             const totalAvailableRefills = (currentJugs * cap) + refillsLeftInOpenJug;
 
-            // Cap deduction so stock cannot drop below zero
             const actualDeduct = Math.min(requestedQty, totalAvailableRefills);
             const remainingRefills = Math.max(0, totalAvailableRefills - actualDeduct);
 
@@ -190,7 +215,6 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
               newJugQty = Math.floor(remainingRefills / cap);
               const remainder = remainingRefills % cap;
               if (remainder === 0 && newJugQty > 0) {
-                // Exactly on a jug boundary (e.g., 4 refills left = 0 unopened jugs, open jug has 4 left)
                 newJugQty -= 1;
                 newUsed = 0;
               } else {
@@ -198,21 +222,19 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
               }
             }
 
+            const isZeroNow = newJugQty === 0 && remainingRefills === 0;
             const isNowLow = minQty > 0 && newJugQty <= minQty;
-            const shouldNotify = isNowLow && !invItem.low_stock_notified;
+            const shouldNotify = (isZeroNow && !invItem.low_stock_notified) || (isNowLow && !invItem.low_stock_notified) || (isZeroNow && currentJugs > 0);
 
-            await supabase
-              .from('inventory')
-              .update({
-                quantity: newJugQty,
-                current_refill_usage: newUsed,
-                low_stock_notified: isNowLow,
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', invItem.id);
+            await supabase.from('inventory').update({
+              quantity: newJugQty,
+              current_refill_usage: newUsed,
+              low_stock_notified: (isNowLow || isZeroNow),
+              updated_at: new Date().toISOString()
+            }).eq('id', invItem.id);
 
             if (shouldNotify) {
-              await triggerLowStockAlert({ ...invItem, quantity: newJugQty, min_quantity: minQty });
+              await triggerLowStockAlert({ ...invItem, quantity: newJugQty, min_quantity: minQty }, isZeroNow);
             }
           }
           continue;
@@ -220,18 +242,25 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
 
         // Case 2: Standard Consumable Item
         const newQty = Math.max(0, Number(invItem.quantity || 0) - requestedQty);
+        const isZeroNow = newQty === 0;
         const isNowLow = minQty > 0 && newQty <= minQty;
-        const shouldNotify = isNowLow && !invItem.low_stock_notified;
+        const shouldNotify = (isZeroNow && Number(invItem.quantity || 0) > 0) || (isNowLow && !invItem.low_stock_notified);
 
         await supabase.from('inventory').update({
-          quantity: newQty, low_stock_notified: isNowLow, updated_at: new Date().toISOString()
+          quantity: newQty,
+          low_stock_notified: (isNowLow || isZeroNow),
+          updated_at: new Date().toISOString()
         }).eq('id', invItem.id);
 
-        if (shouldNotify) await triggerLowStockAlert({ ...invItem, quantity: newQty, min_quantity: minQty });
+        if (shouldNotify) {
+          await triggerLowStockAlert({ ...invItem, quantity: newQty, min_quantity: minQty }, isZeroNow);
+        }
       }
 
       await supabase.from('supply_requests').update({
-        status: 'approved', reviewed_by: reviewerName, reviewed_at: new Date().toISOString()
+        status: 'approved',
+        reviewed_by: reviewerName,
+        reviewed_at: new Date().toISOString()
       }).eq('id', editingRequest.id);
 
       const noteText = wasModified ? '\n(Note: Some quantities were adjusted by Admin)' : '';
@@ -246,8 +275,9 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
       );
 
       setEditingRequest(null);
-      fetchInventory();
-      fetchSupplyRequests();
+      await fetchInventory();
+      await fetchSupplyRequests();
+      if (typeof onRequestsUpdated === 'function') onRequestsUpdated();
       showToast(`✓ Car #${editingRequest.car_number} request approved.`);
     } catch (err) {
       alert(`Error approving request: ${err.message}`);
@@ -261,7 +291,9 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
     const reviewerName = currentProfile?.name || 'Admin';
 
     await supabase.from('supply_requests').update({
-      status: 'rejected', reviewed_by: reviewerName, reviewed_at: new Date().toISOString()
+      status: 'rejected',
+      reviewed_by: reviewerName,
+      reviewed_at: new Date().toISOString()
     }).eq('id', editingRequest.id);
 
     await dispatchNotification(
@@ -274,9 +306,11 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
     );
 
     setEditingRequest(null);
-    fetchSupplyRequests();
+    await fetchSupplyRequests();
+    if (typeof onRequestsUpdated === 'function') onRequestsUpdated();
   };
 
+  // Quick quantity stepper on cards (+ and -)
   const handleQuickUpdateQuantity = async (id, delta) => {
     const target = inventory.find(i => i.id === id);
     if (!target) return;
@@ -286,19 +320,43 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
 
     const minQty = Number(target.min_quantity || 0);
     const isNowLow = minQty > 0 && newQty <= minQty;
-    const shouldNotify = isNowLow && !target.low_stock_notified;
+    const isZero = newQty === 0;
 
-    setInventory(prev => prev.map(i => i.id === id ? { ...i, quantity: newQty, low_stock_notified: isNowLow } : i));
+    // When restocking a jug (delta > 0), if the active station was empty, automatically crack open and fill it!
+    const cap = Number(target.refills_per_jug || 0);
+    let nextUsage = Number(target.current_refill_usage || 0);
+    if (target.is_bulk_refill && cap > 0 && delta > 0) {
+      const refillsLeft = Math.max(0, cap - nextUsage);
+      if (refillsLeft === 0) {
+        nextUsage = 0; // fills back to full capacity
+      }
+    }
+
+    setInventory(prev => prev.map(i => 
+      i.id === id ? { 
+        ...i, 
+        quantity: newQty, 
+        current_refill_usage: nextUsage,
+        low_stock_notified: (isNowLow || isZero) 
+      } : i
+    ));
 
     const { error } = await supabase.from('inventory').update({
-      quantity: newQty, low_stock_notified: isNowLow, updated_at: new Date().toISOString()
+      quantity: newQty,
+      current_refill_usage: nextUsage,
+      low_stock_notified: (isNowLow || isZero),
+      updated_at: new Date().toISOString()
     }).eq('id', id);
 
     if (error) {
       fetchInventory();
       return;
     }
-    if (shouldNotify) await triggerLowStockAlert({ ...target, quantity: newQty, min_quantity: minQty });
+
+    const shouldNotify = (isZero && Number(target.quantity || 0) > 0) || (isNowLow && !target.low_stock_notified);
+    if (shouldNotify) {
+      await triggerLowStockAlert({ ...target, quantity: newQty, min_quantity: minQty }, isZero);
+    }
   };
 
   const normalizedRole = String(userRole || currentProfile?.role || '').toLowerCase().trim();
@@ -311,6 +369,16 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
         <span className="text-4xl">🔒</span>
         <h2 className="text-xl font-bold">Access Denied</h2>
         <p className="text-sm">You do not have permission to view the Inventory System.</p>
+      </div>
+    );
+  }
+
+  if (activeCompanies.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-gray-500 gap-2 mt-20">
+        <span className="text-4xl">📦</span>
+        <h2 className="text-xl font-bold">Inventory System Inactive</h2>
+        <p className="text-sm">Enable the Inventory Module for at least one company in Settings.</p>
       </div>
     );
   }
@@ -489,15 +557,15 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
                         const cap = Number(item.refills_per_jug);
                         const used = Number(item.current_refill_usage || 0);
                         const refillsLeft = Math.max(0, cap - used);
-                        const isCompletelyEmpty = Number(item.quantity || 0) <= 0 && refillsLeft <= 0;
+                        const isZero = Number(item.quantity || 0) <= 0 && refillsLeft <= 0;
 
                         return (
                           <div className={`mt-2 text-[10px] font-bold px-2 py-1.5 rounded text-center shadow-2xs border ${
-                            isCompletelyEmpty 
+                            isZero 
                               ? 'text-red-800 bg-red-50 border-red-300' 
                               : 'text-blue-800 bg-blue-50 border-blue-200'
                           }`}>
-                            {isCompletelyEmpty 
+                            {isZero 
                               ? '🚫 Out of Stock (0 Refills Left)' 
                               : `💧 Jug Level: ${refillsLeft} / ${cap} Refills Left`}
                           </div>
@@ -565,7 +633,7 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
             </div>
           )}
 
-          {/* History */}
+          {/* Past Approvals & Rejections */}
           <h3 className="font-bold text-xs uppercase tracking-wider text-gray-500 border-b border-gray-300 pb-1 mt-2">Past Approvals & Rejections</h3>
           {historyRequests.length === 0 ? (
             <div className="bg-white p-8 rounded-lg border border-gray-200 text-center text-gray-400 italic text-xs">
@@ -651,7 +719,6 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
                 const jugs = Number(invItem?.quantity || 0);
                 const cap = Number(invItem?.refills_per_jug || 0);
                 
-                // Calculate available units based on item type
                 const availableUnits = item.is_bulk_refill && cap > 0
                   ? (jugs * cap) + Math.max(0, cap - Number(invItem?.current_refill_usage || 0))
                   : jugs;
@@ -665,7 +732,7 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
                         <span className="font-bold text-gray-800 truncate">{item.item_name}</span>
                         {isShortage && (
                           <span className="text-[9px] bg-red-100 text-red-700 px-1 py-0.2 rounded font-bold uppercase">
-                            ⚠️ Shortage (Only {availableUnits} {item.is_bulk_refill ? 'refill(s)' : 'on shelf'})
+                            ⚠️ Shortage (Only {availableUnits} {item.is_bulk_refill ? 'refills' : 'on shelf'})
                           </span>
                         )}
                       </div>

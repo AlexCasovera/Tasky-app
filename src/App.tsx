@@ -153,26 +153,31 @@ export default function App() {
 
   const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
 
-  // Global Realtime Fetch for Pending Supply Requests (Visible on Main Task Board)
-  useEffect(() => {
+ // Global Fetch for Pending Supply Requests (for the designated company manager)
+  const fetchGlobalRequests = async () => {
     if (!session || companiesData.length === 0) return;
 
-    const fetchGlobalRequests = async () => {
-      const managedComps = companiesData
-        .filter(c => userRole === 'admin' || c.inventory_manager === currentUserName)
-        .map(c => c.name);
+    const managedComps = companiesData
+      .filter(c => c.inventory_manager === currentUserName)
+      .map(c => c.name);
+    
+    if (managedComps.length === 0) {
+      setGlobalPendingRequests([]);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('supply_requests')
+      .select('*')
+      .in('company', managedComps)
+      .eq('status', 'pending');
       
-      if (managedComps.length === 0) return;
+    if (!error && data) {
+      setGlobalPendingRequests(data);
+    }
+  };
 
-      const { data } = await supabase
-        .from('supply_requests')
-        .select('*')
-        .in('company', managedComps)
-        .eq('status', 'pending');
-        
-      if (data) setGlobalPendingRequests(data);
-    };
-
+  useEffect(() => {
     fetchGlobalRequests();
 
     const reqChannel = supabase
@@ -183,7 +188,7 @@ export default function App() {
       .subscribe();
 
     return () => { supabase.removeChannel(reqChannel); };
-  }, [session, companiesData, userRole, currentUserName]);
+  }, [session, companiesData, currentUserName, currentView]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -2176,6 +2181,7 @@ const handleSaveMember = async () => {
             currentProfile={currentProfile}
             userRole={userRole} 
             dispatchNotification={dispatchNotification}
+            onRequestsUpdated={fetchGlobalRequests}
           />
         )}
 
