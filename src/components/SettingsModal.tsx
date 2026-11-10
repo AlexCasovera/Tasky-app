@@ -34,6 +34,7 @@ export default function SettingsModal({
   memberColor,
   setMemberColor,
   handleDeleteMember,
+  handleSaveMember,
   newCompanyInput,
   setNewCompanyInput,
   handleAddCompany,
@@ -46,7 +47,11 @@ export default function SettingsModal({
   formatDateKey,
   currentDate,
   companiesData,
-  setCompaniesData
+  setCompaniesData,
+  hideInventoryBtn,
+  setHideInventoryBtn,
+  hideSupplyBtn,
+  setHideSupplyBtn
 }) {
   if (!isSettingsOpen) return null;
 
@@ -62,7 +67,6 @@ export default function SettingsModal({
   const [dispatchStatusMessage, setDispatchStatusMessage] = useState('');
   const [isSavingSlackId, setIsSavingSlackId] = useState(false);
 
-  // Permissions state for the profile form
   const [memberInventoryAccess, setMemberInventoryAccess] = useState(false);
   const [memberSupplyAccess, setMemberSupplyAccess] = useState(false);
   const [memberSupplyCompanies, setMemberSupplyCompanies] = useState([]);
@@ -412,10 +416,32 @@ export default function SettingsModal({
             {/* DASHBOARD VISIBILITY */}
             <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-3 shadow-2xs">
               <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 border-b pb-1">Dashboard Visibility (This Device)</h4>
-              <p className="text-[10px] text-gray-500">Uncheck items below to completely hide them from your personal dashboard filters and calendar views.</p>
+              <p className="text-[10px] text-gray-500">Uncheck items below to hide them from your personal dashboard UI without revoking your permissions.</p>
               
-              <div className="flex gap-6 mt-1">
-                <div className="w-1/2 flex flex-col gap-2">
+              <div className="flex gap-6 mt-1 flex-wrap">
+                <div className="w-full sm:w-[45%] flex flex-col gap-2">
+                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Features</span>
+                  <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={!hideInventoryBtn} 
+                      onChange={(e) => setHideInventoryBtn(!e.target.checked)} 
+                      className="accent-[#A9B1A6]" 
+                    /> 
+                    Inventory Button
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={!hideSupplyBtn} 
+                      onChange={(e) => setHideSupplyBtn(!e.target.checked)} 
+                      className="accent-[#A9B1A6]" 
+                    /> 
+                    Supply Sheet Button
+                  </label>
+                </div>
+
+                <div className="w-full sm:w-[45%] flex flex-col gap-2">
                   <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Companies</span>
                   {masterCompanyList.map(comp => (
                     <label key={comp} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
@@ -432,22 +458,25 @@ export default function SettingsModal({
                     </label>
                   ))}
                 </div>
-                <div className="w-1/2 flex flex-col gap-2">
+
+                <div className="w-full flex flex-col gap-2 mt-2">
                   <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Team Members</span>
-                  {teamMembers.map(m => (
-                    <label key={m.id} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        checked={!hiddenMembers.includes(m.name)} 
-                        onChange={(e) => {
-                          if (e.target.checked) setHiddenMembers(prev => prev.filter(n => n !== m.name));
-                          else setHiddenMembers(prev => [...prev, m.name]);
-                        }} 
-                        className="accent-[#A9B1A6]" 
-                      /> 
-                        {m.name}
-                    </label>
-                  ))}
+                  <div className="grid grid-cols-2 gap-2">
+                    {teamMembers.map(m => (
+                      <label key={m.id} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={!hiddenMembers.includes(m.name)} 
+                          onChange={(e) => {
+                            if (e.target.checked) setHiddenMembers(prev => prev.filter(n => n !== m.name));
+                            else setHiddenMembers(prev => [...prev, m.name]);
+                          }} 
+                          className="accent-[#A9B1A6]" 
+                        /> 
+                          {m.name}
+                      </label>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -738,14 +767,14 @@ export default function SettingsModal({
                           </div>
 
                           {isInventoryEnabled && (
-                            <div className="flex items-center justify-between gap-2 bg-white p-1.5 rounded border border-gray-200">
-                              <span className="text-[10px] font-bold text-gray-600 uppercase tracking-wider">
-                                🔔 Low-Stock Slack Manager:
+                            <div className="flex flex-col gap-1 bg-white p-2 rounded border border-gray-200">
+                              <span className="text-[10px] font-bold text-gray-700 uppercase tracking-wider">
+                                🔔 Inventory & Supply Manager (Notification Receiver):
                               </span>
                               <select
                                 value={currentManager}
                                 onChange={(e) => handleCompanyManagerChange(comp, e.target.value)}
-                                className="text-xs font-bold p-1 border border-gray-300 rounded bg-gray-50 focus:outline-none"
+                                className="text-xs font-bold p-1.5 border border-gray-300 rounded bg-gray-50 focus:outline-none"
                               >
                                 <option value="">Select Manager...</option>
                                 {teamMembers.map(m => (
@@ -754,6 +783,9 @@ export default function SettingsModal({
                                   </option>
                                 ))}
                               </select>
+                              <span className="text-[9px] text-gray-400">
+                                This person receives all low-stock Slack pings, supply request notifications, and the dashboard action banner for {comp}.
+                              </span>
                             </div>
                           )}
                         </div>

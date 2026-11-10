@@ -22,6 +22,7 @@ export default function InventoryItemModal({
   const [isBulkRefill, setIsBulkRefill] = useState(false);
   const [refillUnitLabel, setRefillUnitLabel] = useState('8oz Bottle Refill');
   const [refillsPerJug, setRefillsPerJug] = useState(0);
+  const [currentRefillsLeft, setCurrentRefillsLeft] = useState(0);
   const [imageUrl, setImageUrl] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -49,7 +50,10 @@ export default function InventoryItemModal({
       setMinQuantity(editingItem.min_quantity ?? 0);
       setIsBulkRefill(Boolean(editingItem.is_bulk_refill));
       setRefillUnitLabel(editingItem.refill_unit_label || '8oz Bottle Refill');
-      setRefillsPerJug(editingItem.refills_per_jug ?? 0);
+      const perJug = Number(editingItem.refills_per_jug ?? 0);
+      setRefillsPerJug(perJug);
+      const used = Number(editingItem.current_refill_usage ?? 0);
+      setCurrentRefillsLeft(perJug > 0 ? Math.max(0, perJug - used) : 0);
       setImageUrl(editingItem.image_url || '');
     } else {
       setName('');
@@ -60,6 +64,7 @@ export default function InventoryItemModal({
       setIsBulkRefill(false);
       setRefillUnitLabel('8oz Bottle Refill');
       setRefillsPerJug(0);
+      setCurrentRefillsLeft(0);
       setImageUrl('');
     }
     setIsDragging(false);
@@ -69,10 +74,7 @@ export default function InventoryItemModal({
 
   const processAndUploadFile = async (file) => {
     if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      return alert('Please upload an image file (PNG, JPG, WEBP, etc.).');
-    }
+    if (!file.type.startsWith('image/')) return alert('Please upload an image file.');
 
     setIsUploading(true);
     try {
@@ -113,7 +115,6 @@ export default function InventoryItemModal({
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
-
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       processAndUploadFile(e.dataTransfer.files[0]);
     }
@@ -131,6 +132,10 @@ export default function InventoryItemModal({
     const minWasChanged = !editingItem || Number(editingItem.min_quantity || 0) !== numMin;
     const shouldFireAlert = isAtOrBelowMin && (!editingItem?.low_stock_notified || minWasChanged);
 
+    const perJug = Math.max(0, Number(refillsPerJug || 0));
+    const refillsLeft = Math.max(0, Math.min(perJug, Number(currentRefillsLeft || 0)));
+    const calculatedUsed = perJug > 0 ? (perJug - refillsLeft) : 0;
+
     const payload = {
       name: name.trim(),
       description: description.trim(),
@@ -139,7 +144,8 @@ export default function InventoryItemModal({
       min_quantity: numMin,
       is_bulk_refill: isBulkRefill,
       refill_unit_label: isBulkRefill ? (refillUnitLabel.trim() || 'Bottle Refill') : null,
-      refills_per_jug: isBulkRefill ? Math.max(0, Number(refillsPerJug || 0)) : 0,
+      refills_per_jug: perJug,
+      current_refill_usage: isBulkRefill ? calculatedUsed : 0,
       low_stock_notified: isAtOrBelowMin,
       image_url: imageUrl,
       updated_at: new Date().toISOString()
@@ -252,7 +258,7 @@ export default function InventoryItemModal({
             </div>
           </div>
 
-          {/* BULK REFILL / SMALL BOTTLE CONFIGURATION */}
+          {/* BULK REFILL CONFIGURATION & JUG LEVEL ADJUSTER */}
           <div className="bg-white p-3 rounded-lg border border-gray-200 flex flex-col gap-2.5">
             <div className="flex items-start gap-2.5">
               <input 
@@ -271,53 +277,63 @@ export default function InventoryItemModal({
             </div>
 
             {isBulkRefill && (
-              <div className="pt-2 border-t border-gray-100 grid grid-cols-2 gap-2.5 text-xs bg-blue-50/40 p-2 rounded">
-                <div>
-                  <label className="block text-[10px] font-bold text-blue-900 uppercase mb-1">
-                    Cleaner Request Unit
-                  </label>
-                  <input 
-                    type="text"
-                    value={refillUnitLabel}
-                    onChange={(e) => setRefillUnitLabel(e.target.value)}
-                    placeholder="e.g., 8oz Bottle Refill"
-                    className="w-full p-1.5 text-xs border border-blue-200 rounded bg-white font-semibold"
-                  />
-                  <span className="text-[9px] text-gray-500 block mt-0.5">Shown on the cleaner's Supply Sheet</span>
+              <div className="pt-2 border-t border-gray-100 flex flex-col gap-2 text-xs bg-blue-50/40 p-2.5 rounded">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold text-blue-900 uppercase mb-1">
+                      Cleaner Request Unit
+                    </label>
+                    <input 
+                      type="text"
+                      value={refillUnitLabel}
+                      onChange={(e) => setRefillUnitLabel(e.target.value)}
+                      placeholder="e.g., 8oz Bottle Refill"
+                      className="w-full p-1.5 text-xs border border-blue-200 rounded bg-white font-semibold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-blue-900 uppercase mb-1">
+                      Refills Per 1 Jug
+                    </label>
+                    <input 
+                      type="number"
+                      min="0"
+                      value={refillsPerJug}
+                      onChange={(e) => {
+                        const val = Number(e.target.value || 0);
+                        setRefillsPerJug(val);
+                        if (currentRefillsLeft > val) setCurrentRefillsLeft(val);
+                      }}
+                      placeholder="0 = Manual"
+                      className="w-full p-1.5 text-xs border border-blue-200 rounded bg-white font-bold text-center"
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-[10px] font-bold text-blue-900 uppercase mb-1">
-                    Refills Per 1 Big Jug
-                  </label>
-                  <input 
-                    type="number"
-                    min="0"
-                    value={refillsPerJug}
-                    onChange={(e) => setRefillsPerJug(e.target.value)}
-                    placeholder="0 = Manual Jug Count"
-                    className="w-full p-1.5 text-xs border border-blue-200 rounded bg-white font-bold text-center"
-                  />
-                  <span className="text-[9px] text-gray-500 block mt-0.5">
-                    {Number(refillsPerJug) > 0 
-                      ? `Auto-deducts 1 jug every ${refillsPerJug} refills` 
-                      : '0 = Log usage only (manual jug count)'}
-                  </span>
-                </div>
+                {/* EDITABLE ACTIVE JUG LEVEL */}
+                {Number(refillsPerJug) > 0 && (
+                  <div className="bg-white p-2 rounded border border-blue-200 flex justify-between items-center mt-1">
+                    <div>
+                      <span className="font-bold text-[11px] text-blue-950 block">💧 Active Open Jug:</span>
+                      <span className="text-[10px] text-gray-500">Refills left before next full jug deduction</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input 
+                        type="number"
+                        min="0"
+                        max={refillsPerJug}
+                        value={currentRefillsLeft}
+                        onChange={(e) => setCurrentRefillsLeft(Math.max(0, Math.min(Number(refillsPerJug), Number(e.target.value || 0))))}
+                        className="w-14 p-1 text-xs border border-blue-300 rounded font-bold text-center bg-blue-50/50"
+                      />
+                      <span className="text-[11px] font-bold text-gray-500">/ {refillsPerJug}</span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
-
-          {Number(minQuantity) > 0 && (
-            <div className="text-[11px] bg-amber-50 border border-amber-200 text-amber-900 px-2.5 py-1.5 rounded flex items-center justify-between">
-              <span>
-                🔔 Reorder alert triggers when backstock is <strong>{minQuantity} or fewer</strong>.
-              </span>
-              {Number(quantity) <= Number(minQuantity) && (
-                <span className="font-bold text-red-600 uppercase text-[10px]">⚠️ At or Below Min</span>
-              )}
-            </div>
-          )}
 
           <div>
             <label className="block text-xs font-bold text-gray-700 mb-1">Description (Optional)</label>

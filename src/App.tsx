@@ -62,6 +62,8 @@ export default function App() {
 
   const [hiddenCompanies, setHiddenCompanies] = useState(() => JSON.parse(localStorage.getItem('hiddenCompanies') || '[]'));
   const [hiddenMembers, setHiddenMembers] = useState(() => JSON.parse(localStorage.getItem('hiddenMembers') || '[]'));
+  const [hideInventoryBtn, setHideInventoryBtn] = useState(() => JSON.parse(localStorage.getItem('hideInventoryBtn') || 'false'));
+  const [hideSupplyBtn, setHideSupplyBtn] = useState(() => JSON.parse(localStorage.getItem('hideSupplyBtn') || 'false'));
 
   useEffect(() => {
     localStorage.setItem('hiddenCompanies', JSON.stringify(hiddenCompanies));
@@ -72,6 +74,14 @@ export default function App() {
   }, [hiddenMembers]);
 
   useEffect(() => {
+    localStorage.setItem('hideInventoryBtn', JSON.stringify(hideInventoryBtn));
+  }, [hideInventoryBtn]);
+
+  useEffect(() => {
+    localStorage.setItem('hideSupplyBtn', JSON.stringify(hideSupplyBtn));
+  }, [hideSupplyBtn]);
+
+  useEffect(() => {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(console.error);
     }
@@ -80,6 +90,7 @@ export default function App() {
   const [companies, setCompanies] = useState([]);
   const [companiesData, setCompaniesData] = useState([]);
   const [activeCompanyFilters, setActiveCompanyFilters] = useState([]);
+  const [globalPendingRequests, setGlobalPendingRequests] = useState([]);
 
   useEffect(() => {
     async function loadData() {
@@ -133,13 +144,46 @@ export default function App() {
         }
       }
 
-      // Preload inventory items for Supply Sheet Modal
       const { data: invData } = await supabase.from('inventory').select('*').order('name');
       if (invData) setAllInventory(invData);
     }
 
     if (session) loadData();
   }, [session]);
+
+  const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
+
+  // Global Realtime Fetch for Pending Supply Requests (Visible on Main Task Board)
+  useEffect(() => {
+    if (!session || companiesData.length === 0) return;
+
+    const fetchGlobalRequests = async () => {
+      const managedComps = companiesData
+        .filter(c => userRole === 'admin' || c.inventory_manager === currentUserName)
+        .map(c => c.name);
+      
+      if (managedComps.length === 0) return;
+
+      const { data } = await supabase
+        .from('supply_requests')
+        .select('*')
+        .in('company', managedComps)
+        .eq('status', 'pending');
+        
+      if (data) setGlobalPendingRequests(data);
+    };
+
+    fetchGlobalRequests();
+
+    const reqChannel = supabase
+      .channel('global-supply-requests')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'supply_requests' }, () => {
+        fetchGlobalRequests();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(reqChannel); };
+  }, [session, companiesData, userRole, currentUserName]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -163,8 +207,6 @@ export default function App() {
 
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
-
-  const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
 
   useEffect(() => {
     if (!currentUserName) return;
@@ -227,6 +269,30 @@ export default function App() {
     }
   };
 
+  const handleNotificationClick = async (notif) => {
+    setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
+    await supabase.from('notifications').update({ read: true }).eq('id', notif.id);
+    
+    // Jump straight to inventory for supply sheet alerts
+    if (['supply_request', 'inventory_low', 'supply_approved', 'supply_rejected'].includes(notif.type)) {
+      setCurrentView('inventory');
+      setIsNotifOpen(false);
+      return;
+    }
+
+    if (notif.taskId) {
+      const targetTask = tasks.find(t => t.id === notif.taskId);
+      if (targetTask) {
+        handleOpenModal(targetTask, notif.taskDate || targetTask.date);
+        setIsNotifOpen(false);
+      } else {
+        alert("This task could not be found or may have been deleted.");
+      }
+    } else {
+       setIsNotifOpen(false);
+    }
+  };
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingMemberId, setEditingMemberId] = useState(null);
   const [newCompanyInput, setNewCompanyInput] = useState('');
@@ -264,7 +330,6 @@ export default function App() {
   const [requiresComment, setRequiresComment] = useState(false);
   const [allowAssigneeDeadlineChange, setAllowAssigneeDeadlineChange] = useState(true);
 
-  // Checklist State
   const [requireChecklist, setRequireChecklist] = useState(false);
   const [checklist, setChecklist] = useState([]);
   const [checklistException, setChecklistException] = useState('');
@@ -931,6 +996,21 @@ export default function App() {
     setMemberSlackId(member.slackUserId || '');
     setMemberRole(member.role);
     setMemberColor(member.color || '#2A9D8F');
+  };
+
+const handleSaveMember = async () => {
+    if (!memberName.trim()) return alert('Please enter a name.');
+    const initials = memberName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+
+    if (editingMemberId) {
+      await supabase.from('profiles').update({
+        name: memberName,
+        initials,
+        role: memberRole,
+        color: memberColor,
+        slack_user_id: memberSlackId.trim() || null
+      }).eq('id', editingMemberId);
+    }
   };
 
   const handleDeleteMember = async (id, name) => {
@@ -1724,23 +1804,6 @@ export default function App() {
     setSelectedTask(null);
   };
 
-  const handleNotificationClick = async (notif) => {
-    setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
-    await supabase.from('notifications').update({ read: true }).eq('id', notif.id);
-    
-    if (notif.taskId) {
-      const targetTask = tasks.find(t => t.id === notif.taskId);
-      if (targetTask) {
-        handleOpenModal(targetTask, notif.taskDate || targetTask.date);
-        setIsNotifOpen(false);
-      } else {
-        alert("This task could not be found or may have been deleted.");
-      }
-    } else {
-       setIsNotifOpen(false);
-    }
-  };
-
   const renderComment = (commentText, index) => {
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     const hasUrl = urlRegex.test(commentText);
@@ -1922,9 +1985,11 @@ export default function App() {
           currentUserName={currentUserName} resetMemberForm={resetMemberForm} 
           setIsSettingsOpen={setIsSettingsOpen} handleOpenCreateView={handleOpenCreateView}
           onOpenSupplySheet={() => setIsSupplyModalOpen(true)}
+          hideInventoryBtn={hideInventoryBtn}
+          hideSupplyBtn={hideSupplyBtn}
         />
 
-        {/* TEAM MEMBER & COMPANY FILTER BAR (HIDDEN IN INVENTORY VIEW) */}
+        {/* TEAM MEMBER & COMPANY FILTER BAR */}
         {currentView !== 'inventory' && (
           <FilterBar 
             currentView={currentView}
@@ -1942,7 +2007,37 @@ export default function App() {
           />
         )}
 
-        {/* CONDITIONAL DASHBOARD TRAYS (HIDDEN IN INVENTORY VIEW) */}
+        {/* GLOBAL PENDING REQUESTS BANNER (ONLY VISIBLE TO THE ASSIGNED INVENTORY/SUPPLY MANAGER) */}
+        {currentView !== 'inventory' && (() => {
+          // Identify which companies current user is the designated Inventory Manager for
+          const managedCompanies = (companiesData || [])
+            .filter(c => c.inventory_manager === currentUserName)
+            .map(c => c.name);
+
+          const myPendingRequests = (globalPendingRequests || [])
+            .filter(r => managedCompanies.includes(r.company));
+
+          if (myPendingRequests.length === 0) return null;
+
+          return (
+            <div 
+              onClick={() => setCurrentView('inventory')}
+              className="mb-4 bg-amber-50 border-2 border-amber-300 rounded-lg p-3 shadow-sm flex justify-between items-center cursor-pointer hover:bg-amber-100 transition animate-fade-in"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-lg">📋</span>
+                <h3 className="font-bold text-xs uppercase tracking-wider text-amber-950">
+                  Action Required: {myPendingRequests.length} Pending Supply Request(s)
+                </h3>
+              </div>
+              <span className="text-[11px] font-bold bg-[#5B7049] text-white px-3 py-1.5 rounded shadow-sm">
+                Review in Inventory →
+              </span>
+            </div>
+          );
+        })()}
+
+        {/* CONDITIONAL DASHBOARD TRAYS */}
         {currentView !== 'inventory' && (
           <DashboardTrays 
             userRole={userRole}
@@ -2080,6 +2175,7 @@ export default function App() {
             companiesData={companiesData} 
             currentProfile={currentProfile}
             userRole={userRole} 
+            dispatchNotification={dispatchNotification}
           />
         )}
 
@@ -2141,7 +2237,6 @@ export default function App() {
           checklistException={checklistException} setChecklistException={setChecklistException}
         />
 
-        {/* SUB-TASK COMPLETION MODAL */}
         <CompletionModal 
           completionPrompt={completionPrompt}
           setCompletionPrompt={setCompletionPrompt}
@@ -2150,14 +2245,12 @@ export default function App() {
           teamMembers={teamMembers}
         />
 
-        {/* RESCHEDULE MODAL */}
         <RescheduleModal 
           reschedulePrompt={reschedulePrompt}
           setReschedulePrompt={setReschedulePrompt}
           applyTaskMove={applyTaskMove}
         />
 
-        {/* SETTINGS MODAL */}
         <SettingsModal 
           isSettingsOpen={isSettingsOpen}
           setIsSettingsOpen={setIsSettingsOpen}
@@ -2188,6 +2281,7 @@ export default function App() {
           memberColor={memberColor}
           setMemberColor={setMemberColor}
           handleDeleteMember={handleDeleteMember}
+          handleSaveMember={handleSaveMember}
           newCompanyInput={newCompanyInput}
           setNewCompanyInput={setNewCompanyInput}
           handleAddCompany={handleAddCompany}
@@ -2201,9 +2295,13 @@ export default function App() {
           currentDate={currentDate}
           companiesData={companiesData}
           setCompaniesData={setCompaniesData}
+          hideInventoryBtn={hideInventoryBtn}
+          setHideInventoryBtn={setHideInventoryBtn}
+          hideSupplyBtn={hideSupplyBtn}
+          setHideSupplyBtn={setHideSupplyBtn}
         />
 
-        {/* GLOBAL SUPPLY REQUEST MODAL (LAUNCHABLE FROM ANY VIEW) */}
+        {/* GLOBAL SUPPLY REQUEST MODAL */}
         <SupplyRequestModal 
           isOpen={isSupplyModalOpen}
           onClose={() => setIsSupplyModalOpen(false)}
