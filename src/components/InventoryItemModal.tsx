@@ -24,14 +24,14 @@ export default function InventoryItemModal({
   const [refillsPerJug, setRefillsPerJug] = useState(0);
   const [currentRefillsLeft, setCurrentRefillsLeft] = useState(0);
 
-  // Pricing, Multi-pack & Vendor States
+  // Pricing, Multi-Pack & Vendor States
   const [unitPrice, setUnitPrice] = useState('0.00');
   const [vendorName, setVendorName] = useState('Manual');
   const [vendorUrl, setVendorUrl] = useState('');
   const [priceLocked, setPriceLocked] = useState(false);
   const [isSyncingPrice, setIsSyncingPrice] = useState(false);
 
-  // Multi-pack breakdown state
+  // Multi-Pack Configuration
   const [isMultiPack, setIsMultiPack] = useState(false);
   const [unitsPerPack, setUnitsPerPack] = useState(1);
   const [packPrice, setPackPrice] = useState('0.00');
@@ -70,9 +70,20 @@ export default function InventoryItemModal({
 
       const basePrice = Number(editingItem.unit_price ?? 0);
       setUnitPrice(basePrice.toFixed(2));
-      setPackPrice(basePrice.toFixed(2));
-      setUnitsPerPack(1);
-      setIsMultiPack(false);
+
+      // Load persistent multi-pack parameters from Supabase
+      const isMulti = Boolean(editingItem.is_multi_pack);
+      const packCount = Math.max(1, Number(editingItem.units_per_pack || 1));
+      setIsMultiPack(isMulti);
+      setUnitsPerPack(packCount);
+
+      if (isMulti && editingItem.pack_price != null && Number(editingItem.pack_price) > 0) {
+        setPackPrice(Number(editingItem.pack_price).toFixed(2));
+      } else if (isMulti) {
+        setPackPrice((basePrice * packCount).toFixed(2));
+      } else {
+        setPackPrice(basePrice.toFixed(2));
+      }
 
       setVendorName(editingItem.vendor_name || 'Manual');
       setVendorUrl(editingItem.vendor_url || '');
@@ -102,7 +113,7 @@ export default function InventoryItemModal({
 
   if (!isOpen) return null;
 
-  // Multi-pack math: calculates price per unit from pack price / pack count
+  // Calculates per-unit price from total case cost divided by count
   const handlePackCalculation = (newPackPrice, newUnits) => {
     const p = Math.max(0, parseFloat(newPackPrice) || 0);
     const u = Math.max(1, parseInt(newUnits) || 1);
@@ -110,7 +121,7 @@ export default function InventoryItemModal({
     setUnitPrice(calculatedPerUnit);
   };
 
-  // Bulk jug math: price per full jug / refills_per_jug
+  // Bulk jug calculation: price per jug / refills_per_jug
   const numericJugOrUnitPrice = Math.max(0, parseFloat(unitPrice) || 0);
   const perRefillCost = (isBulkRefill && Number(refillsPerJug) > 0)
     ? (numericJugOrUnitPrice / Number(refillsPerJug))
@@ -118,7 +129,7 @@ export default function InventoryItemModal({
 
   const handleFetchVendorPrice = async () => {
     if (priceLocked) {
-      return alert('Price is locked. Uncheck "Lock Price" to sync from vendor.');
+      return alert('Price is currently locked. Uncheck "Lock Price" to sync from vendor.');
     }
     if (!vendorUrl.trim()) {
       return alert('Please paste a product URL first.');
@@ -126,22 +137,35 @@ export default function InventoryItemModal({
 
     setIsSyncingPrice(true);
     try {
-      const res = await fetch('/api/sync-price', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: vendorUrl.trim() })
-      });
+      let res;
+      try {
+        res = await fetch('/api/sync-price', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: vendorUrl.trim() })
+        });
+        if (!res.ok && res.status === 404) throw new Error('Dev 404');
+      } catch (localErr) {
+        // Fallback to production Vercel endpoint during local development
+        res = await fetch('https://tasky-app-gilt.vercel.app/api/sync-price', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: vendorUrl.trim() })
+        });
+      }
+
       const data = await res.json();
       if (data.success && data.price) {
+        const fetched = Number(data.price);
         if (isMultiPack) {
-          setPackPrice(Number(data.price).toFixed(2));
-          handlePackCalculation(data.price, unitsPerPack);
+          setPackPrice(fetched.toFixed(2));
+          handlePackCalculation(fetched, unitsPerPack);
         } else {
-          setUnitPrice(Number(data.price).toFixed(2));
+          setUnitPrice(fetched.toFixed(2));
         }
-        alert(`✓ Updated price to $${Number(data.price).toFixed(2)} from vendor page!`);
+        alert(`✓ Updated price to $${fetched.toFixed(2)} from vendor page!`);
       } else {
-        alert(`ℹ️ ${data.reason || 'Vendor blocked automated check (HTTP 403). Using manual price.'}`);
+        alert(`ℹ️ ${data.reason || 'Could not auto-read price from URL. Please enter price manually.'}`);
       }
     } catch (err) {
       alert('Could not reach price sync endpoint. You can type the price manually.');
@@ -214,6 +238,11 @@ export default function InventoryItemModal({
     const refillsLeft = Math.max(0, Math.min(perJug, Number(currentRefillsLeft || 0)));
     const calculatedUsed = perJug > 0 ? (perJug - refillsLeft) : 0;
 
+    const isMulti = Boolean(isMultiPack && !isBulkRefill);
+    const packCount = isMulti ? Math.max(1, Number(unitsPerPack || 1)) : 1;
+    const finalPackPrice = isMulti ? Math.max(0, parseFloat(packPrice) || 0) : numericJugOrUnitPrice;
+    const finalUnitPrice = isMulti ? Number((finalPackPrice / packCount).toFixed(2)) : numericJugOrUnitPrice;
+
     const payload = {
       name: name.trim(),
       description: description.trim(),
@@ -224,7 +253,13 @@ export default function InventoryItemModal({
       refill_unit_label: isBulkRefill ? (refillUnitLabel.trim() || 'Bottle Refill') : null,
       refills_per_jug: perJug,
       current_refill_usage: isBulkRefill ? calculatedUsed : 0,
-      unit_price: numericJugOrUnitPrice,
+
+      // Multi-pack persistent columns
+      is_multi_pack: isMulti,
+      units_per_pack: packCount,
+      pack_price: finalPackPrice,
+      unit_price: finalUnitPrice,
+
       vendor_name: vendorName,
       vendor_url: vendorUrl.trim(),
       price_locked: priceLocked,
@@ -357,7 +392,7 @@ export default function InventoryItemModal({
               </label>
             </div>
 
-            {/* MULTI-PACK TOGGLE (Pumice Stones 25-pack, Scrub Daddy 12-pack, Vacuum bags) */}
+            {/* MULTI-PACK CASE CONFIGURATION */}
             {!isBulkRefill && (
               <div className="bg-emerald-50/50 p-2 rounded border border-emerald-100 flex flex-col gap-1.5">
                 <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-emerald-950">
@@ -471,7 +506,7 @@ export default function InventoryItemModal({
               </div>
             )}
 
-            {/* Product Link & Universal Fetch Button */}
+            {/* Universal Product Link & Fetch Price Button */}
             {vendorName !== 'Manual' && (
               <div className="pt-1 border-t border-gray-100 flex flex-col gap-1">
                 <label className="block text-[10px] font-bold text-gray-500 uppercase">
@@ -556,7 +591,7 @@ export default function InventoryItemModal({
                   </div>
                 </div>
 
-                {/* EDITABLE ACTIVE JUG LEVEL */}
+                {/* Active Open Jug Level */}
                 {Number(refillsPerJug) > 0 && (
                   <div className="bg-white p-2 rounded border border-blue-200 flex justify-between items-center mt-1">
                     <div>

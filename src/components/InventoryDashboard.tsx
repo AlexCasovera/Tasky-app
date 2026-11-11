@@ -287,14 +287,26 @@ const handleRefreshAllPrices = async () => {
 
         const data = await res.json();
         if (data.success && data.price) {
-          const newPrice = Number(data.price);
+          const fetchedPrice = Number(data.price);
+          
+          let calculatedUnitPrice = fetchedPrice;
+          let calculatedPackPrice = fetchedPrice;
+
+          // If item is bought in a case/multi-pack, divide by units_per_pack
+          if (item.is_multi_pack && Number(item.units_per_pack) > 1) {
+            calculatedPackPrice = fetchedPrice;
+            calculatedUnitPrice = Number((fetchedPrice / Number(item.units_per_pack)).toFixed(2));
+          }
+
           await supabase
             .from('inventory')
             .update({
-              unit_price: newPrice,
+              unit_price: calculatedUnitPrice,
+              pack_price: calculatedPackPrice,
               updated_at: new Date().toISOString()
             })
             .eq('id', item.id);
+            
           successCount++;
         } else {
           failCount++;
