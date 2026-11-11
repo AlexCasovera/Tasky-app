@@ -453,6 +453,7 @@ export default function InventoryItemModal({
                   <option value="Manual">Manual / In-House</option>
                   <option value="Amazon">Amazon</option>
                   <option value="Home Depot">Home Depot</option>
+                  <option value="Instacart">Instacart</option>
                   <option value="Wholesale">Wholesale / Other</option>
                 </select>
               </div>
@@ -470,25 +471,12 @@ export default function InventoryItemModal({
               </div>
             )}
 
-            {/* Vendor URL, 1-Click Open & Price Sync */}
+            {/* Product Link & Universal Fetch Button */}
             {vendorName !== 'Manual' && (
-              <div className="pt-1 border-t border-gray-100 flex flex-col gap-1.5">
-                <div className="flex justify-between items-center">
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase">
-                    {vendorName} Product Link
-                  </label>
-                  {vendorUrl.trim() && (
-                    <a
-                      href={vendorUrl.trim()}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[10px] font-bold text-emerald-800 hover:text-emerald-950 underline flex items-center gap-1"
-                    >
-                      <span>🔗 Open {vendorName} Page</span>
-                    </a>
-                  )}
-                </div>
-
+              <div className="pt-1 border-t border-gray-100 flex flex-col gap-1">
+                <label className="block text-[10px] font-bold text-gray-500 uppercase">
+                  Product Link ({vendorName} / Web URL)
+                </label>
                 <div className="flex gap-1.5">
                   <input 
                     type="url"
@@ -497,22 +485,17 @@ export default function InventoryItemModal({
                     placeholder={`Paste ${vendorName} product link...`}
                     className="flex-1 p-1.5 text-xs border border-gray-300 rounded bg-white"
                   />
-                  {!priceLocked && vendorName === 'Amazon' && (
+                  {!priceLocked && (
                     <button
                       type="button"
                       disabled={isSyncingPrice || !vendorUrl.trim()}
                       onClick={handleFetchVendorPrice}
-                      className="bg-emerald-700 hover:bg-emerald-800 text-white px-2.5 py-1 rounded text-[10px] font-bold shrink-0 disabled:opacity-40 transition"
+                      className="bg-emerald-700 hover:bg-emerald-800 text-white px-3 py-1 rounded text-[10px] font-bold shrink-0 disabled:opacity-40 transition"
                     >
                       {isSyncingPrice ? 'Checking...' : '🔄 Fetch Price'}
                     </button>
                   )}
                 </div>
-                {vendorName === 'Home Depot' && (
-                  <span className="text-[10px] text-gray-400">
-                    💡 Click <strong>Open Home Depot Page</strong> above to verify price without bot-block, then type it in.
-                  </span>
-                )}
               </div>
             )}
           </div>

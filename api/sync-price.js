@@ -27,21 +27,21 @@ export default async function handler(req, res) {
 
     const html = await response.text();
 
-    // Check for bot/CAPTCHA blocks
     if (html.includes('captchacharacters') || html.includes('Robot Check') || html.includes('Access Denied')) {
       return res.status(200).json({
         success: false,
-        reason: 'Vendor anti-bot CAPTCHA triggered. Keep manual price or lock price.'
+        reason: 'Vendor anti-bot CAPTCHA triggered. Please enter price manually.'
       });
     }
 
-    // Try common e-commerce price patterns (JSON-LD, meta product:price, Amazon corePrice, Home Depot)
+    // Comprehensive patterns covering Amazon, Instacart, Walmart, and generic JSON-LD / Microdata
     const patterns = [
-      /"price"\s*:\s*"?(\d+\.\d{2})"?/i,
-      /property="product:price:amount"\s+content="(\d+\.\d{2})"/i,
-      /"priceAmount"\s*:\s*(\d+\.\d{2})/i,
-      /class="a-offscreen">\s*\$(\d+\.\d{2})\s*</i,
-      /"specialPrice"\s*:\s*(\d+\.\d{2})/i
+      /"price"\s*:\s*"?(\d+(?:\.\d{1,2})?)"?/i,
+      /property=["']product:price:amount["']\s+content=["'](\d+(?:\.\d{1,2})?)["']/i,
+      /itemprop=["']price["']\s+content=["'](\d+(?:\.\d{1,2})?)["']/i,
+      /"priceAmount"\s*:\s*"?(\d+(?:\.\d{1,2})?)"?/i,
+      /class=["'][^"']*a-offscreen[^"']*["']>\s*\$(\d+(?:\.\d{1,2})?)\s*</i,
+      /\$(\d+\.\d{2})/
     ];
 
     for (const regex of patterns) {
@@ -59,7 +59,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       success: false,
-      reason: 'Could not locate price tag on vendor page. Using manual price.'
+      reason: 'Could not auto-read price from URL. Please enter price manually.'
     });
   } catch (err) {
     return res.status(200).json({
