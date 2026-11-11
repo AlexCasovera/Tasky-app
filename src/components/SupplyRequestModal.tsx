@@ -14,7 +14,6 @@ export default function SupplyRequestModal({
   dispatchNotification
 }) {
   const [viewMode, setViewMode] = useState('new');
-  const [carNumber, setCarNumber] = useState('');
   const [selectedCompany, setSelectedCompany] = useState('');
   const [hasWarningLight, setHasWarningLight] = useState(false);
   const [warningLightNote, setWarningLightNote] = useState('');
@@ -44,7 +43,6 @@ export default function SupplyRequestModal({
       setQuantities({});
       setHasWarningLight(false);
       setWarningLightNote('');
-      setCarNumber('');
       setSearch('');
       setViewMode('new');
     } else {
@@ -85,9 +83,6 @@ export default function SupplyRequestModal({
   const totalItemsSelected = Object.values(quantities).reduce((acc, q) => acc + q, 0);
 
   const handleSubmit = async () => {
-    if (!carNumber.trim()) {
-      return alert('Please enter a Car / Van # (Por favor ingresa el Número de Coche).');
-    }
     if (totalItemsSelected === 0) {
       return alert('Please select at least 1 item (Por favor selecciona al menos un producto).');
     }
@@ -101,7 +96,7 @@ export default function SupplyRequestModal({
         .insert({
           company: selectedCompany,
           requested_by: applicantName,
-          car_number: carNumber.trim(),
+          car_number: '', // Left blank for single-employee mode; preserved in DB for future crew/vehicle use
           has_vehicle_warning: hasWarningLight,
           vehicle_warning_note: hasWarningLight ? warningLightNote.trim() : null,
           status: 'pending'
@@ -135,9 +130,9 @@ export default function SupplyRequestModal({
       const targetType = managerName ? 'userName' : 'role';
       const targetValue = managerName || 'admin';
 
-      const notifBellText = `📋 Supply Request: Car #${carNumber.trim()} (${applicantName}) requested ${totalItemsSelected} items for ${selectedCompany}.${hasWarningLight ? ' ⚠️ Vehicle Light ON!' : ''}`;
+      const notifBellText = `📋 Supply Request: ${applicantName} requested ${totalItemsSelected} items for ${selectedCompany}.${hasWarningLight ? ' ⚠️ Equipment/Vehicle Note!' : ''}`;
       const pushTitle = `📋 New Supply Request (${selectedCompany})`;
-      const pushBody = `Car #${carNumber.trim()} (${applicantName}) requested ${totalItemsSelected} items.${hasWarningLight ? ' ⚠️ Vehicle light reported!' : ''}`;
+      const pushBody = `${applicantName} requested ${totalItemsSelected} items.${hasWarningLight ? ' ⚠️ Note attached!' : ''}`;
 
       if (typeof dispatchNotification === 'function') {
         await dispatchNotification(
@@ -149,7 +144,6 @@ export default function SupplyRequestModal({
           pushBody
         );
       } else {
-        // Fallback: direct push + DB insert
         sendNativePush({
           targetType,
           targetValue,
@@ -233,7 +227,8 @@ export default function SupplyRequestModal({
                         }`}>
                           {req.status}
                         </span>
-                        <span className="font-bold text-xs text-gray-900">Car #{req.car_number}</span>
+                        <span className="font-bold text-xs text-gray-900">{req.requested_by}</span>
+                        <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.2 rounded font-semibold">{req.company}</span>
                       </div>
                       <span className="text-[10px] text-gray-400">{subDate}</span>
                     </div>
@@ -254,15 +249,11 @@ export default function SupplyRequestModal({
             <div className="bg-white p-3 rounded-lg border border-gray-200 grid grid-cols-2 gap-3 text-xs shadow-2xs mt-1">
               <div>
                 <label className="block font-bold text-gray-700 uppercase tracking-wider text-[10px] mb-1">
-                  Car / Van # <span className="font-normal text-gray-400 lowercase">(número de coche)</span> *
+                  Team Member <span className="font-normal text-gray-400 lowercase">(empleado)</span>
                 </label>
-                <input 
-                  type="text" 
-                  value={carNumber} 
-                  onChange={(e) => setCarNumber(e.target.value)} 
-                  placeholder="e.g., Van 4 / Car 2" 
-                  className="w-full p-2 border border-gray-300 rounded font-bold text-gray-900 bg-gray-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#A9B1A6]" 
-                />
+                <div className="w-full p-2 border border-gray-200 rounded font-bold text-gray-800 bg-gray-100 truncate">
+                  👤 {currentProfile?.name || 'Cleaner'}
+                </div>
               </div>
 
               <div>
@@ -394,7 +385,7 @@ export default function SupplyRequestModal({
                   onChange={(e) => setHasWarningLight(e.target.checked)} 
                   className="accent-amber-600 w-4 h-4 cursor-pointer" 
                 />
-                <span>Vehicle warning light ON? <span className="font-normal text-gray-500">(¿Luz de advertencia encendida?)</span></span>
+                <span>Equipment / Vehicle Issue? <span className="font-normal text-gray-500">(¿Problema con equipo o vehículo?)</span></span>
               </label>
 
               {hasWarningLight && (
@@ -402,7 +393,7 @@ export default function SupplyRequestModal({
                   type="text" 
                   value={warningLightNote} 
                   onChange={(e) => setWarningLightNote(e.target.value)} 
-                  placeholder="Details: Check Engine, Tire Pressure, Oil change... (Detalles)" 
+                  placeholder="Details: Vacuum belt, sprayer broken, warning light... (Detalles)" 
                   className="w-full mt-2 p-1.5 border border-amber-300 rounded bg-white text-xs focus:outline-none" 
                 />
               )}
@@ -410,7 +401,7 @@ export default function SupplyRequestModal({
             
             <div className="flex justify-between items-center pt-2 border-t border-gray-300">
               <div className="text-xs text-gray-500 font-semibold">
-                Requester: <span className="font-bold text-gray-800">{currentProfile?.name || 'Cleaner'}</span>
+                Items Selected: <span className="font-bold text-gray-900">{totalItemsSelected}</span>
               </div>
 
               <div className="flex gap-2">

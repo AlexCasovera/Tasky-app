@@ -12,10 +12,23 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
   const [isLoading, setIsLoading] = useState(true);
   const [toastMessage, setToastMessage] = useState('');
 
+  // 'grid' | 'requests' | 'analytics'
   const [subView, setSubView] = useState('grid');
   const [allRequests, setAllRequests] = useState([]);
   const [editingRequest, setEditingRequest] = useState(null);
   const [isApproving, setIsApproving] = useState(false);
+
+  // Month & Job Metrics
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [monthlyMetricsMap, setMonthlyMetricsMap] = useState({});
+  const [jobsInput, setJobsInput] = useState(0);
+  const [isSavingJobs, setIsSavingJobs] = useState(false);
+
+  // Matrix Record Management Modal State
+  const [isManageRecordsOpen, setIsManageRecordsOpen] = useState(false);
 
   const activeCompanies = (companiesData || [])
     .filter(c => c.inventory_enabled)
@@ -26,6 +39,29 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
   const showToast = (msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 4500);
+  };
+
+  const getDispenseUnitPrice = (item) => {
+    if (!item) return 0;
+    const basePrice = Number(item.unit_price || 0);
+    if (item.is_bulk_refill && Number(item.refills_per_jug) > 0) {
+      return basePrice / Number(item.refills_per_jug);
+    }
+    return basePrice;
+  };
+
+  const getItemShelfValue = (item) => {
+    if (!item) return 0;
+    const basePrice = Number(item.unit_price || 0);
+    const qty = Number(item.quantity || 0);
+    if (item.is_bulk_refill && Number(item.refills_per_jug) > 0) {
+      const cap = Number(item.refills_per_jug);
+      const used = Number(item.current_refill_usage || 0);
+      const refillsLeft = used > 0 ? Math.max(0, cap - used) : 0;
+      const fractionalJug = refillsLeft / cap;
+      return (qty + fractionalJug) * basePrice;
+    }
+    return qty * basePrice;
   };
 
   const fetchInventory = async () => {
@@ -46,7 +82,7 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
       .select('*')
       .in('company', activeCompanies)
       .order('submitted_at', { ascending: false })
-      .limit(100);
+      .limit(500);
 
     if (reqErr || !reqs) return;
 
@@ -69,9 +105,54 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
     setAllRequests(combined);
   };
 
+  const fetchMonthlyMetrics = async () => {
+    const { data } = await supabase.from('inventory_monthly_metrics').select('*');
+    if (data) {
+      const map = {};
+      data.forEach(row => {
+        map[`${row.month_key}__${row.company}`] = Number(row.jobs_completed || 0);
+      });
+      setMonthlyMetricsMap(map);
+    }
+  };
+
+  useEffect(() => {
+    const key = `${selectedMonth}__${selectedCompany}`;
+    setJobsInput(monthlyMetricsMap[key] ?? 0);
+  }, [selectedMonth, selectedCompany, monthlyMetricsMap]);
+
+  const handleSaveJobsCompleted = async () => {
+    setIsSavingJobs(true);
+    const numJobs = Math.max(0, Number(jobsInput || 0));
+    const key = `${selectedMonth}__${selectedCompany}`;
+
+    try {
+      const { error } = await supabase
+        .from('inventory_monthly_metrics')
+        .upsert(
+          {
+            month_key: selectedMonth,
+            company: selectedCompany,
+            jobs_completed: numJobs,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'month_key,company' }
+        );
+
+      if (error) throw error;
+      setMonthlyMetricsMap(prev => ({ ...prev, [key]: numJobs }));
+      showToast(`✓ Saved ${numJobs} completed jobs for ${selectedMonth}.`);
+    } catch (err) {
+      alert(`Error saving jobs count: ${err.message}`);
+    } finally {
+      setIsSavingJobs(false);
+    }
+  };
+
   useEffect(() => {
     fetchInventory();
     fetchSupplyRequests();
+    fetchMonthlyMetrics();
 
     const invChannel = supabase.channel('inventory-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () => fetchInventory())
@@ -152,11 +233,7 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
 
         if (sent) {
           showToast(`🔔 Slack reorder alert sent to ${targetName}!`);
-        } else {
-          showToast(`🔔 Stock alert logged for ${targetName} (Deploy api/inventory-alert to live Vercel for Slack DMs).`);
         }
-      } else {
-        showToast(`⚠️ Stock alert logged! (Add a Slack Member ID for ${targetName} in Settings to get Slack pings).`);
       }
     } catch (err) {
       console.error('Error sending low stock alert:', err);
@@ -196,7 +273,6 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
         if (!invItem) continue;
         const minQty = Number(invItem.min_quantity || 0);
 
-        // Case 1: Bulk / Station Refill Item
         if (reqItem.is_bulk_refill || invItem.is_bulk_refill) {
           const cap = Number(invItem.refills_per_jug || 0);
           if (cap > 0) {
@@ -240,7 +316,6 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
           continue;
         }
 
-        // Case 2: Standard Consumable Item
         const newQty = Math.max(0, Number(invItem.quantity || 0) - requestedQty);
         const isZeroNow = newQty === 0;
         const isNowLow = minQty > 0 && newQty <= minQty;
@@ -269,16 +344,16 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
         'userName',
         editingRequest.requested_by,
         'supply_approved',
-        `✅ Supply Request Approved: Car #${editingRequest.car_number} supplies approved by ${reviewerName}.${noteText}`,
+        `✅ Supply Request Approved: Your supplies were approved by ${reviewerName}.${noteText}`,
         '✅ Supply Request Approved',
-        `Your supplies for Car #${editingRequest.car_number} were approved and are ready to grab.${noteText}`
+        `Your requested supplies were approved and are ready to grab.${noteText}`
       );
 
       setEditingRequest(null);
       await fetchInventory();
       await fetchSupplyRequests();
       if (typeof onRequestsUpdated === 'function') onRequestsUpdated();
-      showToast(`✓ Car #${editingRequest.car_number} request approved.`);
+      showToast(`✓ ${editingRequest.requested_by}'s supply request approved.`);
     } catch (err) {
       alert(`Error approving request: ${err.message}`);
     } finally {
@@ -287,7 +362,7 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
   };
 
   const handleRejectRequest = async () => {
-    if (!window.confirm(`Reject supply request for Car #${editingRequest.car_number}?`)) return;
+    if (!window.confirm(`Reject supply request from ${editingRequest.requested_by}?`)) return;
     const reviewerName = currentProfile?.name || 'Admin';
 
     await supabase.from('supply_requests').update({
@@ -300,9 +375,9 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
       'userName',
       editingRequest.requested_by,
       'supply_rejected',
-      `❌ Supply Request Declined: Your supply sheet for Car #${editingRequest.car_number} was declined by ${reviewerName}.`,
+      `❌ Supply Request Declined: Your supply sheet was declined by ${reviewerName}.`,
       '❌ Supply Request Declined',
-      `Your supply sheet for Car #${editingRequest.car_number} was declined by ${reviewerName}.`
+      `Your supply sheet was declined by ${reviewerName}.`
     );
 
     setEditingRequest(null);
@@ -310,7 +385,58 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
     if (typeof onRequestsUpdated === 'function') onRequestsUpdated();
   };
 
-  // Quick quantity stepper on cards (+ and -)
+  // COMPLETE PURGE / DELETE A SUPPLY REQUEST ENTRY (TEST SHEETS & ACCIDENTS)
+  const handleDeleteHistoricalRequest = async (requestId, requestedBy) => {
+    if (!window.confirm(`Are you sure you want to permanently delete this supply sheet from ${requestedBy}? This will immediately remove it from all monthly matrix calculations.`)) {
+      return;
+    }
+
+    try {
+      await supabase.from('supply_request_items').delete().eq('request_id', requestId);
+      const { error } = await supabase.from('supply_requests').delete().eq('id', requestId);
+      if (error) throw error;
+
+      setAllRequests(prev => prev.filter(r => r.id !== requestId));
+      if (typeof onRequestsUpdated === 'function') onRequestsUpdated();
+      showToast('✓ Supply request deleted successfully.');
+    } catch (err) {
+      alert(`Error deleting record: ${err.message}`);
+    }
+  };
+
+  // INLINE QUANTITY ADJUSTMENT ON PAST APPROVED SHEETS
+  const handleUpdateItemQuantityInPastRequest = async (requestId, itemId, delta) => {
+    const targetReq = allRequests.find(r => r.id === requestId);
+    if (!targetReq) return;
+
+    const targetItem = targetReq.items.find(i => i.id === itemId);
+    if (!targetItem) return;
+
+    const newQty = Math.max(0, Number(targetItem.quantity || 0) + delta);
+    if (newQty === targetItem.quantity) return;
+
+    try {
+      const { error } = await supabase
+        .from('supply_request_items')
+        .update({ quantity: newQty })
+        .eq('id', itemId);
+
+      if (error) throw error;
+
+      setAllRequests(prev => prev.map(r => {
+        if (r.id === requestId) {
+          return {
+            ...r,
+            items: r.items.map(it => it.id === itemId ? { ...it, quantity: newQty } : it)
+          };
+        }
+        return r;
+      }));
+    } catch (err) {
+      alert(`Error updating item quantity: ${err.message}`);
+    }
+  };
+
   const handleQuickUpdateQuantity = async (id, delta) => {
     const target = inventory.find(i => i.id === id);
     if (!target) return;
@@ -322,13 +448,12 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
     const isNowLow = minQty > 0 && newQty <= minQty;
     const isZero = newQty === 0;
 
-    // When restocking a jug (delta > 0), if the active station was empty, automatically crack open and fill it!
     const cap = Number(target.refills_per_jug || 0);
     let nextUsage = Number(target.current_refill_usage || 0);
     if (target.is_bulk_refill && cap > 0 && delta > 0) {
       const refillsLeft = Math.max(0, cap - nextUsage);
       if (refillsLeft === 0) {
-        nextUsage = 0; // fills back to full capacity
+        nextUsage = 0;
       }
     }
 
@@ -373,16 +498,6 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
     );
   }
 
-  if (activeCompanies.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-gray-500 gap-2 mt-20">
-        <span className="text-4xl">📦</span>
-        <h2 className="text-xl font-bold">Inventory System Inactive</h2>
-        <p className="text-sm">Enable the Inventory Module for at least one company in Settings.</p>
-      </div>
-    );
-  }
-
   const pendingRequests = allRequests.filter(r => r.status === 'pending' && (selectedCompany === 'All' || r.company === selectedCompany));
   const historyRequests = allRequests.filter(r => r.status !== 'pending' && (selectedCompany === 'All' || r.company === selectedCompany));
 
@@ -393,6 +508,46 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
   });
 
   const lowStockCount = filteredInventory.filter(i => Number(i.min_quantity || 0) > 0 && Number(i.quantity || 0) <= Number(i.min_quantity || 0)).length;
+  const totalShelfValuation = filteredInventory.reduce((sum, item) => sum + getItemShelfValue(item), 0);
+
+  // Month-Filtered Approved Requests
+  const approvedInMonth = allRequests.filter(r => {
+    if (r.status !== 'approved') return false;
+    if (selectedCompany !== 'All' && r.company !== selectedCompany) return false;
+    const dateStr = (r.submitted_at || '').slice(0, 7);
+    return dateStr === selectedMonth;
+  });
+
+  const employeeColumns = [...new Set(approvedInMonth.map(r => r.requested_by || 'Unknown'))].sort();
+
+  const usageMatrix = {};
+  approvedInMonth.forEach(req => {
+    const emp = req.requested_by || 'Unknown';
+    (req.items || []).forEach(it => {
+      const key = String(it.item_id);
+      if (!usageMatrix[key]) usageMatrix[key] = {};
+      usageMatrix[key][emp] = (usageMatrix[key][emp] || 0) + Number(it.quantity || 0);
+    });
+  });
+
+  const employeeSpendTotals = {};
+  employeeColumns.forEach(emp => { employeeSpendTotals[emp] = 0; });
+
+  filteredInventory.forEach(item => {
+    const dispensePrice = getDispenseUnitPrice(item);
+    employeeColumns.forEach(emp => {
+      const qtyUsed = usageMatrix[String(item.id)]?.[emp] || 0;
+      employeeSpendTotals[emp] += qtyUsed * dispensePrice;
+    });
+  });
+
+  const allEmployeeMonthlyTotal = Object.values(employeeSpendTotals).reduce((a, b) => a + b, 0);
+  const currentMonthJobs = Number(monthlyMetricsMap[`${selectedMonth}__${selectedCompany}`] || 0);
+  const avgCostPerJob = currentMonthJobs > 0 ? (allEmployeeMonthlyTotal / currentMonthJobs) : 0;
+
+  const sortedSpenders = [...employeeColumns].sort((a, b) => employeeSpendTotals[b] - employeeSpendTotals[a]);
+  const highestSpender = sortedSpenders.length > 0 ? sortedSpenders[0] : null;
+  const lowestSpender = sortedSpenders.length > 1 ? sortedSpenders[sortedSpenders.length - 1] : null;
 
   return (
     <div className="flex flex-col h-full animate-fade-in">
@@ -403,11 +558,16 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
         </div>
       )}
 
-      {/* TOP TITLE & SUB-NAVIGATION BAR */}
+      {/* TOP TITLE & NAVIGATION BAR */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 border-b border-gray-300 pb-4">
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <h1 className="text-3xl font-serif font-bold">Master Inventory</h1>
-          <span className="bg-[#A9B1A6] text-white text-xs font-bold px-2.5 py-1 rounded-full">{filteredInventory.length} Items</span>
+          <span className="bg-[#A9B1A6] text-white text-xs font-bold px-2.5 py-1 rounded-full">
+            {filteredInventory.length} Items
+          </span>
+          <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs font-bold px-3 py-1 rounded-full shadow-2xs" title="Total monetary value of stock & active jugs">
+            💰 Shelf Value: ${totalShelfValuation.toFixed(2)}
+          </span>
           {lowStockCount > 0 && (
             <span className="bg-red-100 text-red-800 border border-red-300 text-xs font-bold px-2.5 py-1 rounded-full">
               ⚠️ {lowStockCount} Needs Reorder
@@ -431,12 +591,20 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
                 subView === 'requests' ? 'bg-white text-gray-900 shadow-2xs' : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <span>📋 Supply Requests & Log</span>
+              <span>📋 Requests & Log</span>
               {pendingRequests.length > 0 && (
                 <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full animate-pulse">
                   {pendingRequests.length}
                 </span>
               )}
+            </button>
+            <button
+              onClick={() => setSubView('analytics')}
+              className={`px-3 py-1.5 text-xs font-bold rounded transition ${
+                subView === 'analytics' ? 'bg-white text-gray-900 shadow-2xs' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              📊 Monthly Cost & Matrix
             </button>
           </div>
 
@@ -479,6 +647,7 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
               {filteredInventory.map(item => {
                 const minQty = Number(item.min_quantity || 0);
                 const isLowStock = minQty > 0 && Number(item.quantity || 0) <= minQty;
+                const dispenseCost = getDispenseUnitPrice(item);
 
                 return (
                   <div 
@@ -497,6 +666,10 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
                       <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">
                         {item.company}
                       </div>
+
+                      <div className="absolute bottom-2 right-2 bg-emerald-950/85 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-0.5 rounded">
+                        ${dispenseCost.toFixed(2)} {item.is_bulk_refill ? '/ refill' : '/ unit'}
+                      </div>
                       
                       {item.is_bulk_refill && (
                         <div className="absolute bottom-2 left-2 bg-blue-900/85 backdrop-blur-sm text-white text-[9px] font-bold px-2 py-0.5 rounded">
@@ -514,11 +687,10 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
                       <div className="flex justify-between items-start mb-2 gap-2">
                         <div className="min-w-0">
                           <h3 className="font-bold text-gray-800 text-sm truncate" title={item.name}>{item.name}</h3>
-                          {minQty > 0 && (
-                            <span className="text-[10px] font-semibold text-gray-400 block">
-                              Min Backstock: {minQty}
-                            </span>
-                          )}
+                          <span className="text-[10px] font-semibold text-gray-400 block">
+                            {item.is_bulk_refill ? `Jug: $${Number(item.unit_price || 0).toFixed(2)}` : `Min Stock: ${minQty}`}
+                            {item.price_locked ? ' 🔒' : ''}
+                          </span>
                         </div>
                         
                         <div 
@@ -552,7 +724,6 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
                       </div>
                       <p className="text-[11px] text-gray-500 line-clamp-2 mt-auto">{item.description || 'No description provided.'}</p>
 
-                      {/* JUG LEVEL / REFILL INDICATOR */}
                       {item.is_bulk_refill && Number(item.refills_per_jug) > 0 && (() => {
                         const cap = Number(item.refills_per_jug);
                         const used = Number(item.current_refill_usage || 0);
@@ -595,7 +766,6 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
             </select>
           </div>
 
-          {/* Pending Requests */}
           {pendingRequests.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
               {pendingRequests.map(req => {
@@ -611,15 +781,15 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-sm">📋</span>
-                        <span className="font-bold text-sm text-gray-900">Car #{req.car_number}</span>
+                        <span className="font-bold text-sm text-gray-900">{req.requested_by}</span>
                         {req.has_vehicle_warning && (
                           <span className="text-[9px] bg-red-100 text-red-800 px-1.5 py-0.5 rounded font-bold uppercase animate-pulse">
-                            ⚠️ Vehicle Light
+                            ⚠️ Issue Reported
                           </span>
                         )}
                       </div>
                       <span className="text-[11px] text-gray-600 block mt-1">
-                        By <strong>{req.requested_by}</strong> ({req.company}) • {totalCount} items
+                        Company: <strong>{req.company}</strong> • {totalCount} items
                       </span>
                       <span className="text-[10px] text-gray-400 block">{submittedTime}</span>
                     </div>
@@ -633,7 +803,6 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
             </div>
           )}
 
-          {/* Past Approvals & Rejections */}
           <h3 className="font-bold text-xs uppercase tracking-wider text-gray-500 border-b border-gray-300 pb-1 mt-2">Past Approvals & Rejections</h3>
           {historyRequests.length === 0 ? (
             <div className="bg-white p-8 rounded-lg border border-gray-200 text-center text-gray-400 italic text-xs">
@@ -652,8 +821,7 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
                         }`}>
                           {req.status === 'approved' ? '✓ Approved' : '✕ Rejected'}
                         </span>
-                        <span className="font-bold text-sm text-gray-900">Car #{req.car_number}</span>
-                        <span className="text-gray-500">• Requested by <strong>{req.requested_by}</strong></span>
+                        <span className="font-bold text-sm text-gray-900">👤 {req.requested_by}</span>
                         <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-bold text-[10px]">{req.company}</span>
                       </div>
                       <div className="flex flex-wrap gap-1.5 mt-2">
@@ -667,9 +835,20 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
                       </div>
                     </div>
 
-                    <div className="text-[10px] text-gray-400 sm:text-right shrink-0">
-                      <div>Submitted: {subDate}</div>
-                      {req.reviewed_by && <div>Reviewed by: <strong>{req.reviewed_by}</strong></div>}
+                    <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
+                      <div className="text-[10px] text-gray-400 sm:text-right">
+                        <div>Submitted: {subDate}</div>
+                        {req.reviewed_by && <div>Reviewed by: <strong>{req.reviewed_by}</strong></div>}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteHistoricalRequest(req.id, req.requested_by)}
+                        className="text-red-500 hover:text-red-700 p-1.5 hover:bg-red-50 rounded transition"
+                        title="Delete this record permanently"
+                      >
+                        🗑️
+                      </button>
                     </div>
                   </div>
                 );
@@ -679,7 +858,332 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
         </div>
       )}
 
-      {/* EDIT & APPROVE REQUEST MODAL */}
+      {/* SUB-VIEW 3: MONTHLY CHEMICAL COST & EMPLOYEE USAGE MATRIX */}
+      {subView === 'analytics' && (
+        <div className="flex flex-col gap-5 pb-10">
+          {/* Controls Row */}
+          <div className="bg-white p-4 rounded-lg border border-gray-300 shadow-2xs flex flex-wrap justify-between items-center gap-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Report Month</label>
+                <input 
+                  type="month"
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="px-3 py-1.5 border border-gray-300 rounded text-xs font-bold bg-gray-50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Company Filter</label>
+                <select 
+                  value={selectedCompany} 
+                  onChange={(e) => setSelectedCompany(e.target.value)}
+                  className="px-3 py-1.5 border border-gray-300 rounded bg-gray-50 font-bold text-xs"
+                >
+                  <option value="All">All Enabled Companies</option>
+                  {activeCompanies.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              {/* Data Cleanup Button */}
+              <div className="self-end">
+                <button
+                  type="button"
+                  onClick={() => setIsManageRecordsOpen(true)}
+                  className="bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300 px-3 py-1.5 rounded text-xs font-bold transition flex items-center gap-1.5 shadow-2xs"
+                >
+                  <span>🛠️</span>
+                  <span>Manage / Clean Up Records ({approvedInMonth.length})</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Jobs Completed Metric Input */}
+            <div className="flex items-end gap-2 bg-amber-50/70 p-2.5 rounded-lg border border-amber-200">
+              <div>
+                <label className="block text-[10px] font-bold text-amber-900 uppercase mb-1">
+                  Jobs Completed ({selectedMonth})
+                </label>
+                <input 
+                  type="number"
+                  min="0"
+                  value={jobsInput}
+                  onChange={(e) => setJobsInput(e.target.value)}
+                  className="w-28 px-2.5 py-1 text-xs font-bold border border-amber-300 rounded bg-white text-center"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={isSavingJobs}
+                onClick={handleSaveJobsCompleted}
+                className="bg-[#333333] hover:bg-black text-white px-3 py-1.5 rounded text-xs font-bold transition"
+              >
+                {isSavingJobs ? 'Saving...' : 'Save Jobs'}
+              </button>
+            </div>
+          </div>
+
+          {/* KPI Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-2xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">
+                Total Chemical Spend ({selectedMonth})
+              </span>
+              <span className="text-2xl font-serif font-bold text-gray-900 mt-1 block">
+                ${allEmployeeMonthlyTotal.toFixed(2)}
+              </span>
+              <span className="text-[11px] text-gray-500">
+                Across {approvedInMonth.length} approved sheets
+              </span>
+            </div>
+
+            <div className="bg-white p-4 rounded-lg border border-emerald-300 shadow-2xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">
+                Avg Chemical Cost Per Job
+              </span>
+              <span className="text-2xl font-serif font-bold text-emerald-900 mt-1 block">
+                {currentMonthJobs > 0 ? `$${avgCostPerJob.toFixed(2)}` : 'Enter Jobs ↑'}
+              </span>
+              <span className="text-[11px] text-gray-500">
+                {currentMonthJobs > 0 ? `Based on ${currentMonthJobs} completed jobs` : 'Save monthly job count above'}
+              </span>
+            </div>
+
+            <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-2xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">
+                Highest Usage Employee
+              </span>
+              <span className="text-lg font-bold text-red-700 mt-1 block truncate">
+                {highestSpender ? `${highestSpender} ($${employeeSpendTotals[highestSpender].toFixed(2)})` : 'N/A'}
+              </span>
+              <span className="text-[11px] text-gray-500">
+                Lowest: {lowestSpender ? `${lowestSpender} ($${employeeSpendTotals[lowestSpender].toFixed(2)})` : 'N/A'}
+              </span>
+            </div>
+
+            <div className="bg-white p-4 rounded-lg border border-blue-200 shadow-2xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-800 block">
+                Current Total Shelf Value
+              </span>
+              <span className="text-2xl font-serif font-bold text-blue-950 mt-1 block">
+                ${totalShelfValuation.toFixed(2)}
+              </span>
+              <span className="text-[11px] text-gray-500">
+                Unopened stock + open jugs
+              </span>
+            </div>
+          </div>
+
+          {/* Matrix Table */}
+          <div className="bg-white rounded-lg border border-gray-300 shadow-sm overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-gray-200 text-gray-800 border-b border-gray-300">
+                  <th className="p-2.5 font-bold border-r border-gray-300 min-w-[180px]">Chemical / Product</th>
+                  <th className="p-2.5 font-bold border-r border-gray-300 text-center w-24">
+                    Unit / Refill Price
+                  </th>
+                  {employeeColumns.length === 0 ? (
+                    <th className="p-2.5 font-normal italic text-gray-400">No approved requests in {selectedMonth}</th>
+                  ) : (
+                    employeeColumns.map(emp => (
+                      <th key={emp} className="p-2.5 font-bold border-r border-gray-300 text-center min-w-[110px]">
+                        👤 {emp}
+                      </th>
+                    ))
+                  )}
+                  <th className="p-2.5 font-bold text-center bg-gray-100 w-28">Total Units</th>
+                  <th className="p-2.5 font-bold text-right bg-gray-100 w-28">Total Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredInventory.map(item => {
+                  const dispensePrice = getDispenseUnitPrice(item);
+                  const rowCounts = employeeColumns.map(emp => usageMatrix[String(item.id)]?.[emp] || 0);
+                  const totalUnits = rowCounts.reduce((a, b) => a + b, 0);
+                  const totalItemCost = totalUnits * dispensePrice;
+
+                  return (
+                    <tr key={item.id} className="border-b border-gray-200 hover:bg-gray-50/60">
+                      <td className="p-2 font-bold text-gray-800 border-r border-gray-200 bg-gray-50/40">
+                        <div className="flex items-center justify-between gap-1">
+                          <span>{item.name}</span>
+                          {item.is_bulk_refill && (
+                            <span className="text-[9px] bg-blue-100 text-blue-800 px-1.5 py-0.2 rounded font-semibold">
+                              Refill
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-2 text-center font-mono font-bold text-gray-700 border-r border-gray-200 bg-emerald-50/30">
+                        ${dispensePrice.toFixed(2)}
+                      </td>
+
+                      {employeeColumns.length === 0 ? (
+                        <td className="p-2 text-center text-gray-300">—</td>
+                      ) : (
+                        employeeColumns.map(emp => {
+                          const count = usageMatrix[String(item.id)]?.[emp] || 0;
+                          let cellColor = '';
+                          if (count >= 10) cellColor = 'bg-red-500 text-white font-black';
+                          else if (count >= 7) cellColor = 'bg-orange-400 text-gray-900 font-bold';
+                          else if (count >= 4) cellColor = 'bg-yellow-300 text-gray-900 font-bold';
+
+                          return (
+                            <td key={emp} className={`p-2 text-center border-r border-gray-200 ${cellColor}`}>
+                              {count}
+                            </td>
+                          );
+                        })
+                      )}
+
+                      <td className="p-2 text-center font-bold text-gray-800 bg-gray-50 border-r border-gray-200">
+                        {totalUnits}
+                      </td>
+                      <td className="p-2 text-right font-mono font-bold text-gray-900 bg-gray-50">
+                        ${totalItemCost.toFixed(2)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+
+              <tfoot>
+                <tr className="bg-blue-50/80 border-t-2 border-gray-400 font-bold text-gray-900">
+                  <td className="p-2.5 border-r border-gray-300">Total Value ($):</td>
+                  <td className="p-2.5 border-r border-gray-300"></td>
+                  {employeeColumns.length === 0 ? (
+                    <td className="p-2.5"></td>
+                  ) : (
+                    employeeColumns.map(emp => (
+                      <td key={emp} className="p-2.5 text-center font-mono border-r border-gray-300">
+                        ${(employeeSpendTotals[emp] || 0).toFixed(2)}
+                      </td>
+                    ))
+                  )}
+                  <td className="p-2.5 border-r border-gray-300"></td>
+                  <td className="p-2.5 text-right font-mono text-sm">
+                    ${allEmployeeMonthlyTotal.toFixed(2)}
+                  </td>
+                </tr>
+
+                <tr className="bg-blue-50/40 border-t border-gray-300 font-bold text-gray-800">
+                  <td className="p-2.5 border-r border-gray-300">Jobs Completed:</td>
+                  <td className="p-2.5 border-r border-gray-300 text-center font-mono">
+                    {currentMonthJobs}
+                  </td>
+                  <td colSpan={Math.max(1, employeeColumns.length + 2)} className="p-2.5 text-xs text-gray-600">
+                    Average Spend Per Job in {selectedMonth}:{' '}
+                    <strong className="text-emerald-800 font-mono">
+                      {currentMonthJobs > 0 ? `$${avgCostPerJob.toFixed(2)} / job` : 'N/A (Enter Jobs Completed above)'}
+                    </strong>
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: MANAGE & CLEAN UP MONTH'S APPROVED SUBMISSIONS */}
+      {isManageRecordsOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          onMouseDown={() => setIsManageRecordsOpen(false)}
+        >
+          <div 
+            className="bg-[#F4F3ED] max-w-2xl w-full max-h-[88vh] rounded-lg shadow-2xl p-5 flex flex-col gap-3 animate-fade-in overflow-hidden"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center border-b border-gray-300 pb-2">
+              <div>
+                <h3 className="font-serif font-bold text-lg text-gray-900">
+                  Manage Monthly Submissions ({selectedMonth})
+                </h3>
+                <span className="text-[11px] text-gray-500">
+                  Edit item quantities or delete accidental test submissions to keep matrix numbers accurate.
+                </span>
+              </div>
+              <button onClick={() => setIsManageRecordsOpen(false)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-3 min-h-[250px]">
+              {approvedInMonth.length === 0 ? (
+                <div className="text-center text-gray-400 italic text-xs py-10">
+                  No approved submissions in {selectedMonth}.
+                </div>
+              ) : (
+                approvedInMonth.map(req => {
+                  const subDate = new Date(req.submitted_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                  return (
+                    <div key={req.id} className="bg-white p-3.5 rounded-lg border border-gray-200 shadow-2xs flex flex-col gap-2">
+                      <div className="flex justify-between items-center border-b border-gray-100 pb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-gray-900">👤 {req.requested_by}</span>
+                          <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.2 rounded font-semibold">{req.company}</span>
+                          <span className="text-[10px] text-gray-400">{subDate}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteHistoricalRequest(req.id, req.requested_by)}
+                          className="text-xs text-red-600 hover:text-red-800 font-bold hover:underline flex items-center gap-1"
+                          title="Purge this request"
+                        >
+                          <span>🗑️</span>
+                          <span>Delete Sheet</span>
+                        </button>
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        {(req.items || []).map(it => (
+                          <div key={it.id} className="flex justify-between items-center text-xs bg-gray-50 p-1.5 rounded border border-gray-100">
+                            <span className="font-semibold text-gray-800">
+                              {it.item_name} {it.is_bulk_refill ? '(Refill)' : ''}
+                            </span>
+                            <div className="flex items-center gap-1 bg-white p-0.5 rounded border border-gray-200">
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateItemQuantityInPastRequest(req.id, it.id, -1)}
+                                disabled={it.quantity === 0}
+                                className="w-5 h-5 rounded flex items-center justify-center bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 disabled:opacity-30"
+                              >
+                                −
+                              </button>
+                              <span className="min-w-[24px] text-center font-bold text-emerald-800">
+                                {it.quantity}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateItemQuantityInPastRequest(req.id, it.id, 1)}
+                                className="w-5 h-5 rounded flex items-center justify-center bg-gray-100 text-gray-700 font-bold hover:bg-gray-200"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-gray-300">
+              <button
+                type="button"
+                onClick={() => setIsManageRecordsOpen(false)}
+                className="bg-[#333333] hover:bg-black text-white px-5 py-2 text-xs font-bold rounded shadow-sm transition"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REVIEW & APPROVE MODAL */}
       {editingRequest && (
         <div 
           className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50"
@@ -695,7 +1199,7 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
                   Review Supply Request
                 </h3>
                 <span className="text-[11px] text-gray-500">
-                  Car <strong>#{editingRequest.car_number}</strong> • Requester: <strong>{editingRequest.requested_by}</strong> ({editingRequest.company})
+                  Employee: <strong>{editingRequest.requested_by}</strong> ({editingRequest.company})
                 </span>
               </div>
               <button onClick={() => setEditingRequest(null)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
@@ -703,7 +1207,7 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
 
             {editingRequest.has_vehicle_warning && (
               <div className="bg-red-50 border border-red-300 p-2.5 rounded text-xs text-red-900">
-                <strong>⚠️ Vehicle Warning Light Reported ON!</strong>
+                <strong>⚠️ Equipment / Vehicle Issue Reported!</strong>
                 {editingRequest.vehicle_warning_note && (
                   <p className="mt-0.5 text-[11px] text-red-800">Note: {editingRequest.vehicle_warning_note}</p>
                 )}
@@ -724,22 +1228,26 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
                   : jugs;
 
                 const isShortage = Number(item.quantity) > availableUnits;
+                const unitCost = getDispenseUnitPrice(invItem);
 
                 return (
                   <div key={item.id} className="flex justify-between items-center text-xs py-1.5 border-b border-gray-100 last:border-0">
                     <div className="min-w-0 pr-2">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="font-bold text-gray-800 truncate">{item.item_name}</span>
+                        <span className="text-[10px] font-mono text-emerald-700 font-bold">
+                          (${(unitCost * Number(item.quantity || 0)).toFixed(2)})
+                        </span>
                         {isShortage && (
                           <span className="text-[9px] bg-red-100 text-red-700 px-1 py-0.2 rounded font-bold uppercase">
-                            ⚠️ Shortage (Only {availableUnits} {item.is_bulk_refill ? 'refills' : 'on shelf'})
+                            ⚠️ Shortage (Only {availableUnits} available)
                           </span>
                         )}
                       </div>
                       <span className={`text-[10px] block ${item.is_bulk_refill ? 'text-blue-600' : 'text-gray-500'}`}>
                         {item.is_bulk_refill 
-                          ? `🧴 Bottle Refill (Total Refills Left: ${availableUnits})` 
-                          : `📦 Whole Unit (Current Stock: ${availableUnits})`}
+                          ? `🧴 Bottle Refill ($${unitCost.toFixed(2)}/ea • ${availableUnits} left)` 
+                          : `📦 Whole Unit ($${unitCost.toFixed(2)}/ea • ${availableUnits} in stock)`}
                       </span>
                     </div>
                     

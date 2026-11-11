@@ -23,6 +23,14 @@ export default function InventoryItemModal({
   const [refillUnitLabel, setRefillUnitLabel] = useState('8oz Bottle Refill');
   const [refillsPerJug, setRefillsPerJug] = useState(0);
   const [currentRefillsLeft, setCurrentRefillsLeft] = useState(0);
+
+  // Pricing & Vendor States
+  const [unitPrice, setUnitPrice] = useState('0.00');
+  const [vendorName, setVendorName] = useState('Manual');
+  const [vendorUrl, setVendorUrl] = useState('');
+  const [priceLocked, setPriceLocked] = useState(false);
+  const [isSyncingPrice, setIsSyncingPrice] = useState(false);
+
   const [imageUrl, setImageUrl] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -54,6 +62,10 @@ export default function InventoryItemModal({
       setRefillsPerJug(perJug);
       const used = Number(editingItem.current_refill_usage ?? 0);
       setCurrentRefillsLeft(perJug > 0 ? Math.max(0, perJug - used) : 0);
+      setUnitPrice(Number(editingItem.unit_price ?? 0).toFixed(2));
+      setVendorName(editingItem.vendor_name || 'Manual');
+      setVendorUrl(editingItem.vendor_url || '');
+      setPriceLocked(Boolean(editingItem.price_locked));
       setImageUrl(editingItem.image_url || '');
     } else {
       setName('');
@@ -65,12 +77,51 @@ export default function InventoryItemModal({
       setRefillUnitLabel('8oz Bottle Refill');
       setRefillsPerJug(0);
       setCurrentRefillsLeft(0);
+      setUnitPrice('0.00');
+      setVendorName('Manual');
+      setVendorUrl('');
+      setPriceLocked(false);
       setImageUrl('');
     }
     setIsDragging(false);
   }, [editingItem, activeCompanies, isOpen]);
 
   if (!isOpen) return null;
+
+  // Automatic division for bulk jugs
+  const numericJugOrUnitPrice = Math.max(0, parseFloat(unitPrice) || 0);
+  const perRefillCost = (isBulkRefill && Number(refillsPerJug) > 0)
+    ? (numericJugOrUnitPrice / Number(refillsPerJug))
+    : numericJugOrUnitPrice;
+
+  const handleFetchVendorPrice = async () => {
+    if (priceLocked) {
+      return alert('Price is currently locked. Uncheck "Lock Price" to sync from vendor URL.');
+    }
+    if (!vendorUrl.trim()) {
+      return alert('Please paste a Home Depot or Amazon product URL first.');
+    }
+
+    setIsSyncingPrice(true);
+    try {
+      const res = await fetch('/api/sync-price', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: vendorUrl.trim() })
+      });
+      const data = await res.json();
+      if (data.success && data.price) {
+        setUnitPrice(Number(data.price).toFixed(2));
+        alert(`✓ Updated price to $${Number(data.price).toFixed(2)} from vendor page!`);
+      } else {
+        alert(`ℹ️ ${data.reason || 'Could not auto-read price from URL. Please enter price manually.'}`);
+      }
+    } catch (err) {
+      alert('Could not reach price sync endpoint. You can type the price manually.');
+    } finally {
+      setIsSyncingPrice(false);
+    }
+  };
 
   const processAndUploadFile = async (file) => {
     if (!file) return;
@@ -146,6 +197,10 @@ export default function InventoryItemModal({
       refill_unit_label: isBulkRefill ? (refillUnitLabel.trim() || 'Bottle Refill') : null,
       refills_per_jug: perJug,
       current_refill_usage: isBulkRefill ? calculatedUsed : 0,
+      unit_price: numericJugOrUnitPrice,
+      vendor_name: vendorName,
+      vendor_url: vendorUrl.trim(),
+      price_locked: priceLocked,
       low_stock_notified: isAtOrBelowMin,
       image_url: imageUrl,
       updated_at: new Date().toISOString()
@@ -213,7 +268,7 @@ export default function InventoryItemModal({
               type="text" 
               value={name} 
               onChange={(e) => setName(e.target.value)} 
-              placeholder="e.g., Dawn Soap"
+              placeholder="e.g., Dawn Soap / Sparoxide"
               className="w-full p-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#A9B1A6] bg-white" 
             />
           </div>
@@ -230,7 +285,7 @@ export default function InventoryItemModal({
             </div>
             <div className="w-1/4">
               <label className="block text-xs font-bold text-gray-700 mb-1">
-                {isBulkRefill ? 'Full Jugs' : 'Backstock'}
+                {isBulkRefill ? 'Unopened Jugs' : 'Backstock'}
               </label>
               <input 
                 type="number" 
@@ -258,6 +313,99 @@ export default function InventoryItemModal({
             </div>
           </div>
 
+          {/* PRICING, VENDOR & COST CALCULATION */}
+          <div className="bg-white p-3 rounded-lg border border-emerald-200 flex flex-col gap-2.5 shadow-2xs">
+            <div className="flex justify-between items-center">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-950">
+                💲 Pricing & Vendor Tracking
+              </span>
+              <label className="flex items-center gap-1.5 text-[11px] font-bold text-gray-700 cursor-pointer">
+                <input 
+                  type="checkbox"
+                  checked={priceLocked}
+                  onChange={(e) => setPriceLocked(e.target.checked)}
+                  className="accent-emerald-700 w-3.5 h-3.5 cursor-pointer"
+                />
+                <span>🔒 Lock / In-House Override</span>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1">
+                  {isBulkRefill ? 'Price Per Full Jug ($)' : 'Price Per Unit ($)'}
+                </label>
+                <div className="relative">
+                  <span className="absolute left-2.5 top-2 text-xs font-bold text-gray-500">$</span>
+                  <input 
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={unitPrice}
+                    onChange={(e) => setUnitPrice(e.target.value)}
+                    className="w-full pl-6 pr-2 py-1.5 text-xs border border-gray-300 rounded font-bold text-gray-900 bg-gray-50 focus:bg-white focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1">
+                  Primary Vendor
+                </label>
+                <select
+                  value={vendorName}
+                  onChange={(e) => setVendorName(e.target.value)}
+                  className="w-full p-1.5 text-xs border border-gray-300 rounded bg-white font-semibold"
+                >
+                  <option value="Manual">Manual / In-House</option>
+                  <option value="Amazon">Amazon</option>
+                  <option value="Home Depot">Home Depot</option>
+                  <option value="Wholesale">Wholesale / Other</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Automatic Refill Cost Division Preview */}
+            {isBulkRefill && Number(refillsPerJug) > 0 && (
+              <div className="bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded flex justify-between items-center text-xs">
+                <span className="text-emerald-900 font-semibold">
+                  🧴 Auto-Calculated Cost Per Refill:
+                </span>
+                <span className="font-black text-emerald-800">
+                  ${perRefillCost.toFixed(2)} / {refillUnitLabel || 'Refill'}
+                </span>
+              </div>
+            )}
+
+            {/* Optional Vendor URL & Auto-Fetch */}
+            {vendorName !== 'Manual' && (
+              <div className="pt-1 border-t border-gray-100 flex flex-col gap-1.5">
+                <label className="block text-[10px] font-bold text-gray-500 uppercase">
+                  Product Link ({vendorName} URL)
+                </label>
+                <div className="flex gap-1.5">
+                  <input 
+                    type="url"
+                    value={vendorUrl}
+                    onChange={(e) => setVendorUrl(e.target.value)}
+                    placeholder={`Paste ${vendorName} product link...`}
+                    className="flex-1 p-1.5 text-xs border border-gray-300 rounded bg-white"
+                  />
+                  {!priceLocked && (
+                    <button
+                      type="button"
+                      disabled={isSyncingPrice || !vendorUrl.trim()}
+                      onClick={handleFetchVendorPrice}
+                      className="bg-emerald-700 hover:bg-emerald-800 text-white px-2.5 py-1 rounded text-[10px] font-bold shrink-0 disabled:opacity-40 transition"
+                    >
+                      {isSyncingPrice ? 'Checking...' : '🔄 Fetch Price'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* BULK REFILL CONFIGURATION & JUG LEVEL ADJUSTER */}
           <div className="bg-white p-3 rounded-lg border border-gray-200 flex flex-col gap-2.5">
             <div className="flex items-start gap-2.5">
@@ -271,7 +419,7 @@ export default function InventoryItemModal({
               <label htmlFor="isBulkRefillCheck" className="text-xs cursor-pointer">
                 <span className="font-bold text-gray-800 block">Dispensed into Smaller Refill Bottles (e.g., Dawn, Bona, Vinegar)</span>
                 <span className="text-[11px] text-gray-500">
-                  Cleaners request small bottle refills on their Supply Sheet while you track large backstock jugs here.
+                  Tasky divides the Full Jug Price by Refills Per Jug to calculate exact employee refill costs.
                 </span>
               </label>
             </div>
@@ -305,7 +453,7 @@ export default function InventoryItemModal({
                         setRefillsPerJug(val);
                         if (currentRefillsLeft > val) setCurrentRefillsLeft(val);
                       }}
-                      placeholder="0 = Manual"
+                      placeholder="e.g., 7"
                       className="w-full p-1.5 text-xs border border-blue-200 rounded bg-white font-bold text-center"
                     />
                   </div>
@@ -341,7 +489,7 @@ export default function InventoryItemModal({
               rows={2} 
               value={description} 
               onChange={(e) => setDescription(e.target.value)} 
-              placeholder="Storage location, specs, or reorder notes..."
+              placeholder="Storage location, dilution ratio, or reorder notes..."
               className="w-full p-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#A9B1A6] bg-white" 
             />
           </div>
