@@ -24,12 +24,17 @@ export default function InventoryItemModal({
   const [refillsPerJug, setRefillsPerJug] = useState(0);
   const [currentRefillsLeft, setCurrentRefillsLeft] = useState(0);
 
-  // Pricing & Vendor States
+  // Pricing, Multi-pack & Vendor States
   const [unitPrice, setUnitPrice] = useState('0.00');
   const [vendorName, setVendorName] = useState('Manual');
   const [vendorUrl, setVendorUrl] = useState('');
   const [priceLocked, setPriceLocked] = useState(false);
   const [isSyncingPrice, setIsSyncingPrice] = useState(false);
+
+  // Multi-pack breakdown state
+  const [isMultiPack, setIsMultiPack] = useState(false);
+  const [unitsPerPack, setUnitsPerPack] = useState(1);
+  const [packPrice, setPackPrice] = useState('0.00');
 
   const [imageUrl, setImageUrl] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -62,7 +67,13 @@ export default function InventoryItemModal({
       setRefillsPerJug(perJug);
       const used = Number(editingItem.current_refill_usage ?? 0);
       setCurrentRefillsLeft(perJug > 0 ? Math.max(0, perJug - used) : 0);
-      setUnitPrice(Number(editingItem.unit_price ?? 0).toFixed(2));
+
+      const basePrice = Number(editingItem.unit_price ?? 0);
+      setUnitPrice(basePrice.toFixed(2));
+      setPackPrice(basePrice.toFixed(2));
+      setUnitsPerPack(1);
+      setIsMultiPack(false);
+
       setVendorName(editingItem.vendor_name || 'Manual');
       setVendorUrl(editingItem.vendor_url || '');
       setPriceLocked(Boolean(editingItem.price_locked));
@@ -78,6 +89,9 @@ export default function InventoryItemModal({
       setRefillsPerJug(0);
       setCurrentRefillsLeft(0);
       setUnitPrice('0.00');
+      setPackPrice('0.00');
+      setUnitsPerPack(1);
+      setIsMultiPack(false);
       setVendorName('Manual');
       setVendorUrl('');
       setPriceLocked(false);
@@ -88,7 +102,15 @@ export default function InventoryItemModal({
 
   if (!isOpen) return null;
 
-  // Automatic division for bulk jugs
+  // Multi-pack math: calculates price per unit from pack price / pack count
+  const handlePackCalculation = (newPackPrice, newUnits) => {
+    const p = Math.max(0, parseFloat(newPackPrice) || 0);
+    const u = Math.max(1, parseInt(newUnits) || 1);
+    const calculatedPerUnit = (p / u).toFixed(2);
+    setUnitPrice(calculatedPerUnit);
+  };
+
+  // Bulk jug math: price per full jug / refills_per_jug
   const numericJugOrUnitPrice = Math.max(0, parseFloat(unitPrice) || 0);
   const perRefillCost = (isBulkRefill && Number(refillsPerJug) > 0)
     ? (numericJugOrUnitPrice / Number(refillsPerJug))
@@ -96,10 +118,10 @@ export default function InventoryItemModal({
 
   const handleFetchVendorPrice = async () => {
     if (priceLocked) {
-      return alert('Price is currently locked. Uncheck "Lock Price" to sync from vendor URL.');
+      return alert('Price is locked. Uncheck "Lock Price" to sync from vendor.');
     }
     if (!vendorUrl.trim()) {
-      return alert('Please paste a Home Depot or Amazon product URL first.');
+      return alert('Please paste a product URL first.');
     }
 
     setIsSyncingPrice(true);
@@ -111,10 +133,15 @@ export default function InventoryItemModal({
       });
       const data = await res.json();
       if (data.success && data.price) {
-        setUnitPrice(Number(data.price).toFixed(2));
+        if (isMultiPack) {
+          setPackPrice(Number(data.price).toFixed(2));
+          handlePackCalculation(data.price, unitsPerPack);
+        } else {
+          setUnitPrice(Number(data.price).toFixed(2));
+        }
         alert(`✓ Updated price to $${Number(data.price).toFixed(2)} from vendor page!`);
       } else {
-        alert(`ℹ️ ${data.reason || 'Could not auto-read price from URL. Please enter price manually.'}`);
+        alert(`ℹ️ ${data.reason || 'Vendor blocked automated check (HTTP 403). Using manual price.'}`);
       }
     } catch (err) {
       alert('Could not reach price sync endpoint. You can type the price manually.');
@@ -268,7 +295,7 @@ export default function InventoryItemModal({
               type="text" 
               value={name} 
               onChange={(e) => setName(e.target.value)} 
-              placeholder="e.g., Dawn Soap / Sparoxide"
+              placeholder="e.g., Scrub Daddy, Pumice Stone, Bona"
               className="w-full p-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#A9B1A6] bg-white" 
             />
           </div>
@@ -285,7 +312,7 @@ export default function InventoryItemModal({
             </div>
             <div className="w-1/4">
               <label className="block text-xs font-bold text-gray-700 mb-1">
-                {isBulkRefill ? 'Unopened Jugs' : 'Backstock'}
+                {isBulkRefill ? 'Full Jugs' : 'Backstock'}
               </label>
               <input 
                 type="number" 
@@ -313,11 +340,11 @@ export default function InventoryItemModal({
             </div>
           </div>
 
-          {/* PRICING, VENDOR & COST CALCULATION */}
+          {/* PRICING, MULTI-PACK & VENDOR TRACKING */}
           <div className="bg-white p-3 rounded-lg border border-emerald-200 flex flex-col gap-2.5 shadow-2xs">
             <div className="flex justify-between items-center">
               <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-950">
-                💲 Pricing & Vendor Tracking
+                💲 Pricing & Vendor
               </span>
               <label className="flex items-center gap-1.5 text-[11px] font-bold text-gray-700 cursor-pointer">
                 <input 
@@ -330,10 +357,73 @@ export default function InventoryItemModal({
               </label>
             </div>
 
+            {/* MULTI-PACK TOGGLE (Pumice Stones 25-pack, Scrub Daddy 12-pack, Vacuum bags) */}
+            {!isBulkRefill && (
+              <div className="bg-emerald-50/50 p-2 rounded border border-emerald-100 flex flex-col gap-1.5">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-emerald-950">
+                  <input
+                    type="checkbox"
+                    checked={isMultiPack}
+                    onChange={(e) => {
+                      setIsMultiPack(e.target.checked);
+                      if (!e.target.checked) {
+                        setUnitsPerPack(1);
+                      }
+                    }}
+                    className="accent-emerald-700 w-3.5 h-3.5 cursor-pointer"
+                  />
+                  <span>📦 Purchased in Multi-Packs / Cases (e.g., 25-pack, 12-pack)</span>
+                </label>
+
+                {isMultiPack && (
+                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-emerald-200/60">
+                    <div>
+                      <label className="block text-[10px] font-bold text-emerald-900 uppercase mb-0.5">
+                        Total Package Price ($)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={packPrice}
+                        onChange={(e) => {
+                          setPackPrice(e.target.value);
+                          handlePackCalculation(e.target.value, unitsPerPack);
+                        }}
+                        placeholder="e.g., 21.00"
+                        className="w-full p-1.5 text-xs border border-emerald-300 rounded font-bold bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-emerald-900 uppercase mb-0.5">
+                        Units Per Pack
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={unitsPerPack}
+                        onChange={(e) => {
+                          const val = Math.max(1, parseInt(e.target.value) || 1);
+                          setUnitsPerPack(val);
+                          handlePackCalculation(packPrice, val);
+                        }}
+                        placeholder="e.g., 25"
+                        className="w-full p-1.5 text-xs border border-emerald-300 rounded font-bold text-center bg-white"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-2.5">
               <div>
                 <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1">
-                  {isBulkRefill ? 'Price Per Full Jug ($)' : 'Price Per Unit ($)'}
+                  {isBulkRefill 
+                    ? 'Price Per Full Jug ($)' 
+                    : isMultiPack 
+                    ? 'Calculated Price Per Piece ($)' 
+                    : 'Price Per Unit ($)'}
                 </label>
                 <div className="relative">
                   <span className="absolute left-2.5 top-2 text-xs font-bold text-gray-500">$</span>
@@ -341,9 +431,12 @@ export default function InventoryItemModal({
                     type="number"
                     step="0.01"
                     min="0"
+                    disabled={isMultiPack}
                     value={unitPrice}
                     onChange={(e) => setUnitPrice(e.target.value)}
-                    className="w-full pl-6 pr-2 py-1.5 text-xs border border-gray-300 rounded font-bold text-gray-900 bg-gray-50 focus:bg-white focus:outline-none"
+                    className={`w-full pl-6 pr-2 py-1.5 text-xs border rounded font-bold text-gray-900 ${
+                      isMultiPack ? 'bg-gray-100 text-gray-700 border-gray-200' : 'bg-gray-50 focus:bg-white border-gray-300'
+                    }`}
                   />
                 </div>
               </div>
@@ -365,7 +458,7 @@ export default function InventoryItemModal({
               </div>
             </div>
 
-            {/* Automatic Refill Cost Division Preview */}
+            {/* Bulk Refill Cost Preview */}
             {isBulkRefill && Number(refillsPerJug) > 0 && (
               <div className="bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded flex justify-between items-center text-xs">
                 <span className="text-emerald-900 font-semibold">
@@ -377,12 +470,25 @@ export default function InventoryItemModal({
               </div>
             )}
 
-            {/* Optional Vendor URL & Auto-Fetch */}
+            {/* Vendor URL, 1-Click Open & Price Sync */}
             {vendorName !== 'Manual' && (
               <div className="pt-1 border-t border-gray-100 flex flex-col gap-1.5">
-                <label className="block text-[10px] font-bold text-gray-500 uppercase">
-                  Product Link ({vendorName} URL)
-                </label>
+                <div className="flex justify-between items-center">
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase">
+                    {vendorName} Product Link
+                  </label>
+                  {vendorUrl.trim() && (
+                    <a
+                      href={vendorUrl.trim()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] font-bold text-emerald-800 hover:text-emerald-950 underline flex items-center gap-1"
+                    >
+                      <span>🔗 Open {vendorName} Page</span>
+                    </a>
+                  )}
+                </div>
+
                 <div className="flex gap-1.5">
                   <input 
                     type="url"
@@ -391,7 +497,7 @@ export default function InventoryItemModal({
                     placeholder={`Paste ${vendorName} product link...`}
                     className="flex-1 p-1.5 text-xs border border-gray-300 rounded bg-white"
                   />
-                  {!priceLocked && (
+                  {!priceLocked && vendorName === 'Amazon' && (
                     <button
                       type="button"
                       disabled={isSyncingPrice || !vendorUrl.trim()}
@@ -402,6 +508,11 @@ export default function InventoryItemModal({
                     </button>
                   )}
                 </div>
+                {vendorName === 'Home Depot' && (
+                  <span className="text-[10px] text-gray-400">
+                    💡 Click <strong>Open Home Depot Page</strong> above to verify price without bot-block, then type it in.
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -413,7 +524,10 @@ export default function InventoryItemModal({
                 type="checkbox"
                 id="isBulkRefillCheck"
                 checked={isBulkRefill}
-                onChange={(e) => setIsBulkRefill(e.target.checked)}
+                onChange={(e) => {
+                  setIsBulkRefill(e.target.checked);
+                  if (e.target.checked) setIsMultiPack(false);
+                }}
                 className="accent-blue-600 w-4 h-4 mt-0.5 cursor-pointer"
               />
               <label htmlFor="isBulkRefillCheck" className="text-xs cursor-pointer">
@@ -453,7 +567,7 @@ export default function InventoryItemModal({
                         setRefillsPerJug(val);
                         if (currentRefillsLeft > val) setCurrentRefillsLeft(val);
                       }}
-                      placeholder="e.g., 7"
+                      placeholder="e.g., 4"
                       className="w-full p-1.5 text-xs border border-blue-200 rounded bg-white font-bold text-center"
                     />
                   </div>

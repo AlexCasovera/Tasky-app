@@ -12,6 +12,10 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
   const [isLoading, setIsLoading] = useState(true);
   const [toastMessage, setToastMessage] = useState('');
 
+  // Bulk Price Sync State
+  const [isBulkSyncing, setIsBulkSyncing] = useState(false);
+  const [bulkSyncStatus, setBulkSyncStatus] = useState('');
+
   // 'grid' | 'requests' | 'analytics'
   const [subView, setSubView] = useState('grid');
   const [allRequests, setAllRequests] = useState([]);
@@ -238,6 +242,77 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
     } catch (err) {
       console.error('Error sending low stock alert:', err);
     }
+  };
+
+const handleRefreshAllPrices = async () => {
+   // Open to all vendors with a saved URL
+    const syncableItems = inventory.filter(i => 
+      !i.price_locked && 
+      i.vendor_url && 
+      i.vendor_url.startsWith('http')
+    );
+
+    if (syncableItems.length === 0) {
+      return alert('No unlocked Amazon items with product links found to refresh.');
+    }
+
+    if (!window.confirm(`Refresh live prices for ${syncableItems.length} items? This will check them one-by-one.`)) {
+      return;
+    }
+
+    setIsBulkSyncing(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < syncableItems.length; i++) {
+      const item = syncableItems[i];
+      setBulkSyncStatus(`Syncing (${i + 1}/${syncableItems.length})...`);
+
+      try {
+        let res;
+        try {
+          res = await fetch('/api/sync-price', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: item.vendor_url })
+          });
+          if (!res.ok && res.status === 404) throw new Error('Dev 404');
+        } catch {
+          res = await fetch('https://tasky-app-gilt.vercel.app/api/sync-price', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: item.vendor_url })
+          });
+        }
+
+        const data = await res.json();
+        if (data.success && data.price) {
+          const newPrice = Number(data.price);
+          await supabase
+            .from('inventory')
+            .update({
+              unit_price: newPrice,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', item.id);
+          successCount++;
+        } else {
+          failCount++;
+        }
+      } catch (err) {
+        failCount++;
+      }
+
+      // 1.5-second pacing delay between items to prevent bot-detection
+      if (i < syncableItems.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+    }
+
+    setIsBulkSyncing(false);
+    setBulkSyncStatus('');
+    await fetchInventory();
+    showToast(`✓ Price sync finished: ${successCount} updated, ${failCount} unchanged.`);
   };
 
   const handleEditRequestQty = (itemId, delta) => {
@@ -607,6 +682,25 @@ export default function InventoryDashboard({ companiesData, currentProfile, user
               📊 Monthly Cost & Matrix
             </button>
           </div>
+
+          <button 
+            onClick={() => { setEditingItem(null); setIsModalOpen(true); }}
+            className="bg-[#333333] text-white px-4 py-2 rounded text-xs font-bold shadow-sm hover:bg-black transition"
+          >
+            + Add Item
+          </button>
+
+{/* MASTER SYNC BUTTON */}
+          <button
+            type="button"
+            disabled={isBulkSyncing}
+            onClick={handleRefreshAllPrices}
+            className="bg-emerald-800 hover:bg-emerald-900 text-white px-3 py-2 rounded text-xs font-bold shadow-sm transition flex items-center gap-1.5 disabled:opacity-50"
+            title="Sequentially update prices for all unlocked products"
+          >
+            <span>{isBulkSyncing ? '⏳' : '🔄'}</span>
+            <span>{isBulkSyncing ? bulkSyncStatus : 'Sync All Prices'}</span>
+          </button>
 
           <button 
             onClick={() => { setEditingItem(null); setIsModalOpen(true); }}
