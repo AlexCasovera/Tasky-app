@@ -9,6 +9,7 @@ export default function InventoryItemModal({
   onClose,
   editingItem,
   activeCompanies,
+  defaultCompany = '',
   refreshInventory,
   currentProfile,
   userRole,
@@ -92,7 +93,7 @@ export default function InventoryItemModal({
     } else {
       setName('');
       setDescription('');
-      setCompany(activeCompanies[0] || '');
+      setCompany(defaultCompany || '');
       setQuantity(0);
       setMinQuantity(0);
       setIsBulkRefill(false);
@@ -342,6 +343,7 @@ export default function InventoryItemModal({
                 value={company} 
                 onChange={(e) => setCompany(e.target.value)} 
                 className="w-full p-2 text-sm border border-gray-300 rounded bg-white focus:outline-none focus:ring-2 focus:ring-[#A9B1A6]">
+                <option value="">-- Select Company --</option>
                 {activeCompanies.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>

@@ -1413,12 +1413,13 @@ const handleRefreshAllPrices = async () => {
         </div>
       )}
 
-      {/* EDIT/ADD ITEM MODAL */}
+     {/* EDIT/ADD ITEM MODAL */}
       <InventoryItemModal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)} 
         editingItem={editingItem}
         activeCompanies={activeCompanies}
+        defaultCompany={selectedCompany === 'All' ? '' : selectedCompany}
         refreshInventory={fetchInventory}
         currentProfile={currentProfile}
         userRole={userRole}
