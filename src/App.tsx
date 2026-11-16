@@ -31,6 +31,9 @@ import ListAndCompletedViews from './components/ListAndCompletedViews';
 import InventoryDashboard from './components/InventoryDashboard';
 import SupplyRequestModal from './components/SupplyRequestModal';
 
+const generateTaskId = () =>
+  `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
 export default function App() {
   const [session, setSession] = useState<any>(null);
 
@@ -153,7 +156,7 @@ export default function App() {
 
   const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
 
- // Global Fetch for Pending Supply Requests (for the designated company manager)
+  // Global Fetch for Pending Supply Requests (for the designated company manager)
   const fetchGlobalRequests = async () => {
     if (!session || companiesData.length === 0) return;
 
@@ -286,7 +289,18 @@ export default function App() {
     }
 
     if (notif.taskId) {
-      const targetTask = tasks.find(t => t.id === notif.taskId);
+      let targetTask = tasks.find(t => t.id === notif.taskId);
+      if (!targetTask) {
+        const { data } = await supabase.from('tasks').select('*').eq('id', notif.taskId).single();
+        if (data) {
+          targetTask = {
+            ...mapFromDb(data),
+            requireChecklist: data.require_checklist || false,
+            checklist: typeof data.checklist === 'string' ? JSON.parse(data.checklist) : (data.checklist || [])
+          };
+          setTasks(prev => [targetTask, ...prev]);
+        }
+      }
       if (targetTask) {
         handleOpenModal(targetTask, notif.taskDate || targetTask.date);
         setIsNotifOpen(false);
@@ -359,6 +373,14 @@ export default function App() {
 
   const [tasks, setTasks] = useState([]);
   const [isDbLoading, setIsDbLoading] = useState(true);
+  const [hasLoadedFullHistory, setHasLoadedFullHistory] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  const getFourWeeksAgoStr = () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 28);
+    return formatDateKey(d);
+  };
 
   let gridStartHour = 6;
   let gridEndHour = 20;
@@ -472,22 +494,58 @@ export default function App() {
     return task.status === 'completed' && task.date === dateStr;
   };
 
+  const mapRawTask = (d) => {
+    const mappedItem = mapFromDb(d);
+    return {
+      ...mappedItem,
+      requireChecklist: d.require_checklist || false,
+      checklist: typeof d.checklist === 'string' ? JSON.parse(d.checklist) : (d.checklist || [])
+    };
+  };
+
+  const loadOlderTaskHistory = async () => {
+    if (hasLoadedFullHistory || isLoadingHistory || !session) return;
+    setIsLoadingHistory(true);
+    try {
+      const cutoffStr = getFourWeeksAgoStr();
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('*')
+        .lt('date', cutoffStr)
+        .eq('status', 'completed')
+        .order('date', { ascending: false });
+
+      if (!error && data) {
+        const mappedOld = data.map(mapRawTask);
+        setTasks(prev => {
+          const merged = new Map(prev.map(t => [String(t.id), t]));
+          mappedOld.forEach(oldTask => merged.set(String(oldTask.id), oldTask));
+          return Array.from(merged.values());
+        });
+        setHasLoadedFullHistory(true);
+      }
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
   useEffect(() => {
     if (!session) return;
 
     const fetchCloudData = async () => {
-      const { data, error } = await supabase.from('tasks').select('*');
+      const cutoffStr = getFourWeeksAgoStr();
+      const query = hasLoadedFullHistory
+        ? supabase.from('tasks').select('*')
+        : supabase
+            .from('tasks')
+            .select('*')
+            .or(`date.gte.${cutoffStr},date.is.null,date.eq.,status.neq.completed,recurrence_type.neq.once`);
+
+      const { data, error } = await query;
       if (error) {
         console.error('Error fetching tasks from cloud:', error);
       } else if (data) {
-        const mapped = data.map(d => {
-           const mappedItem = mapFromDb(d);
-           return {
-             ...mappedItem,
-             requireChecklist: d.require_checklist || false,
-             checklist: typeof d.checklist === 'string' ? JSON.parse(d.checklist) : (d.checklist || [])
-           };
-        });
+        const mapped = data.map(mapRawTask);
         setTasks(mapped);
 
         const missingCompanies = [...new Set(mapped.map(t => t.company).filter(c => c && !companies.includes(c)))];
@@ -515,7 +573,24 @@ export default function App() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [session, companies]);
+  }, [session, companies, hasLoadedFullHistory]);
+
+  // Automatically hydrate older archived tasks when inspecting Completed tab, searching, or browsing past 4 weeks
+  useEffect(() => {
+    if (!session || hasLoadedFullHistory) return;
+
+    const cutoffStr = getFourWeeksAgoStr();
+    const viewingDateStr = formatDateKey(currentDate);
+
+    const needsArchive =
+      currentView === 'completed' ||
+      (searchQuery && searchQuery.trim().length > 0) ||
+      (viewingDateStr && viewingDateStr < cutoffStr);
+
+    if (needsArchive) {
+      loadOlderTaskHistory();
+    }
+  }, [session, currentView, searchQuery, currentDate, hasLoadedFullHistory]);
   
   const masterCompanyList = [...new Set([...companies, ...tasks.map(t => t.company).filter(Boolean)])];
 
@@ -841,7 +916,7 @@ export default function App() {
       if (targetTask.recurrenceType !== 'once' && !updateSeries) {
         const standaloneTask = {
           ...targetTask,
-          id: Date.now().toString(),
+          id: generateTaskId(),
           date: targetDate,
           assignees: targetMemberName ? [targetMemberName] : (targetTask.assignees || []),
           startHour: startDec,
@@ -877,7 +952,7 @@ export default function App() {
 
         const newMasterTask = {
           ...targetTask,
-          id: Date.now().toString(),
+          id: generateTaskId(),
           date: targetDate,
           activeDays: [targetDayName],
           assignees: targetMemberName ? [targetMemberName] : (targetTask.assignees || []),
@@ -1003,7 +1078,7 @@ export default function App() {
     setMemberColor(member.color || '#2A9D8F');
   };
 
-const handleSaveMember = async () => {
+  const handleSaveMember = async () => {
     if (!memberName.trim()) return alert('Please enter a name.');
     const initials = memberName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
 
@@ -1212,7 +1287,7 @@ const handleSaveMember = async () => {
     const validChecklist = checklist.filter(i => i.text.trim() !== '');
 
     const newTask = {
-      id: Date.now().toString(),
+      id: generateTaskId(),
       title: taskTitle,
       desc: taskDesc,
       company: taskCompany,
@@ -1606,7 +1681,7 @@ const handleSaveMember = async () => {
     if (withFollowUp && completionPrompt) {
       const targetDate = completionPrompt.targetDate || formatDateKey(new Date());
       const newAdHocTask = {
-        id: Date.now().toString(),
+        id: generateTaskId(),
         title: completionPrompt.title,
         desc: completionPrompt.desc || `Ad-hoc sub task from: "${selectedTask.title}"`,
         company: selectedTask.company,
@@ -1665,7 +1740,7 @@ const handleSaveMember = async () => {
       const nextDueDate = addDaysToDateStr(selectedInstanceDate, selectedTask.cadenceDays || 14);
       const nextInstanceTask = {
         ...selectedTask,
-        id: Date.now().toString(),
+        id: generateTaskId(),
         date: nextDueDate,
         completedDates: [],
         exceptionDates: [],
@@ -1683,7 +1758,7 @@ const handleSaveMember = async () => {
       const stepAssignees = nextStep.assignee === 'Same as Parent' ? selectedTask.assignees : [nextStep.assignee];
 
       const chainedTask = {
-        id: Date.now().toString(),
+        id: generateTaskId(),
         title: nextStep.title || 'Follow-up Task',
         desc: nextStep.desc || `Chained step from completed task: "${selectedTask.title}"`,
         company: selectedTask.company,
@@ -2014,7 +2089,6 @@ const handleSaveMember = async () => {
 
         {/* GLOBAL PENDING REQUESTS BANNER (ONLY VISIBLE TO THE ASSIGNED INVENTORY/SUPPLY MANAGER) */}
         {currentView !== 'inventory' && (() => {
-          // Identify which companies current user is the designated Inventory Manager for
           const managedCompanies = (companiesData || [])
             .filter(c => c.inventory_manager === currentUserName)
             .map(c => c.name);
