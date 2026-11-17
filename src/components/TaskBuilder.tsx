@@ -1,3 +1,4 @@
+// src/components/TaskBuilder.tsx
 // @ts-nocheck
 import React, { useState, useEffect } from 'react';
 import { formatDateKey, daysOfWeek, timeToDecimal, formatTimeLabel } from '../utils';
@@ -16,10 +17,20 @@ export default function TaskBuilder({
   notifyOnDeadlineChange, setNotifyOnDeadlineChange, notifyOnTaskCreated, 
   setNotifyOnTaskCreated, handleDeployTask,
   requireChecklist, setRequireChecklist, checklist, setChecklist, handleAddChecklistItem, 
-  handleUpdateChecklistItem, handleRemoveChecklistItem
+  handleUpdateChecklistItem, handleRemoveChecklistItem,
+  propertyName, setPropertyName, unitName, setUnitName, requireAiQc, setRequireAiQc
 }) {
   const [templates, setTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [properties, setProperties] = useState([]);
+  const [propertyUnits, setPropertyUnits] = useState([]);
+
+  const formatUnitTags = (u) => {
+    const tags = Array.isArray(u.blueprints) && u.blueprints.length > 0
+      ? u.blueprints
+      : (u.blueprint ? [u.blueprint] : []);
+    return tags.length > 0 ? ` (${tags.join(', ')})` : '';
+  };
 
   const fetchTemplates = async () => {
     try {
@@ -35,9 +46,29 @@ export default function TaskBuilder({
     }
   };
 
+  const fetchPropertiesAndUnits = async () => {
+    const [{ data: propsData }, { data: unitsData }] = await Promise.all([
+      supabase.from('properties').select('*').eq('active', true).order('name'),
+      supabase.from('property_units').select('*').eq('active', true).order('unit_name')
+    ]);
+    if (propsData) setProperties(propsData);
+    if (unitsData) setPropertyUnits(unitsData);
+  };
+
   useEffect(() => {
     fetchTemplates();
+    fetchPropertiesAndUnits();
   }, []);
+
+  const handlePropertySelection = (selectedPropName) => {
+    if (typeof setPropertyName === 'function') setPropertyName(selectedPropName);
+    const matchingUnits = propertyUnits.filter(u => u.property_name === selectedPropName);
+    if (matchingUnits.length === 1 && typeof setUnitName === 'function') {
+      setUnitName(matchingUnits[0].unit_name);
+    } else if (typeof setUnitName === 'function') {
+      setUnitName('');
+    }
+  };
 
   const handleApplyTemplate = async (templateId) => {
     try {
@@ -67,7 +98,6 @@ export default function TaskBuilder({
       if (tmpl.notify_on_deadline_change !== undefined && typeof setNotifyOnDeadlineChange === 'function') setNotifyOnDeadlineChange(Boolean(tmpl.notify_on_deadline_change));
       if (tmpl.notify_on_task_created !== undefined && typeof setNotifyOnTaskCreated === 'function') setNotifyOnTaskCreated(Boolean(tmpl.notify_on_task_created));
 
-      // Synchronize active days safely through toggleDay without throwing ReferenceError
       if (Array.isArray(tmpl.active_days) && typeof toggleDay === 'function') {
         const targetDays = tmpl.active_days;
         const currentActive = Array.isArray(activeDays) ? activeDays : [];
@@ -80,7 +110,6 @@ export default function TaskBuilder({
         });
       }
 
-      // Parse checklist directly from Supabase JSON
       let parsedChecklist = [];
       if (tmpl.checklist !== undefined && tmpl.checklist !== null) {
         let raw = tmpl.checklist;
@@ -105,12 +134,10 @@ export default function TaskBuilder({
         }
       }
 
-      // Open the checklist container
       if (typeof setRequireChecklist === 'function') {
         setRequireChecklist(parsedChecklist.length > 0 || Boolean(tmpl.require_checklist));
       }
 
-      // Apply the checklist items
       if (typeof setChecklist === 'function') {
         setChecklist(parsedChecklist);
       }
@@ -139,7 +166,7 @@ export default function TaskBuilder({
       }));
 
     const newTemplate = {
-      id: Date.now().toString(),
+      id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       name: templateName.trim(),
       title: taskTitle,
       description: taskDesc,
@@ -188,6 +215,15 @@ export default function TaskBuilder({
       setTemplates(prev => prev.filter(t => String(t.id) !== String(templateId)));
       setSelectedTemplateId('');
     }
+  };
+
+  const filteredUnitsForSelectedProp = propertyUnits.filter(u => u.property_name === propertyName);
+
+  const handleValidateAndDeploy = () => {
+    if (requireAiQc && (!propertyName || !unitName)) {
+      return alert('Please select both a Property and a Unit/Room for AI Photo QC verification.');
+    }
+    handleDeployTask();
   };
 
   return (
@@ -444,6 +480,61 @@ export default function TaskBuilder({
               <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                 <input type="checkbox" checked={requiresPhoto} onChange={(e) => setRequiresPhoto(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require proof of work upload (Mandatory to complete)
               </label>
+
+              {/* PROGRESSIVE AI PHOTO QC TOGGLE */}
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(requireAiQc)}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    if (typeof setRequireAiQc === 'function') setRequireAiQc(checked);
+                    if (checked && typeof setRequiresPhoto === 'function') setRequiresPhoto(true);
+                  }}
+                  className="accent-blue-600 w-4 h-4"
+                />
+                <span>🤖 Require AI Photo QC (Verify against room standards)</span>
+              </label>
+
+              {requireAiQc && (
+                <div className="bg-blue-50/70 p-3 rounded border border-blue-200 flex flex-col gap-2 text-xs ml-6">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-blue-900">
+                    Target Property & Room Blueprints
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-600 mb-0.5">Property</label>
+                      <select
+                        value={propertyName || ''}
+                        onChange={(e) => handlePropertySelection(e.target.value)}
+                        className="w-full p-1.5 border border-blue-300 rounded bg-white font-bold"
+                      >
+                        <option value="">Select Property...</option>
+                        {properties.map(p => (
+                          <option key={p.id} value={p.name}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-600 mb-0.5">Unit / Room</label>
+                      <select
+                        value={unitName || ''}
+                        disabled={!propertyName}
+                        onChange={(e) => typeof setUnitName === 'function' && setUnitName(e.target.value)}
+                        className="w-full p-1.5 border border-blue-300 rounded bg-white font-bold disabled:opacity-50"
+                      >
+                        <option value="">Select Unit...</option>
+                        {filteredUnitsForSelectedProp.map(u => (
+                          <option key={u.id} value={u.unit_name}>
+                            {u.unit_name}{formatUnitTags(u)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                 <input type="checkbox" checked={requiresComment} onChange={(e) => setRequiresComment(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require execution notes/comment to complete
               </label>
@@ -482,7 +573,7 @@ export default function TaskBuilder({
         >
           💾 Save as Template
         </button>
-        <button onClick={handleDeployTask} className="bg-[#333333] text-white px-8 py-3 rounded font-bold shadow-sm hover:bg-black transition">Deploy Task</button>
+        <button onClick={handleValidateAndDeploy} className="bg-[#333333] text-white px-8 py-3 rounded font-bold shadow-sm hover:bg-black transition">Deploy Task</button>
       </div>
     </div>
   );

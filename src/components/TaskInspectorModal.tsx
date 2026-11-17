@@ -1,13 +1,259 @@
+// src/components/TaskInspectorModal.tsx
 // @ts-nocheck
-import React from 'react';
-import { formatDateKey, formatTimeLabel, mapToDb, daysOfWeek } from '../utils';
+import React, { useState, useEffect } from 'react';
+import { formatDateKey, formatTimeLabel, mapToDb, daysOfWeek, compressImage } from '../utils';
 import { supabase } from '../supabaseClient';
 
 export default function TaskInspectorModal({
   selectedTask, setSelectedTask, selectedInstanceDate, isCurrentInstanceCompleted, userRole, currentUserName, teamMembers, masterCompanyList, isEditing, setIsEditing, taskTitle, setTaskTitle, taskDesc, setTaskDesc, taskCompany, setTaskCompany, taskPriority, setTaskPriority, taskDate, setTaskDate, hasSpecificTime, setHasSpecificTime, startTime, setStartTime, endTime, setEndTime, isLongTerm, setIsLongTerm, selectedAssignees, handleAddAssignee, handleRemoveAssignee, recurrenceType, setRecurrenceType, activeDays, toggleDay, cadenceDays, setCadenceDays, chainedSteps, handleAddChainedStep, handleUpdateChainedStep, handleRemoveChainedStep, requiresPhoto, setRequiresPhoto, requiresComment, setRequiresComment, allowAssigneeDeadlineChange, setAllowAssigneeDeadlineChange, notifyOnComplete, setNotifyOnComplete, notifyOnComment, setNotifyOnComment, notifyOnDeadlineChange, setNotifyOnDeadlineChange, notifyOnTaskCreated, setNotifyOnTaskCreated, openCommentInput, setExecutionComment, handlePostOpenComment, isDraggingFile, setIsDraggingFile, handleFileUpload, additionalNote, setAdditionalNote, handleAppendNote, handleSaveChanges, handleDeleteTask, handleReopenTask, handleInitiateCompletion, handleOpenModal, isTaskPastDue, getCurrentTimestamp, tasks, setTasks, dispatchNotification, renderComment,
-  requireChecklist, setRequireChecklist, checklist, handleAddChecklistItem, handleUpdateChecklistItem, handleRemoveChecklistItem, handleToggleChecklistItem, checklistException, setChecklistException
+  requireChecklist, setRequireChecklist, checklist, handleAddChecklistItem, handleUpdateChecklistItem, handleRemoveChecklistItem, handleToggleChecklistItem, checklistException, setChecklistException,
+  propertyName, setPropertyName, unitName, setUnitName, requireAiQc, setRequireAiQc
 }) {
+  const [checkingRuleId, setCheckingRuleId] = useState(null);
+  const [draggingRuleId, setDraggingRuleId] = useState(null);
+  const [ruleBypassNotes, setRuleBypassNotes] = useState({});
+  const [unitQcRules, setUnitQcRules] = useState([]);
+  const [properties, setProperties] = useState([]);
+  const [propertyUnits, setPropertyUnits] = useState([]);
+
+  useEffect(() => {
+    if (!selectedTask) return;
+    setCheckingRuleId(null);
+    setDraggingRuleId(null);
+    setRuleBypassNotes({});
+
+    if (selectedTask.requireAiQc && selectedTask.propertyName && selectedTask.unitName) {
+      loadUnitRules(selectedTask.propertyName, selectedTask.unitName);
+    } else {
+      setUnitQcRules([]);
+    }
+  }, [selectedTask?.id, selectedInstanceDate]);
+
+  useEffect(() => {
+    if (isEditing) {
+      Promise.all([
+        supabase.from('properties').select('*').eq('active', true).order('name'),
+        supabase.from('property_units').select('*').eq('active', true).order('unit_name')
+      ]).then(([{ data: p }, { data: u }]) => {
+        if (p) setProperties(p);
+        if (u) setPropertyUnits(u);
+      });
+    }
+  }, [isEditing]);
+
+  const loadUnitRules = async (propName, uName) => {
+    const { data: unitData } = await supabase
+      .from('property_units')
+      .select('*')
+      .eq('property_name', propName)
+      .eq('unit_name', uName)
+      .single();
+
+    if (!unitData) return;
+
+    const unitBlueprints = Array.isArray(unitData.blueprints) && unitData.blueprints.length > 0
+      ? unitData.blueprints
+      : (unitData.blueprint ? [unitData.blueprint] : []);
+
+    if (unitBlueprints.length === 0) {
+      setUnitQcRules([]);
+      return;
+    }
+
+    const { data: rules } = await supabase
+      .from('ai_qc_rules')
+      .select('*')
+      .in('blueprint', unitBlueprints)
+      .order('area_name')
+      .eq('active', true);
+
+    if (rules) setUnitQcRules(rules);
+  };
+
   if (!selectedTask) return null;
+
+  const qcResultsMap = selectedTask.aiQcResults || {};
+
+  // Upload and evaluate a photo specifically for ONE AI QC rule slot
+  const handleRulePhotoUpload = async (rule, rawFile) => {
+    if (!rawFile || !rawFile.type.startsWith('image/')) {
+      return alert('Please capture or upload an image file for this QC check.');
+    }
+
+    setCheckingRuleId(rule.id);
+
+    try {
+      // Compress photo before uploading to Supabase Storage
+      const compressedFile = await compressImage(rawFile, 1280, 1280, 0.75);
+      const fileExt = compressedFile.name?.split('.').pop() || 'jpg';
+      const fileName = `${selectedTask.id}-${rule.id.slice(0, 6)}-${Date.now()}.${fileExt}`;
+
+      const { error: uploadErr } = await supabase.storage
+        .from('task-proofs')
+        .upload(fileName, compressedFile);
+
+      if (uploadErr) {
+        alert(`Upload failed: ${uploadErr.message}`);
+        setCheckingRuleId(null);
+        return;
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('task-proofs')
+        .getPublicUrl(fileName);
+
+      // Call AI Vision QC Endpoint scoped strictly to this single rule
+      let qcRes;
+      try {
+        qcRes = await fetch('/api/ai-qc-check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            submittedImageUrl: publicUrl,
+            propertyName: selectedTask.propertyName,
+            unitName: selectedTask.unitName,
+            selectedRuleIds: [rule.id]
+          })
+        });
+        if (!qcRes.ok && qcRes.status === 404) throw new Error('Dev 404');
+      } catch {
+        qcRes = await fetch('https://tasky-app-gilt.vercel.app/api/ai-qc-check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            submittedImageUrl: publicUrl,
+            propertyName: selectedTask.propertyName,
+            unitName: selectedTask.unitName,
+            selectedRuleIds: [rule.id]
+          })
+        });
+      }
+
+      const qcData = await qcRes.json();
+      if (!qcRes.ok && qcData.error) {
+        throw new Error(qcData.error);
+      }
+
+      const prevRuleState = qcResultsMap[rule.id] || { failCount: 0 };
+      const passed = Boolean(qcData.passed);
+      const feedback = qcData.feedback || (passed ? 'Meets room standards.' : 'Does not match standards.');
+      const nextFailCount = passed ? prevRuleState.failCount : (prevRuleState.failCount || 0) + 1;
+
+      const updatedRuleEntry = {
+        status: passed ? 'passed' : 'failed',
+        failCount: nextFailCount,
+        feedback,
+        imageUrl: publicUrl,
+        updatedAt: new Date().toISOString()
+      };
+
+      const nextResultsMap = {
+        ...qcResultsMap,
+        [rule.id]: updatedRuleEntry
+      };
+
+      // Compute overall task AI QC status across all rules for this unit
+      const allCleared = unitQcRules.every(r => {
+        const st = nextResultsMap[r.id]?.status;
+        return st === 'passed' || st === 'bypassed';
+      });
+      const anyBypassed = unitQcRules.some(r => nextResultsMap[r.id]?.status === 'bypassed');
+      const overallStatus = allCleared ? (anyBypassed ? 'bypassed' : 'passed') : 'failed';
+
+      const statusBadge = passed
+        ? `✅ AI QC Passed [${rule.area_name} — ${rule.rule_title}]: ${feedback}`
+        : `❌ AI QC Failed [${rule.area_name} — ${rule.rule_title}] (Attempt ${nextFailCount}): ${feedback}`;
+
+      const fileNote = `📎 QC Photo (${rule.area_name}) by ${currentUserName} [${getCurrentTimestamp()}]:\n${publicUrl}\n${statusBadge}`;
+      const updatedComments = [...(selectedTask.comments || []), fileNote];
+
+      const updatedTask = {
+        ...selectedTask,
+        comments: updatedComments,
+        aiQcStatus: overallStatus,
+        aiQcResults: nextResultsMap
+      };
+
+      setSelectedTask(updatedTask);
+      setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t));
+
+      await supabase.from('tasks').update({
+        ...mapToDb(updatedTask),
+        ai_qc_status: overallStatus,
+        ai_qc_results: nextResultsMap
+      }).eq('id', selectedTask.id);
+    } catch (err) {
+      alert(`AI QC check error: ${err.message}`);
+    } finally {
+      setCheckingRuleId(null);
+    }
+  };
+
+  // Bypass a specific rule after 2+ failed attempts and alert Admin for manual review
+  const handleBypassSingleRule = async (rule) => {
+    const prevRuleState = qcResultsMap[rule.id] || { failCount: 2 };
+    const reason = (ruleBypassNotes[rule.id] || '').trim();
+
+    const nextResultsMap = {
+      ...qcResultsMap,
+      [rule.id]: {
+        ...prevRuleState,
+        status: 'bypassed',
+        bypassReason: reason
+      }
+    };
+
+    const allCleared = unitQcRules.every(r => {
+      const st = nextResultsMap[r.id]?.status;
+      return st === 'passed' || st === 'bypassed';
+    });
+    const overallStatus = allCleared ? 'bypassed' : 'pending';
+
+    const bypassNote = `⚠️ AI QC Bypassed [${rule.area_name} — ${rule.rule_title}] by ${currentUserName} after ${prevRuleState.failCount} failed attempts [${getCurrentTimestamp()}]${reason ? `\nReason: ${reason}` : ''}`;
+    const updatedComments = [...(selectedTask.comments || []), bypassNote];
+
+    const updatedTask = {
+      ...selectedTask,
+      comments: updatedComments,
+      aiQcStatus: overallStatus,
+      aiQcResults: nextResultsMap
+    };
+
+    setSelectedTask(updatedTask);
+    setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t));
+
+    await supabase.from('tasks').update({
+      ...mapToDb(updatedTask),
+      ai_qc_status: overallStatus,
+      ai_qc_results: nextResultsMap
+    }).eq('id', selectedTask.id);
+
+    await dispatchNotification(
+      'role',
+      'admin',
+      'qc_bypass',
+      `⚠️ AI QC Bypassed: "${rule.area_name} — ${rule.rule_title}" on "${selectedTask.title}" (${selectedTask.propertyName} - ${selectedTask.unitName}) bypassed by ${currentUserName}.`,
+      '⚠️ AI QC Manual Review Needed',
+      `${currentUserName} bypassed AI check on "${rule.area_name}" for "${selectedTask.title}". Tap to inspect.`,
+      selectedTask.id,
+      selectedInstanceDate
+    );
+  };
+
+  const handleCompleteWithAiCheck = () => {
+    if (selectedTask.requireAiQc && unitQcRules.length > 0) {
+      const unverifiedRules = unitQcRules.filter(r => {
+        const st = qcResultsMap[r.id]?.status;
+        return st !== 'passed' && st !== 'bypassed';
+      });
+      if (unverifiedRules.length > 0) {
+        return alert(`🤖 Please complete all AI Photo QC checks first (${unverifiedRules.length} remaining: ${unverifiedRules.map(r => r.area_name).join(', ')}).`);
+      }
+    }
+    handleInitiateCompletion();
+  };
+
+  const completedRuleCount = unitQcRules.filter(r => ['passed', 'bypassed'].includes(qcResultsMap[r.id]?.status)).length;
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50" onMouseDown={() => setSelectedTask(null)}>
@@ -17,9 +263,14 @@ export default function TaskInspectorModal({
             <span className="text-xs font-bold text-[#A9B1A6] uppercase tracking-wider">
               {isCurrentInstanceCompleted ? 'Completed Occurrence Review' : (userRole === 'admin' ? (isEditing ? 'Admin Full Task Editor' : 'Admin Inspector Mode') : 'Employee Execution View')}
             </span>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-2xl font-serif font-bold">{selectedTask.title}</h2>
               <span className="text-[10px] bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded font-bold">{selectedTask.company}</span>
+              {selectedTask.propertyName && (
+                <span className="text-[10px] bg-blue-100 text-blue-900 px-2 py-0.5 rounded font-bold">
+                  🏨 {selectedTask.propertyName}{selectedTask.unitName ? ` — ${selectedTask.unitName}` : ''}
+                </span>
+              )}
               {isTaskPastDue(selectedTask) && <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded">OVERDUE</span>}
             </div>
           </div>
@@ -40,7 +291,9 @@ export default function TaskInspectorModal({
               </div>
             )}
 
-            <p className="text-sm text-gray-600 bg-white p-3 rounded border border-gray-200">{selectedTask.desc}</p>
+            {selectedTask.desc && (
+              <p className="text-sm text-gray-600 bg-white p-3 rounded border border-gray-200">{selectedTask.desc}</p>
+            )}
 
             <div className="flex justify-between text-xs text-gray-500 bg-gray-100 p-2 rounded">
               <span>Assigned to: <strong>{selectedTask.assignees && selectedTask.assignees.length > 0 ? selectedTask.assignees.join(', ') : 'Unassigned (Backlog)'}</strong></span>
@@ -115,7 +368,183 @@ export default function TaskInspectorModal({
               </div>
             )}
 
-            {/* INTERACTIVE CHECKLIST VIEW */}
+            {/* PER-ITEM AI PHOTO QC CHECKLIST */}
+            {selectedTask.requireAiQc && (
+              <div className="bg-white p-3.5 rounded-lg border border-blue-300 flex flex-col gap-2.5 shadow-2xs">
+                <div className="flex justify-between items-center border-b border-gray-100 pb-2">
+                  <div>
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-blue-950 flex items-center gap-1.5">
+                      <span>🤖 Required AI Photo QC Checklist</span>
+                    </h4>
+                    <span className="text-[11px] text-gray-500">
+                      Tap or drop a photo on each item below for instant AI verification ({selectedTask.propertyName} — {selectedTask.unitName})
+                    </span>
+                  </div>
+                  <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                    unitQcRules.length > 0 && completedRuleCount === unitQcRules.length
+                      ? 'bg-emerald-100 text-emerald-900'
+                      : 'bg-blue-100 text-blue-900'
+                  }`}>
+                    {completedRuleCount} / {unitQcRules.length} Verified
+                  </span>
+                </div>
+
+                {unitQcRules.length === 0 ? (
+                  <p className="text-xs text-gray-500 italic">No AI QC rules configured for this unit's blueprints yet.</p>
+                ) : (
+                  <div className="flex flex-col gap-2.5">
+                    {unitQcRules.map((rule) => {
+                      const rState = qcResultsMap[rule.id] || {};
+                      const isPassed = rState.status === 'passed';
+                      const isBypassed = rState.status === 'bypassed';
+                      const isFailed = rState.status === 'failed';
+                      const isCheckingThis = checkingRuleId === rule.id;
+                      const isDraggingThis = draggingRuleId === rule.id;
+                      const failCount = rState.failCount || 0;
+
+                      return (
+                        <div
+                          key={rule.id}
+                          onDragOver={(e) => {
+                            if (!isCurrentInstanceCompleted) {
+                              e.preventDefault();
+                              setDraggingRuleId(rule.id);
+                            }
+                          }}
+                          onDragLeave={() => setDraggingRuleId(null)}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            setDraggingRuleId(null);
+                            if (!isCurrentInstanceCompleted && e.dataTransfer.files?.[0]) {
+                              handleRulePhotoUpload(rule, e.dataTransfer.files[0]);
+                            }
+                          }}
+                          className={`p-3 rounded-lg border transition flex flex-col gap-2 ${
+                            isDraggingThis
+                              ? 'border-blue-600 bg-blue-100/70'
+                              : isPassed
+                              ? 'bg-emerald-50/70 border-emerald-300'
+                              : isBypassed
+                              ? 'bg-amber-50/80 border-amber-300'
+                              : isFailed
+                              ? 'bg-red-50/60 border-red-300'
+                              : 'bg-gray-50 border-gray-200 hover:bg-gray-100/70'
+                          }`}
+                        >
+                          <div className="flex justify-between items-center gap-3">
+                            <div className="flex items-start gap-2.5 min-w-0">
+                              <span className="mt-0.5 text-base shrink-0">
+                                {isCheckingThis ? '⏳' : isPassed ? '✅' : isBypassed ? '⚠️' : isFailed ? '❌' : '⬜'}
+                              </span>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-white border border-gray-200 text-gray-700">
+                                    {rule.area_name}
+                                  </span>
+                                  <span className={`text-sm font-bold ${isPassed ? 'text-emerald-900' : 'text-gray-900'}`}>
+                                    {rule.rule_title}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-gray-600 mt-0.5">{rule.rule_description}</p>
+                              </div>
+                            </div>
+
+                            {!isCurrentInstanceCompleted && (
+                              <label className={`shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg cursor-pointer transition shadow-2xs flex items-center gap-1.5 ${
+                                isCheckingThis
+                                  ? 'bg-blue-200 text-blue-900 animate-pulse cursor-wait'
+                                  : isPassed
+                                  ? 'bg-white text-emerald-800 border border-emerald-300 hover:bg-emerald-100'
+                                  : 'bg-[#333333] text-white hover:bg-black'
+                              }`}>
+                                <span>📷</span>
+                                <span>
+                                  {isCheckingThis
+                                    ? 'Checking...'
+                                    : isPassed || isFailed
+                                    ? 'Retake Photo'
+                                    : 'Take / Upload Photo'}
+                                </span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  disabled={Boolean(checkingRuleId)}
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    if (e.target.files?.[0]) {
+                                      handleRulePhotoUpload(rule, e.target.files[0]);
+                                      e.target.value = '';
+                                    }
+                                  }}
+                                />
+                              </label>
+                            )}
+                          </div>
+
+                          {/* SUBMITTED PHOTO THUMBNAIL + AI FEEDBACK */}
+                          {(rState.imageUrl || rState.feedback) && (
+                            <div className={`flex items-start gap-2.5 p-2 rounded border text-xs ${
+                              isPassed
+                                ? 'bg-white border-emerald-200 text-emerald-950'
+                                : isBypassed
+                                ? 'bg-white border-amber-300 text-amber-950'
+                                : 'bg-white border-red-200 text-red-950'
+                            }`}>
+                              {rState.imageUrl && (
+                                <a href={rState.imageUrl} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                                  <img
+                                    src={rState.imageUrl}
+                                    alt={rule.rule_title}
+                                    className="w-12 h-12 rounded object-cover border border-gray-300"
+                                  />
+                                </a>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <span className="font-bold block">
+                                  {isPassed
+                                    ? '✓ Passed AI Verification'
+                                    : isBypassed
+                                    ? '⚠️ Bypassed — Sent to Admin for Manual Review'
+                                    : `✕ Attempt ${failCount} Failed — Adjustments Needed`}
+                                </span>
+                                <p className="text-[11px] text-gray-700 mt-0.5">{rState.feedback}</p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 2-FAIL BYPASS ESCALATION PER ITEM */}
+                          {!isCurrentInstanceCompleted && failCount >= 2 && !isPassed && !isBypassed && (
+                            <div className="bg-amber-100/80 border border-amber-400 p-2 rounded flex flex-col gap-1.5 text-xs">
+                              <span className="font-bold text-amber-950">
+                                ⚠️ AI rejected this item {failCount} times. Everything actually set up properly?
+                              </span>
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  value={ruleBypassNotes[rule.id] || ''}
+                                  onChange={(e) => setRuleBypassNotes(prev => ({ ...prev, [rule.id]: e.target.value }))}
+                                  placeholder="Optional note for Admin..."
+                                  className="flex-1 p-1.5 text-xs border border-amber-300 rounded bg-white"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleBypassSingleRule(rule)}
+                                  className="bg-amber-800 hover:bg-amber-900 text-white px-3 py-1.5 rounded text-xs font-bold shrink-0"
+                                >
+                                  ⚠️ Override & Flag Admin
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* INTERACTIVE MANUAL CHECKLIST VIEW */}
             {selectedTask.requireChecklist && selectedTask.checklist?.length > 0 && (
               <div className="bg-white p-3 rounded border border-gray-200 mb-1 mt-1">
                 <h4 className="font-bold text-xs uppercase tracking-wider text-gray-500 mb-2">Required Checklist</h4>
@@ -137,7 +566,6 @@ export default function TaskInspectorModal({
                   })}
                 </div>
                 
-                {/* DYNAMIC EXCEPTION REASON RENDER */}
                 {!isCurrentInstanceCompleted && selectedTask.checklist.some(i => !(i.completedDates || []).includes(selectedInstanceDate)) && (
                    <div className="mt-3 bg-red-50 p-2.5 rounded border border-red-200">
                      <label className="text-[10px] font-bold text-red-800 uppercase flex items-center gap-1"><span className="text-sm">⚠️</span> Reason for incomplete items (Required if completing task)</label>
@@ -205,7 +633,7 @@ export default function TaskInspectorModal({
               )}
             </div>
 
-            {/* UNIVERSAL ATTACHMENTS & Proof OF WORK */}
+            {/* UNIVERSAL ATTACHMENTS & GENERAL PROOF OF WORK */}
             {!isCurrentInstanceCompleted && (
               <div 
                 className={`bg-white p-3 rounded border border-dashed transition flex justify-between items-center my-1 relative ${isDraggingFile ? 'border-blue-500 bg-blue-50' : 'border-amber-300'}`}
@@ -227,10 +655,10 @@ export default function TaskInspectorModal({
                 
                 <div className="flex flex-col">
                   <span className="text-xs font-semibold text-amber-800 flex items-center gap-1">
-                    📎 Attachments & Proof of Work
-                    {selectedTask.requiresPhoto && <span className="text-red-600 font-bold ml-1">(Required)</span>}
+                    📎 General Attachments & Files
+                    {selectedTask.requiresPhoto && !selectedTask.requireAiQc && <span className="text-red-600 font-bold ml-1">(Required)</span>}
                   </span>
-                  <span className="text-[10px] text-gray-500">Upload or drag and drop images, PDFs, spreadsheets, etc.</span>
+                  <span className="text-[10px] text-gray-500">Upload or drag and drop additional images, PDFs, spreadsheets, etc.</span>
                 </div>
                 
                 <label className="text-xs font-bold px-3 py-1 rounded bg-amber-100 text-amber-800 hover:bg-amber-200 cursor-pointer transition z-20">
@@ -384,7 +812,7 @@ export default function TaskInspectorModal({
               )}
             </div>
 
-            {/* EDIT MODE CHECKLIST */}
+            {/* EDIT MODE CHECKLIST & AI QC */}
             <div className="bg-white p-3 rounded border border-gray-200 flex flex-col gap-1.5 mt-1">
               <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer border-b pb-2 mb-1 border-gray-100 font-bold">
                 <input type="checkbox" checked={requireChecklist} onChange={(e) => setRequireChecklist(e.target.checked)} className="accent-[#A9B1A6] w-4 h-4" /> Require Checklist Completion (Mandatory items)
@@ -407,6 +835,50 @@ export default function TaskInspectorModal({
               <label className="flex items-center gap-1.5 font-bold cursor-pointer">
                 <input type="checkbox" checked={requiresPhoto} onChange={(e) => setRequiresPhoto(e.target.checked)} className="accent-[#A9B1A6]" /> Require proof of work upload (Mandatory to complete)
               </label>
+
+              <label className="flex items-center gap-1.5 font-bold cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(requireAiQc)}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    if (typeof setRequireAiQc === 'function') setRequireAiQc(checked);
+                    if (checked && typeof setRequiresPhoto === 'function') setRequiresPhoto(true);
+                  }}
+                  className="accent-blue-600"
+                />
+                <span>🤖 Require AI Photo QC</span>
+              </label>
+
+              {requireAiQc && (
+                <div className="grid grid-cols-2 gap-2 bg-blue-50 p-2 rounded border border-blue-200 ml-4">
+                  <select
+                    value={propertyName || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (typeof setPropertyName === 'function') setPropertyName(val);
+                      const matches = propertyUnits.filter(u => u.property_name === val);
+                      if (matches.length === 1 && typeof setUnitName === 'function') setUnitName(matches[0].unit_name);
+                      else if (typeof setUnitName === 'function') setUnitName('');
+                    }}
+                    className="p-1 border rounded bg-white font-bold"
+                  >
+                    <option value="">Select Property...</option>
+                    {properties.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                  </select>
+                  <select
+                    value={unitName || ''}
+                    onChange={(e) => typeof setUnitName === 'function' && setUnitName(e.target.value)}
+                    className="p-1 border rounded bg-white font-bold"
+                  >
+                    <option value="">Select Unit...</option>
+                    {propertyUnits.filter(u => u.property_name === propertyName).map(u => (
+                      <option key={u.id} value={u.unit_name}>{u.unit_name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <label className="flex items-center gap-1.5 font-bold cursor-pointer">
                 <input type="checkbox" checked={requiresComment} onChange={(e) => setRequiresComment(e.target.checked)} className="accent-[#A9B1A6]" /> Require Comment
               </label>
@@ -430,7 +902,6 @@ export default function TaskInspectorModal({
                 <input type="checkbox" checked={notifyOnTaskCreated} onChange={(e) => setNotifyOnTaskCreated(e.target.checked)} className="accent-[#A9B1A6]" /> Notify me when new task has been added
               </label>
             </div>
-
           </div>
         )}
 
@@ -457,7 +928,11 @@ export default function TaskInspectorModal({
               </button>
             ) : (
               !isCurrentInstanceCompleted && (
-                <button onClick={handleInitiateCompletion} className="bg-[#A9B1A6] text-white px-5 py-2 rounded text-xs font-bold shadow-sm hover:bg-gray-600 transition">
+                <button
+                  disabled={Boolean(checkingRuleId)}
+                  onClick={handleCompleteWithAiCheck}
+                  className="bg-[#A9B1A6] text-white px-5 py-2 rounded text-xs font-bold shadow-sm hover:bg-gray-600 transition disabled:opacity-40"
+                >
                   Mark Occurrence Complete
                 </button>
               )

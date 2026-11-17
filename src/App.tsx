@@ -293,11 +293,7 @@ export default function App() {
       if (!targetTask) {
         const { data } = await supabase.from('tasks').select('*').eq('id', notif.taskId).single();
         if (data) {
-          targetTask = {
-            ...mapFromDb(data),
-            requireChecklist: data.require_checklist || false,
-            checklist: typeof data.checklist === 'string' ? JSON.parse(data.checklist) : (data.checklist || [])
-          };
+          targetTask = mapRawTask(data);
           setTasks(prev => [targetTask, ...prev]);
         }
       }
@@ -352,6 +348,11 @@ export default function App() {
   const [requireChecklist, setRequireChecklist] = useState(false);
   const [checklist, setChecklist] = useState([]);
   const [checklistException, setChecklistException] = useState('');
+
+  // Property, Unit & AI QC States
+  const [propertyName, setPropertyName] = useState('');
+  const [unitName, setUnitName] = useState('');
+  const [requireAiQc, setRequireAiQc] = useState(false);
 
   const [notifyOnComplete, setNotifyOnComplete] = useState(true); 
   const [notifyOnComment, setNotifyOnComment] = useState(true);   
@@ -499,7 +500,12 @@ export default function App() {
     return {
       ...mappedItem,
       requireChecklist: d.require_checklist || false,
-      checklist: typeof d.checklist === 'string' ? JSON.parse(d.checklist) : (d.checklist || [])
+      checklist: typeof d.checklist === 'string' ? JSON.parse(d.checklist) : (d.checklist || []),
+      propertyName: d.property_name || '',
+      unitName: d.unit_name || '',
+      requireAiQc: Boolean(d.require_ai_qc),
+      aiQcStatus: d.ai_qc_status || 'none',
+      aiQcResults: typeof d.ai_qc_results === 'string' ? JSON.parse(d.ai_qc_results) : (d.ai_qc_results || {})
     };
   };
 
@@ -556,10 +562,10 @@ export default function App() {
         setTasks(mapped);
 
         const missingCompanies = [...new Set(mapped.map(t => t.company).filter(c => c && !companies.includes(c)))];
-        if (missingCompanies.length > 0) {
-          setCompanies(prev => [...new Set([...prev, ...missingCompanies])]);
-          setActiveCompanyFilters(prev => [...new Set([...prev, ...missingCompanies])]);
-        }
+if (missingCompanies.length > 0) {
+  setCompanies(prev => [...new Set([...prev, ...missingCompanies])]);
+  setActiveCompanyFilters(prev => [...new Set([...prev, ...missingCompanies])]);
+}
       }
       setIsDbLoading(false);
     };
@@ -599,7 +605,7 @@ export default function App() {
     }
   }, [session, currentView, searchQuery, currentDate, hasLoadedFullHistory]);
   
-  const masterCompanyList = [...new Set([...companies, ...tasks.map(t => t.company).filter(Boolean)])];
+  const masterCompanyList = [...new Set(companies)];
 
   const getCurrentTimestamp = () => {
     const now = new Date();
@@ -1014,7 +1020,11 @@ export default function App() {
       const dbData = {
         ...mapToDb(job.payload),
         require_checklist: job.payload.requireChecklist,
-        checklist: job.payload.checklist
+        checklist: job.payload.checklist,
+        property_name: job.payload.propertyName || '',
+        unit_name: job.payload.unitName || '',
+        require_ai_qc: Boolean(job.payload.requireAiQc),
+        ai_qc_status: job.payload.aiQcStatus || 'none'
       };
       if (job.action === 'update') await supabase.from('tasks').update(dbData).eq('id', job.payload.id);
       if (job.action === 'insert') await supabase.from('tasks').insert(dbData);
@@ -1134,15 +1144,25 @@ export default function App() {
     }
 
     const tasksUsingCompany = tasks.filter(t => t.company === nameToDelete);
+    let deleteTasksToo = false;
+
     if (tasksUsingCompany.length > 0) {
-      const confirmDelete = window.confirm(`There are ${tasksUsingCompany.length} tasks associated with ${nameToDelete}. Deleting this company will leave those tasks without a valid company tag. Are you sure you want to proceed?`);
+      const confirmDelete = window.confirm(
+        `There are ${tasksUsingCompany.length} task(s) associated with "${nameToDelete}".\n\nClick OK to remove "${nameToDelete}" AND delete those ${tasksUsingCompany.length} demo/leftover tasks.\nClick Cancel to keep the company.`
+      );
       if (!confirmDelete) return;
+      deleteTasksToo = true;
     }
 
     setCompanies(prev => prev.filter(c => c !== nameToDelete));
     setCompaniesData(prev => prev.filter(c => c.name !== nameToDelete));
     setActiveCompanyFilters(prev => prev.filter(c => c !== nameToDelete));
-    
+
+    if (deleteTasksToo) {
+      setTasks(prev => prev.filter(t => t.company !== nameToDelete));
+      await supabase.from('tasks').delete().eq('company', nameToDelete);
+    }
+
     const { error } = await supabase.from('companies').delete().eq('name', nameToDelete);
     if (error) alert(`Database Error: ${error.message}`);
   };
@@ -1195,6 +1215,10 @@ export default function App() {
     setRequireChecklist(false);
     setChecklist([]);
     setChecklistException('');
+
+    setPropertyName('');
+    setUnitName('');
+    setRequireAiQc(false);
   };
 
   const handleAddChecklistItem = () => {
@@ -1324,6 +1348,11 @@ export default function App() {
       notifyOnDeadlineChange,
       notifyOnTaskCreated,
       isLongTerm,
+      propertyName: requireAiQc ? propertyName : '',
+      unitName: requireAiQc ? unitName : '',
+      requireAiQc,
+      aiQcStatus: requireAiQc ? 'pending' : 'none',
+      aiQcResults: {},
       comments: [`📌 Task Generated by ${currentUserName} [${getCurrentTimestamp()}]`] 
     };
 
@@ -1347,7 +1376,11 @@ export default function App() {
     const dbPayload = {
       ...mapToDb(newTask),
       require_checklist: newTask.requireChecklist,
-      checklist: newTask.checklist
+      checklist: newTask.checklist,
+      property_name: newTask.propertyName,
+      unit_name: newTask.unitName,
+      require_ai_qc: newTask.requireAiQc,
+      ai_qc_status: newTask.aiQcStatus
     };
 
     const { error } = await supabase.from('tasks').insert(dbPayload);
@@ -1387,6 +1420,10 @@ export default function App() {
     setRequireChecklist(task.requireChecklist || false);
     setChecklist(task.checklist || []);
     setChecklistException('');
+
+    setPropertyName(task.propertyName || '');
+    setUnitName(task.unitName || '');
+    setRequireAiQc(Boolean(task.requireAiQc));
 
     setRequiresPhoto(task.requiresPhoto || false);
     setRequiresComment(task.requiresComment || false);
@@ -1432,6 +1469,10 @@ export default function App() {
       cadenceDays: Number(cadenceDays),
       requireChecklist,
       checklist: validChecklist,
+      propertyName: requireAiQc ? propertyName : '',
+      unitName: requireAiQc ? unitName : '',
+      requireAiQc,
+      aiQcStatus: requireAiQc ? (selectedTask.aiQcStatus && selectedTask.aiQcStatus !== 'none' ? selectedTask.aiQcStatus : 'pending') : 'none',
       requiresPhoto,
       requiresComment,
       allowAssigneeDeadlineChange,
@@ -1451,7 +1492,11 @@ export default function App() {
     const dbPayload = {
       ...mapToDb(updatedTask),
       require_checklist: updatedTask.requireChecklist,
-      checklist: updatedTask.checklist
+      checklist: updatedTask.checklist,
+      property_name: updatedTask.propertyName,
+      unit_name: updatedTask.unitName,
+      require_ai_qc: updatedTask.requireAiQc,
+      ai_qc_status: updatedTask.aiQcStatus
     };
 
     const { error } = await supabase.from('tasks').update(dbPayload).eq('id', updatedTask.id);
@@ -1722,6 +1767,10 @@ export default function App() {
         notifyOnDeadlineChange: true,
         notifyOnTaskCreated: true,
         isLongTerm: false,
+        propertyName: '',
+        unitName: '',
+        requireAiQc: false,
+        aiQcStatus: 'none',
         comments: [`📌 Sub-task deployed by ${currentUserName} upon completion of "${selectedTask.title}" [${getCurrentTimestamp()}]`]
       };
 
@@ -1753,6 +1802,7 @@ export default function App() {
         exceptionDates: [],
         status: 'pending',
         isOverdue: false,
+        aiQcStatus: selectedTask.requireAiQc ? 'pending' : 'none',
         comments: [`🔄 Interval series re-deployed ${selectedTask.cadenceDays || 14} days after completion [${getCurrentTimestamp()}]`]
       };
       updatedTasks = [nextInstanceTask, ...updatedTasks];
@@ -1799,6 +1849,10 @@ export default function App() {
         notifyOnDeadlineChange: true,
         notifyOnTaskCreated: true,
         isLongTerm: false,
+        propertyName: '',
+        unitName: '',
+        requireAiQc: false,
+        aiQcStatus: 'none',
         comments: [`⚙️ Pre-configured workflow step triggered by "${selectedTask.title}" [${getCurrentTimestamp()}]`]
       };
       updatedTasks = [chainedTask, ...updatedTasks];
@@ -1816,7 +1870,11 @@ export default function App() {
       const dbPayload = {
         ...mapToDb(p.data),
         require_checklist: p.data.requireChecklist,
-        checklist: p.data.checklist
+        checklist: p.data.checklist,
+        property_name: p.data.propertyName || '',
+        unit_name: p.data.unitName || '',
+        require_ai_qc: Boolean(p.data.requireAiQc),
+        ai_qc_status: p.data.aiQcStatus || 'none'
       };
       await supabase.from('tasks').insert(dbPayload);
     }
@@ -1906,6 +1964,7 @@ export default function App() {
     const match = commentText.match(/(https?:\/\/[^\s]+)/);
     const url = match ? match[0] : '';
     const textBeforeUrl = commentText.split(url)[0];
+    const textAfterUrl = commentText.split(url)[1] || '';
     const isImage = /\.(jpg|jpeg|png|webp|gif)($|\?)/i.test(url);
 
     return (
@@ -1929,6 +1988,17 @@ export default function App() {
               className="max-h-40 rounded border border-gray-300 object-cover hover:opacity-90 transition shadow-xs"
             />
           </a>
+        )}
+        {textAfterUrl.trim() && (
+          <div className={`p-1.5 rounded text-[11px] font-bold ${
+            textAfterUrl.includes('✅ AI QC Passed')
+              ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+              : textAfterUrl.includes('❌ AI QC Failed')
+              ? 'bg-red-100 text-red-900 border border-red-300'
+              : 'bg-gray-100 text-gray-800'
+          }`}>
+            {textAfterUrl.trim()}
+          </div>
         )}
       </div>
     );
@@ -2292,6 +2362,9 @@ export default function App() {
             requireChecklist={requireChecklist} setRequireChecklist={setRequireChecklist} 
             checklist={checklist} setChecklist={setChecklist} handleAddChecklistItem={handleAddChecklistItem} 
             handleUpdateChecklistItem={handleUpdateChecklistItem} handleRemoveChecklistItem={handleRemoveChecklistItem}
+            propertyName={propertyName} setPropertyName={setPropertyName}
+            unitName={unitName} setUnitName={setUnitName}
+            requireAiQc={requireAiQc} setRequireAiQc={setRequireAiQc}
           />
         )}
 
@@ -2322,6 +2395,9 @@ export default function App() {
           handleAddChecklistItem={handleAddChecklistItem} handleUpdateChecklistItem={handleUpdateChecklistItem} 
           handleRemoveChecklistItem={handleRemoveChecklistItem} handleToggleChecklistItem={handleToggleChecklistItem}
           checklistException={checklistException} setChecklistException={setChecklistException}
+          propertyName={propertyName} setPropertyName={setPropertyName}
+          unitName={unitName} setUnitName={setUnitName}
+          requireAiQc={requireAiQc} setRequireAiQc={setRequireAiQc}
         />
 
         <CompletionModal 
