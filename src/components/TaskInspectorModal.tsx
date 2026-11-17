@@ -18,7 +18,7 @@ export default function TaskInspectorModal({
 
   useEffect(() => {
     if (!selectedTask) return;
-    setCheckingRuleId(null);
+    setCheckingRuleIds([]);
     setDraggingRuleId(null);
     setRuleBypassNotes({});
 
