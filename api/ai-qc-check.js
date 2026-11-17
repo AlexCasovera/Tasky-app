@@ -112,7 +112,7 @@ export default async function handler(req, res) {
 
     const parts = [
       {
-        text: `You are a strict hospitality and facility quality control inspector. Inspect the SUBMITTED PHOTO for "${propertyName} - ${unitName}" (Blueprints: ${unitBlueprints.join(', ')}).\n\nEvaluate ONLY the items visible in the submitted photo against these standards:\n${rulesPrompt}\n\nNote: A single photo may only show one area (e.g., just the Meeting Area OR just the Kitchen). Only fail the photo if an area shown in the photo violates its standard.`
+        text: `You are a strict hospitality and facility quality control inspector. Inspect the SUBMITTED PHOTO for "${propertyName} - ${unitName}" (Blueprints: ${unitBlueprints.join(', ')}).\n\nEvaluate the submitted photo against these standards:\n${rulesPrompt}\n\nSTRICT INSPECTION RULES:\n1. Verify that the objects/furniture described in the standard are actually present and visible in the submitted photo.\n2. If the cleaner uploads a photo of the wrong area (e.g., uploading a meeting area photo to a kitchen bar stool check), you MUST FAIL the inspection and explain that the wrong area was shown.\n3. Only return passed: true if the correct area is shown and it meets all visual alignment and staging standards.`
       }
     ];
 
