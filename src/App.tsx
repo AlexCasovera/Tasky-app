@@ -534,14 +534,21 @@ export default function App() {
 
     const fetchCloudData = async () => {
       const cutoffStr = getFourWeeksAgoStr();
-      const query = hasLoadedFullHistory
-        ? supabase.from('tasks').select('*')
-        : supabase
+      let { data, error } = hasLoadedFullHistory
+        ? await supabase.from('tasks').select('*')
+        : await supabase
             .from('tasks')
             .select('*')
-            .or(`date.gte.${cutoffStr},date.is.null,date.eq.,status.neq.completed,recurrence_type.neq.once`);
+            .or(`date.gte.${cutoffStr},date.is.null,status.neq.completed`);
 
-      const { data, error } = await query;
+      // Safety fallback: if the filtered query ever errors, load all tasks
+      if (error) {
+        console.warn('Filtered task fetch failed, falling back to full fetch:', error.message);
+        const fallback = await supabase.from('tasks').select('*');
+        data = fallback.data;
+        error = fallback.error;
+      }
+
       if (error) {
         console.error('Error fetching tasks from cloud:', error);
       } else if (data) {
