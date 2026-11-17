@@ -137,11 +137,6 @@ export default function TaskInspectorModal({
         throw new Error(qcData.error);
       }
 
-      const qcData = await qcRes.json();
-      if (!qcRes.ok && qcData.error) {
-        throw new Error(qcData.error);
-      }
-
       const prevRuleState = qcResultsMap[rule.id] || { failCount: 0 };
       const passed = Boolean(qcData.passed);
       const feedback = qcData.feedback || (passed ? 'Meets room standards.' : 'Does not match standards.');
