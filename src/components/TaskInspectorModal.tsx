@@ -9,7 +9,7 @@ export default function TaskInspectorModal({
   requireChecklist, setRequireChecklist, checklist, handleAddChecklistItem, handleUpdateChecklistItem, handleRemoveChecklistItem, handleToggleChecklistItem, checklistException, setChecklistException,
   propertyName, setPropertyName, unitName, setUnitName, requireAiQc, setRequireAiQc
 }) {
-  const [checkingRuleId, setCheckingRuleId] = useState(null);
+  const [checkingRuleIds, setCheckingRuleIds] = useState([]);
   const [draggingRuleId, setDraggingRuleId] = useState(null);
   const [ruleBypassNotes, setRuleBypassNotes] = useState({});
   const [unitQcRules, setUnitQcRules] = useState([]);
@@ -76,40 +76,40 @@ export default function TaskInspectorModal({
 
   // Upload and evaluate a photo specifically for ONE AI QC rule slot
   const handleRulePhotoUpload = async (rule, rawFile) => {
-    if (!rawFile || !rawFile.type.startsWith('image/')) {
-      return alert('Please capture or upload an image file for this QC check.');
+  if (!rawFile || !rawFile.type.startsWith('image/')) {
+    return alert('Please capture or upload an image file for this QC check.');
+  }
+
+  setCheckingRuleIds(prev => [...new Set([...prev, rule.id])]);
+
+  try {
+    const compressedFile = await compressImage(rawFile, 1280, 1280, 0.75);
+    const fileExt = compressedFile.name?.split('.').pop() || 'jpg';
+    const fileName = `${selectedTask.id}-${rule.id.slice(0, 6)}-${Date.now()}.${fileExt}`;
+
+    const { error: uploadErr } = await supabase.storage
+      .from('task-proofs')
+      .upload(fileName, compressedFile);
+
+    if (uploadErr) {
+      alert(`Upload failed: ${uploadErr.message}`);
+      return;
     }
 
-    setCheckingRuleId(rule.id);
+    const { data: { publicUrl } } = supabase.storage
+      .from('task-proofs')
+      .getPublicUrl(fileName);
 
-    try {
-      // Compress photo before uploading to Supabase Storage
-      const compressedFile = await compressImage(rawFile, 1280, 1280, 0.75);
-      const fileExt = compressedFile.name?.split('.').pop() || 'jpg';
-      const fileName = `${selectedTask.id}-${rule.id.slice(0, 6)}-${Date.now()}.${fileExt}`;
+    const qcPayload = JSON.stringify({
+      submittedImageUrl: publicUrl,
+      propertyName: selectedTask.propertyName,
+      unitName: selectedTask.unitName,
+      selectedRuleIds: [rule.id]
+    });
 
-      const { error: uploadErr } = await supabase.storage
-        .from('task-proofs')
-        .upload(fileName, compressedFile);
-
-      if (uploadErr) {
-        alert(`Upload failed: ${uploadErr.message}`);
-        setCheckingRuleId(null);
-        return;
-      }
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('task-proofs')
-        .getPublicUrl(fileName);
-
-      // Call AI Vision QC Endpoint on the primary backend project (which holds all keys)
-      const qcPayload = JSON.stringify({
-        submittedImageUrl: publicUrl,
-        propertyName: selectedTask.propertyName,
-        unitName: selectedTask.unitName,
-        selectedRuleIds: [rule.id]
-      });
-
+    // Automatic retry loop if Google AI Studio briefly rate-limits (429/503)
+    let qcData = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
       let qcRes;
       try {
         qcRes = await fetch('https://tasky-app-gilt.vercel.app/api/ai-qc-check', {
@@ -127,39 +127,41 @@ export default function TaskInspectorModal({
       }
 
       const rawBody = await qcRes.text();
-      let qcData;
       try {
         qcData = JSON.parse(rawBody);
       } catch {
         throw new Error(`Server returned HTTP ${qcRes.status}: ${rawBody.slice(0, 140)}`);
       }
-      if (!qcRes.ok && qcData.error) {
-        throw new Error(qcData.error);
+
+      if (qcRes.ok) break;
+
+      if ((qcRes.status === 429 || qcRes.status === 503) && attempt < 2) {
+        await new Promise(r => setTimeout(r, 4000 * (attempt + 1)));
+        continue;
       }
 
-      const prevRuleState = qcResultsMap[rule.id] || { failCount: 0 };
-      const passed = Boolean(qcData.passed);
-      const feedback = qcData.feedback || (passed ? 'Meets room standards.' : 'Does not match standards.');
-      const nextFailCount = passed ? prevRuleState.failCount : (prevRuleState.failCount || 0) + 1;
+      throw new Error(qcData.error || `AI QC failed (${qcRes.status})`);
+    }
 
-      const updatedRuleEntry = {
-        status: passed ? 'passed' : 'failed',
-        failCount: nextFailCount,
-        feedback,
-        imageUrl: publicUrl,
-        updatedAt: new Date().toISOString()
-      };
+    const prevRuleState = (selectedTask.aiQcResults || {})[rule.id] || { failCount: 0 };
+    const passed = Boolean(qcData.passed);
+    const feedback = qcData.feedback || (passed ? 'Meets room standards.' : 'Does not match standards.');
+    const nextFailCount = passed ? prevRuleState.failCount : (prevRuleState.failCount || 0) + 1;
 
-      const nextResultsMap = {
-        ...qcResultsMap,
-        [rule.id]: updatedRuleEntry
-      };
+    const updatedRuleEntry = {
+      status: passed ? 'passed' : 'failed',
+      failCount: nextFailCount,
+      feedback,
+      imageUrl: publicUrl,
+      updatedAt: new Date().toISOString()
+    };
 
-      // Compute overall task AI QC status across all rules for this unit
-      const allCleared = unitQcRules.every(r => {
-        const st = nextResultsMap[r.id]?.status;
-        return st === 'passed' || st === 'bypassed';
-      });
+    setSelectedTask(prevTask => {
+      if (!prevTask || prevTask.id !== selectedTask.id) return prevTask;
+      const latestMap = prevTask.aiQcResults || {};
+      const nextResultsMap = { ...latestMap, [rule.id]: updatedRuleEntry };
+
+      const allCleared = unitQcRules.every(r => ['passed', 'bypassed'].includes(nextResultsMap[r.id]?.status));
       const anyBypassed = unitQcRules.some(r => nextResultsMap[r.id]?.status === 'bypassed');
       const overallStatus = allCleared ? (anyBypassed ? 'bypassed' : 'passed') : 'failed';
 
@@ -168,29 +170,30 @@ export default function TaskInspectorModal({
         : `❌ AI QC Failed [${rule.area_name} — ${rule.rule_title}] (Attempt ${nextFailCount}): ${feedback}`;
 
       const fileNote = `📎 QC Photo (${rule.area_name}) by ${currentUserName} [${getCurrentTimestamp()}]:\n${publicUrl}\n${statusBadge}`;
-      const updatedComments = [...(selectedTask.comments || []), fileNote];
+      const updatedComments = [...(prevTask.comments || []), fileNote];
 
-      const updatedTask = {
-        ...selectedTask,
+      const updated = {
+        ...prevTask,
         comments: updatedComments,
         aiQcStatus: overallStatus,
         aiQcResults: nextResultsMap
       };
 
-      setSelectedTask(updatedTask);
-      setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t));
-
-      await supabase.from('tasks').update({
-        ...mapToDb(updatedTask),
+      setTasks(prevTasks => prevTasks.map(t => t.id === updated.id ? updated : t));
+      supabase.from('tasks').update({
+        ...mapToDb(updated),
         ai_qc_status: overallStatus,
         ai_qc_results: nextResultsMap
-      }).eq('id', selectedTask.id);
-    } catch (err) {
-      alert(`AI QC check error: ${err.message}`);
-    } finally {
-      setCheckingRuleId(null);
-    }
-  };
+      }).eq('id', updated.id);
+
+      return updated;
+    });
+  } catch (err) {
+    alert(`AI QC check error: ${err.message}`);
+  } finally {
+    setCheckingRuleIds(prev => prev.filter(id => id !== rule.id));
+  }
+};
 
   // Bypass a specific rule after 2+ failed attempts and alert Admin for manual review
   const handleBypassSingleRule = async (rule) => {
@@ -401,7 +404,7 @@ export default function TaskInspectorModal({
                       const isPassed = rState.status === 'passed';
                       const isBypassed = rState.status === 'bypassed';
                       const isFailed = rState.status === 'failed';
-                      const isCheckingThis = checkingRuleId === rule.id;
+                      const isCheckingThis = checkingRuleIds.includes(rule.id);
                       const isDraggingThis = draggingRuleId === rule.id;
                       const failCount = rState.failCount || 0;
 
@@ -471,7 +474,7 @@ export default function TaskInspectorModal({
                                 <input
                                   type="file"
                                   accept="*/*"
-                                  disabled={Boolean(checkingRuleId)}
+                                  disabled={isCheckingThis}
                                   className="hidden"
                                   onChange={(e) => {
                                     if (e.target.files?.[0]) {
@@ -932,7 +935,7 @@ export default function TaskInspectorModal({
             ) : (
               !isCurrentInstanceCompleted && (
                 <button
-                  disabled={Boolean(checkingRuleId)}
+                  disabled={checkingRuleIds.length > 0}
                   onClick={handleCompleteWithAiCheck}
                   className="bg-[#A9B1A6] text-white px-5 py-2 rounded text-xs font-bold shadow-sm hover:bg-gray-600 transition disabled:opacity-40"
                 >

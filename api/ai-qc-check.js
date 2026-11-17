@@ -126,15 +126,16 @@ export default async function handler(req, res) {
       }
     };
 
-    // Use gemini-3.5-flash-lite first for lightning-fast responses, falling back to 3.8-flash
-    const models = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
+    // Rotate across 3 separate model quota pools so back-to-back uploads succeed immediately
+    const models = ['gemini-3.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.8-flash'];
     let geminiData = null;
     let lastErrorMsg = '';
+    let lastStatus = 500;
 
     for (const model of models) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 12000); // 12-second hard timeout
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
 
         const apiRes = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
@@ -152,6 +153,7 @@ export default async function handler(req, res) {
           geminiData = json;
           break;
         }
+        lastStatus = apiRes.status;
         lastErrorMsg = json.error?.message || `Gemini ${model} failed (${apiRes.status})`;
       } catch (err) {
         lastErrorMsg = err.name === 'AbortError' ? `Gemini ${model} timed out.` : err.message;
@@ -159,7 +161,9 @@ export default async function handler(req, res) {
     }
 
     if (!geminiData) {
-      throw new Error(lastErrorMsg || 'AI inspection timed out due to high server load. Please try again.');
+      return res.status(lastStatus === 429 ? 429 : 503).json({
+        error: lastErrorMsg || 'AI inspection busy. Please retry.'
+      });
     }
 
     const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
