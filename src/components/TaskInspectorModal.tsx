@@ -467,7 +467,7 @@ export default function TaskInspectorModal({
                                 </span>
                                 <input
                                   type="file"
-                                  accept="image/*"
+                                  accept="*/*"
                                   disabled={Boolean(checkingRuleId)}
                                   className="hidden"
                                   onChange={(e) => {
