@@ -18,7 +18,6 @@ async function urlToInlineData(imageUrl) {
 }
 
 export default async function handler(req, res) {
-  // Allow cross-origin requests from tasky-app-5gkh-alpha.vercel.app
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -38,9 +37,7 @@ export default async function handler(req, res) {
     process.env.VITE_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseKey) {
-    return res.status(500).json({
-      error: 'Missing Supabase credentials in Vercel Environment Variables.'
-    });
+    return res.status(500).json({ error: 'Missing Supabase credentials in Vercel Environment Variables.' });
   }
 
   const supabase = createClient(supabaseUrl, supabaseKey);
@@ -51,7 +48,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. Look up the unit's assigned blueprint tags
     const { data: unitData, error: unitErr } = await supabase
       .from('property_units')
       .select('*')
@@ -60,26 +56,13 @@ export default async function handler(req, res) {
       .single();
 
     if (unitErr || !unitData) {
-      return res.status(200).json({
-        success: true,
-        passed: true,
-        feedback: 'Unit blueprint not configured; auto-passed.'
-      });
+      return res.status(200).json({ success: true, passed: true, feedback: 'Unit not configured; auto-passed.' });
     }
 
     const unitBlueprints = Array.isArray(unitData.blueprints) && unitData.blueprints.length > 0
       ? unitData.blueprints
       : (unitData.blueprint ? [unitData.blueprint] : []);
 
-    if (unitBlueprints.length === 0) {
-      return res.status(200).json({
-        success: true,
-        passed: true,
-        feedback: 'No blueprints assigned to this unit; auto-passed.'
-      });
-    }
-
-    // 2. Fetch active rules matching ANY of the unit's blueprint tags
     const { data: allRules, error: rulesErr } = await supabase
       .from('ai_qc_rules')
       .select('*')
@@ -93,11 +76,7 @@ export default async function handler(req, res) {
       : (allRules || []);
 
     if (activeRules.length === 0) {
-      return res.status(200).json({
-        success: true,
-        passed: true,
-        feedback: 'No active AI QC rules found for this unit.'
-      });
+      return res.status(200).json({ success: true, passed: true, feedback: 'No active AI QC rules found.' });
     }
 
     const geminiKey = process.env.GEMINI_API_KEY;
@@ -105,14 +84,13 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'GEMINI_API_KEY is not set in Vercel environment variables.' });
     }
 
-    // 3. Build multimodal parts with Golden Reference Photos + Submitted Photo
     const rulesPrompt = activeRules
       .map((r, i) => `${i + 1}. [${r.blueprint} — ${r.area_name} — ${r.rule_title}]: ${r.rule_description}`)
       .join('\n');
 
     const parts = [
       {
-        text: `You are a strict hospitality and facility quality control inspector. Inspect the SUBMITTED PHOTO for "${propertyName} - ${unitName}" (Blueprints: ${unitBlueprints.join(', ')}).\n\nEvaluate the submitted photo against these standards:\n${rulesPrompt}\n\nSTRICT INSPECTION RULES:\n1. Verify that the objects/furniture described in the standard are actually present and visible in the submitted photo.\n2. If the cleaner uploads a photo of the wrong area (e.g., uploading a meeting area photo to a kitchen bar stool check), you MUST FAIL the inspection and explain that the wrong area was shown.\n3. Only return passed: true if the correct area is shown and it meets all visual alignment and staging standards.`
+        text: `You are a strict hospitality quality control inspector. Inspect the SUBMITTED PHOTO for "${propertyName} - ${unitName}".\n\nStandards:\n${rulesPrompt}\n\nSTRICT RULES:\n1. Verify items in the standard are visible.\n2. If the cleaner uploads the wrong area, FAIL the inspection.\n3. Return valid JSON only: {"passed": boolean, "feedback": "concise explanation"}`
       }
     ];
 
@@ -123,7 +101,7 @@ export default async function handler(req, res) {
           parts.push({ text: `GOLDEN REFERENCE PHOTO for "${rule.area_name} — ${rule.rule_title}":` });
           parts.push(refPart);
         } catch (refErr) {
-          console.warn('Skipping unreadable reference image:', refErr.message);
+          console.warn('Skipping reference image:', refErr.message);
         }
       }
     }
@@ -148,30 +126,40 @@ export default async function handler(req, res) {
       }
     };
 
-    const models = ['gemini-3.8-flash', 'gemini-3.5-flash-lite'];
+    // Use gemini-3.5-flash-lite first for lightning-fast responses, falling back to 3.8-flash
+    const models = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
     let geminiData = null;
     let lastErrorMsg = '';
 
     for (const model of models) {
-      const apiRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody)
-        }
-      );
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000); // 12-second hard timeout
 
-      const json = await apiRes.json();
-      if (apiRes.ok) {
-        geminiData = json;
-        break;
+        const apiRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+            signal: controller.signal
+          }
+        );
+        clearTimeout(timeoutId);
+
+        const json = await apiRes.json();
+        if (apiRes.ok) {
+          geminiData = json;
+          break;
+        }
+        lastErrorMsg = json.error?.message || `Gemini ${model} failed (${apiRes.status})`;
+      } catch (err) {
+        lastErrorMsg = err.name === 'AbortError' ? `Gemini ${model} timed out.` : err.message;
       }
-      lastErrorMsg = json.error?.message || `Gemini ${model} failed (${apiRes.status})`;
     }
 
     if (!geminiData) {
-      throw new Error(lastErrorMsg || 'All free-tier Gemini models failed to respond.');
+      throw new Error(lastErrorMsg || 'AI inspection timed out due to high server load. Please try again.');
     }
 
     const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
