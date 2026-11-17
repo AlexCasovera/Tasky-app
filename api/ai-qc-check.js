@@ -1,11 +1,6 @@
 // api/ai-qc-check.js
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY
-);
-
 async function urlToInlineData(imageUrl) {
   const imgRes = await fetch(imageUrl);
   if (!imgRes.ok) {
@@ -23,9 +18,32 @@ async function urlToInlineData(imageUrl) {
 }
 
 export default async function handler(req, res) {
+  // Allow cross-origin requests from tasky-app-5gkh-alpha.vercel.app
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  const supabaseKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SECRET_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    return res.status(500).json({
+      error: 'Missing Supabase credentials in Vercel Environment Variables.'
+    });
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseKey);
 
   const { submittedImageUrl, propertyName, unitName, selectedRuleIds } = req.body || {};
   if (!submittedImageUrl || !propertyName || !unitName) {

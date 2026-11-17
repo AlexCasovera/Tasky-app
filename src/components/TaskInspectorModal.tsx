@@ -102,31 +102,39 @@ export default function TaskInspectorModal({
         .from('task-proofs')
         .getPublicUrl(fileName);
 
-      // Call AI Vision QC Endpoint scoped strictly to this single rule
+      // Call AI Vision QC Endpoint on the primary backend project (which holds all keys)
+      const qcPayload = JSON.stringify({
+        submittedImageUrl: publicUrl,
+        propertyName: selectedTask.propertyName,
+        unitName: selectedTask.unitName,
+        selectedRuleIds: [rule.id]
+      });
+
       let qcRes;
       try {
-        qcRes = await fetch('/api/ai-qc-check', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            submittedImageUrl: publicUrl,
-            propertyName: selectedTask.propertyName,
-            unitName: selectedTask.unitName,
-            selectedRuleIds: [rule.id]
-          })
-        });
-        if (!qcRes.ok && qcRes.status === 404) throw new Error('Dev 404');
-      } catch {
         qcRes = await fetch('https://tasky-app-gilt.vercel.app/api/ai-qc-check', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            submittedImageUrl: publicUrl,
-            propertyName: selectedTask.propertyName,
-            unitName: selectedTask.unitName,
-            selectedRuleIds: [rule.id]
-          })
+          body: qcPayload
         });
+        if (qcRes.status === 404) throw new Error('Primary endpoint 404');
+      } catch {
+        qcRes = await fetch('/api/ai-qc-check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: qcPayload
+        });
+      }
+
+      const rawBody = await qcRes.text();
+      let qcData;
+      try {
+        qcData = JSON.parse(rawBody);
+      } catch {
+        throw new Error(`Server returned HTTP ${qcRes.status}: ${rawBody.slice(0, 140)}`);
+      }
+      if (!qcRes.ok && qcData.error) {
+        throw new Error(qcData.error);
       }
 
       const qcData = await qcRes.json();
