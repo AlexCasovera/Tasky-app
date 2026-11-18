@@ -90,19 +90,18 @@ export default async function handler(req, res) {
 
     const parts = [
       {
-        text: `You are a practical, fair hospitality and facility quality control inspector. Inspect the SUBMITTED PHOTO for "${propertyName} - ${unitName}".
+        text: `You are a meticulous hospitality and facility quality control inspector. Inspect the SUBMITTED PHOTO for "${propertyName} - ${unitName}".
 
 Standards to verify:
 ${rulesPrompt}
 
-CRITICAL GRADING GUIDELINES (READ CAREFULLY):
-1. CAMERA ANGLE & PERSPECTIVE INVARIANCE: Cleaners take photos from different corners, heights, and angles than the Golden Reference Photo. Do NOT fail a photo simply because it was taken from a side angle, closer up, or rotated relative to the reference photo. Mentally reconstruct the 3D room layout from the cleaner's camera angle.
-2. GRADE ONLY WHAT IS VISIBLE (CROPPED PHOTOS ARE OK): Cleaners often capture only part of a room or cut off outer furniture at the edge of the frame. NEVER fail a photo because some benches, stools, or items are cropped out of frame. Only evaluate the items actually visible in the submitted photo.
-3. HOW TO USE THE GOLDEN REFERENCE PHOTO: Use the Golden Reference Photo solely as a visual guide to understand what the furniture and staging look like when done properly (e.g., how a bolster pillow sits on a bench or how stools tuck under a counter). Do not require identical framing or item counts.
-4. WHEN TO FAIL:
-   - Fail if the submitted photo shows a completely wrong area/room unrelated to the standard (e.g., showing kitchen stools when asked for meeting benches).
-   - Fail if the visible items clearly violate the standard (e.g., benches visibly crooked/scattered, bolster pillows missing from visible benches, multiple pillows stacked on one bench, or stools pulled out/askew).
-5. Return valid JSON only: {"passed": boolean, "feedback": "concise, specific explanation of what you see in the visible area"}`
+UNIVERSAL INSPECTION PROTOCOL:
+1. WRONG AREA CHECK: Verify that the target area and objects described in the standard are actually visible in the submitted photo. If the photo shows an unrelated room or area, you MUST FAIL.
+2. PERSPECTIVE VS. ACTUAL MISALIGNMENT: Cleaners shoot from different angles, heights, and distances—do NOT fail just because the camera angle or framing differs from the Golden Reference Photo. Instead, evaluate relative geometry in 3D space: compare every visible item against its immediate neighbors, counters/tables, and nearby wall or floor lines. If any individual item is visibly crooked, rotated out of parallel, pushed out of line with its row/group, or unevenly spaced relative to its neighbors, you MUST FAIL.
+3. EXACT ITEM & ACCESSORY COUNTS: Inspect every single visible fixture or piece of furniture individually across the frame (front-to-back, left-to-right). Check exact item counts and pairings required by the standard—fail if any visible item has missing accessories, extra/doubled-up items, or off-center placement.
+4. VISIBLE FRAME ONLY: Do not fail simply because outer edges of a room or additional items are cropped out of frame—strictly grade everything that IS visible inside the frame.
+5. GOLDEN REFERENCE PHOTO: Use the Golden Reference Photo as the visual benchmark for exact staging, spacing, symmetry, and item pairing.
+6. STEP-BY-STEP AUDIT FIRST: In "audit_notes", systematically scan the visible scene region-by-region (front-to-back, left-to-right), verifying item counts, accessory pairings, and relative alignment against neighbors/walls. Only set "passed": true if zero defects exist in the visible area.`
       }
     ];
 
@@ -130,16 +129,16 @@ CRITICAL GRADING GUIDELINES (READ CAREFULLY):
         responseSchema: {
           type: 'OBJECT',
           properties: {
+            audit_notes: { type: 'STRING' },
             passed: { type: 'BOOLEAN' },
             feedback: { type: 'STRING' }
           },
-          required: ['passed', 'feedback']
+          required: ['audit_notes', 'passed', 'feedback']
         }
       }
     };
 
-    // Rotate across 3 separate model quota pools so back-to-back uploads succeed immediately
-    const models = ['gemini-3.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.8-flash'];
+    const models = ['gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-3.5-flash-lite'];
     let geminiData = null;
     let lastErrorMsg = '';
     let lastStatus = 500;
@@ -147,7 +146,7 @@ CRITICAL GRADING GUIDELINES (READ CAREFULLY):
     for (const model of models) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
 
         const apiRes = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
