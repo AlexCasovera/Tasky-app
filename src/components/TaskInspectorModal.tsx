@@ -158,35 +158,42 @@ export default function TaskInspectorModal({
 
       setSelectedTask(prevTask => {
         if (!prevTask || prevTask.id !== selectedTask.id) return prevTask;
-        const latestMap = prevTask.aiQcResults || {};
-        const nextResultsMap = { ...latestMap, [rule.id]: updatedRuleEntry };
+        const latestMap = selectedTask.aiQcResults || {};
+      const nextResultsMap = { ...latestMap, [rule.id]: updatedRuleEntry };
 
-        const allCleared = unitQcRules.every(r => ['passed', 'bypassed'].includes(nextResultsMap[r.id]?.status));
-        const anyBypassed = unitQcRules.some(r => nextResultsMap[r.id]?.status === 'bypassed');
-        const overallStatus = allCleared ? (anyBypassed ? 'bypassed' : 'passed') : 'failed';
+      const allCleared = unitQcRules.every(r => ['passed', 'bypassed'].includes(nextResultsMap[r.id]?.status));
+      const anyBypassed = unitQcRules.some(r => nextResultsMap[r.id]?.status === 'bypassed');
+      const overallStatus = allCleared ? (anyBypassed ? 'bypassed' : 'passed') : 'failed';
 
-        const statusBadge = passed
-          ? `✅ AI QC Passed [${rule.area_name} — ${rule.rule_title}]: ${feedback}`
-          : `❌ AI QC Failed [${rule.area_name} — ${rule.rule_title}] (Attempt ${nextFailCount}): ${feedback}`;
+      const statusBadge = passed
+        ? `✅ AI QC Passed [${rule.area_name} — ${rule.rule_title}]: ${feedback}`
+        : `❌ AI QC Failed [${rule.area_name} — ${rule.rule_title}] (Attempt ${nextFailCount}): ${feedback}`;
 
-        const fileNote = `📎 QC Photo (${rule.area_name}) by ${currentUserName} [${getCurrentTimestamp()}]:\n${publicUrl}\n${statusBadge}`;
-        const updatedComments = [...(prevTask.comments || []), fileNote];
+      const fileNote = `📎 QC Photo (${rule.area_name}) by ${currentUserName} [${getCurrentTimestamp()}]:\n${publicUrl}\n${statusBadge}`;
+      const updatedComments = [...(selectedTask.comments || []), fileNote];
 
-        const updated = {
-          ...prevTask,
-          comments: updatedComments,
-          aiQcStatus: overallStatus,
-          aiQcResults: nextResultsMap
-        };
+      const updated = {
+        ...selectedTask,
+        comments: updatedComments,
+        aiQcStatus: overallStatus,
+        aiQcResults: nextResultsMap
+      };
 
-        setTasks(prevTasks => prevTasks.map(t => t.id === updated.id ? updated : t));
-        
-        // Persist immediately to Supabase
-        supabase.from('tasks').update({
+      setSelectedTask(updated);
+      setTasks(prevTasks => prevTasks.map(t => t.id === updated.id ? updated : t));
+
+      const { error: dbErr } = await supabase
+        .from('tasks')
+        .update({
           ...mapToDb(updated),
           ai_qc_status: overallStatus,
           ai_qc_results: nextResultsMap
-        }).eq('id', updated.id);
+        })
+        .eq('id', updated.id);
+
+      if (dbErr) {
+        alert(`Database save error: ${dbErr.message}`);
+      }
 
         return updated;
       });
