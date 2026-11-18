@@ -90,7 +90,19 @@ export default async function handler(req, res) {
 
     const parts = [
       {
-        text: `You are a strict hospitality quality control inspector. Inspect the SUBMITTED PHOTO for "${propertyName} - ${unitName}".\n\nStandards:\n${rulesPrompt}\n\nSTRICT RULES:\n1. Verify items in the standard are visible.\n2. If the cleaner uploads the wrong area, FAIL the inspection.\n3. Return valid JSON only: {"passed": boolean, "feedback": "concise explanation"}`
+        text: `You are a practical, fair hospitality and facility quality control inspector. Inspect the SUBMITTED PHOTO for "${propertyName} - ${unitName}".
+
+Standards to verify:
+${rulesPrompt}
+
+CRITICAL GRADING GUIDELINES (READ CAREFULLY):
+1. CAMERA ANGLE & PERSPECTIVE INVARIANCE: Cleaners take photos from different corners, heights, and angles than the Golden Reference Photo. Do NOT fail a photo simply because it was taken from a side angle, closer up, or rotated relative to the reference photo. Mentally reconstruct the 3D room layout from the cleaner's camera angle.
+2. GRADE ONLY WHAT IS VISIBLE (CROPPED PHOTOS ARE OK): Cleaners often capture only part of a room or cut off outer furniture at the edge of the frame. NEVER fail a photo because some benches, stools, or items are cropped out of frame. Only evaluate the items actually visible in the submitted photo.
+3. HOW TO USE THE GOLDEN REFERENCE PHOTO: Use the Golden Reference Photo solely as a visual guide to understand what the furniture and staging look like when done properly (e.g., how a bolster pillow sits on a bench or how stools tuck under a counter). Do not require identical framing or item counts.
+4. WHEN TO FAIL:
+   - Fail if the submitted photo shows a completely wrong area/room unrelated to the standard (e.g., showing kitchen stools when asked for meeting benches).
+   - Fail if the visible items clearly violate the standard (e.g., benches visibly crooked/scattered, bolster pillows missing from visible benches, multiple pillows stacked on one bench, or stools pulled out/askew).
+5. Return valid JSON only: {"passed": boolean, "feedback": "concise, specific explanation of what you see in the visible area"}`
       }
     ];
 
