@@ -76,124 +76,126 @@ export default function TaskInspectorModal({
 
   // Upload and evaluate a photo specifically for ONE AI QC rule slot
   const handleRulePhotoUpload = async (rule, rawFile) => {
-  if (!rawFile || !rawFile.type.startsWith('image/')) {
-    return alert('Please capture or upload an image file for this QC check.');
-  }
-
-  setCheckingRuleIds(prev => [...new Set([...prev, rule.id])]);
-
-  try {
-    const compressedFile = await compressImage(rawFile, 1280, 1280, 0.75);
-    const fileExt = compressedFile.name?.split('.').pop() || 'jpg';
-    const fileName = `${selectedTask.id}-${rule.id.slice(0, 6)}-${Date.now()}.${fileExt}`;
-
-    const { error: uploadErr } = await supabase.storage
-      .from('task-proofs')
-      .upload(fileName, compressedFile);
-
-    if (uploadErr) {
-      alert(`Upload failed: ${uploadErr.message}`);
-      return;
+    if (!rawFile || !rawFile.type.startsWith('image/')) {
+      return alert('Please capture or upload an image file for this QC check.');
     }
 
-    const { data: { publicUrl } } = supabase.storage
-      .from('task-proofs')
-      .getPublicUrl(fileName);
+    setCheckingRuleIds(prev => [...new Set([...prev, rule.id])]);
 
-    const qcPayload = JSON.stringify({
-      submittedImageUrl: publicUrl,
-      propertyName: selectedTask.propertyName,
-      unitName: selectedTask.unitName,
-      selectedRuleIds: [rule.id]
-    });
+    try {
+      const compressedFile = await compressImage(rawFile, 1280, 1280, 0.75);
+      const fileExt = compressedFile.name?.split('.').pop() || 'jpg';
+      const fileName = `${selectedTask.id}-${rule.id.slice(0, 6)}-${Date.now()}.${fileExt}`;
 
-    // Automatic retry loop if Google AI Studio briefly rate-limits (429/503)
-    let qcData = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      let qcRes;
-      try {
-        qcRes = await fetch('https://tasky-app-gilt.vercel.app/api/ai-qc-check', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: qcPayload
-        });
-        if (qcRes.status === 404) throw new Error('Primary endpoint 404');
-      } catch {
-        qcRes = await fetch('/api/ai-qc-check', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: qcPayload
-        });
+      const { error: uploadErr } = await supabase.storage
+        .from('task-proofs')
+        .upload(fileName, compressedFile);
+
+      if (uploadErr) {
+        alert(`Upload failed: ${uploadErr.message}`);
+        return;
       }
 
-      const rawBody = await qcRes.text();
-      try {
-        qcData = JSON.parse(rawBody);
-      } catch {
-        throw new Error(`Server returned HTTP ${qcRes.status}: ${rawBody.slice(0, 140)}`);
+      const { data: { publicUrl } } = supabase.storage
+        .from('task-proofs')
+        .getPublicUrl(fileName);
+
+      const qcPayload = JSON.stringify({
+        submittedImageUrl: publicUrl,
+        propertyName: selectedTask.propertyName,
+        unitName: selectedTask.unitName,
+        selectedRuleIds: [rule.id]
+      });
+
+      // Automatic retry loop if Google AI Studio briefly rate-limits (429/503)
+      let qcData = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        let qcRes;
+        try {
+          qcRes = await fetch('https://tasky-app-gilt.vercel.app/api/ai-qc-check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: qcPayload
+          });
+          if (qcRes.status === 404) throw new Error('Primary endpoint 404');
+        } catch {
+          qcRes = await fetch('/api/ai-qc-check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: qcPayload
+          });
+        }
+
+        const rawBody = await qcRes.text();
+        try {
+          qcData = JSON.parse(rawBody);
+        } catch {
+          throw new Error(`Server returned HTTP ${qcRes.status}: ${rawBody.slice(0, 140)}`);
+        }
+
+        if (qcRes.ok) break;
+
+        if ((qcRes.status === 429 || qcRes.status === 503) && attempt < 2) {
+          await new Promise(r => setTimeout(r, 4000 * (attempt + 1)));
+          continue;
+        }
+
+        throw new Error(qcData.error || `AI QC failed (${qcRes.status})`);
       }
 
-      if (qcRes.ok) break;
+      const prevRuleState = (selectedTask.aiQcResults || {})[rule.id] || { failCount: 0 };
+      const passed = Boolean(qcData.passed);
+      const feedback = qcData.feedback || (passed ? 'Meets room standards.' : 'Does not match standards.');
+      const nextFailCount = passed ? prevRuleState.failCount : (prevRuleState.failCount || 0) + 1;
 
-      if ((qcRes.status === 429 || qcRes.status === 503) && attempt < 2) {
-        await new Promise(r => setTimeout(r, 4000 * (attempt + 1)));
-        continue;
-      }
-
-      throw new Error(qcData.error || `AI QC failed (${qcRes.status})`);
-    }
-
-    const prevRuleState = (selectedTask.aiQcResults || {})[rule.id] || { failCount: 0 };
-    const passed = Boolean(qcData.passed);
-    const feedback = qcData.feedback || (passed ? 'Meets room standards.' : 'Does not match standards.');
-    const nextFailCount = passed ? prevRuleState.failCount : (prevRuleState.failCount || 0) + 1;
-
-    const updatedRuleEntry = {
-      status: passed ? 'passed' : 'failed',
-      failCount: nextFailCount,
-      feedback,
-      imageUrl: publicUrl,
-      updatedAt: new Date().toISOString()
-    };
-
-    setSelectedTask(prevTask => {
-      if (!prevTask || prevTask.id !== selectedTask.id) return prevTask;
-      const latestMap = prevTask.aiQcResults || {};
-      const nextResultsMap = { ...latestMap, [rule.id]: updatedRuleEntry };
-
-      const allCleared = unitQcRules.every(r => ['passed', 'bypassed'].includes(nextResultsMap[r.id]?.status));
-      const anyBypassed = unitQcRules.some(r => nextResultsMap[r.id]?.status === 'bypassed');
-      const overallStatus = allCleared ? (anyBypassed ? 'bypassed' : 'passed') : 'failed';
-
-      const statusBadge = passed
-        ? `✅ AI QC Passed [${rule.area_name} — ${rule.rule_title}]: ${feedback}`
-        : `❌ AI QC Failed [${rule.area_name} — ${rule.rule_title}] (Attempt ${nextFailCount}): ${feedback}`;
-
-      const fileNote = `📎 QC Photo (${rule.area_name}) by ${currentUserName} [${getCurrentTimestamp()}]:\n${publicUrl}\n${statusBadge}`;
-      const updatedComments = [...(prevTask.comments || []), fileNote];
-
-      const updated = {
-        ...prevTask,
-        comments: updatedComments,
-        aiQcStatus: overallStatus,
-        aiQcResults: nextResultsMap
+      const updatedRuleEntry = {
+        status: passed ? 'passed' : 'failed',
+        failCount: nextFailCount,
+        feedback,
+        imageUrl: publicUrl,
+        updatedAt: new Date().toISOString()
       };
 
-      setTasks(prevTasks => prevTasks.map(t => t.id === updated.id ? updated : t));
-      supabase.from('tasks').update({
-        ...mapToDb(updated),
-        ai_qc_status: overallStatus,
-        ai_qc_results: nextResultsMap
-      }).eq('id', updated.id);
+      setSelectedTask(prevTask => {
+        if (!prevTask || prevTask.id !== selectedTask.id) return prevTask;
+        const latestMap = prevTask.aiQcResults || {};
+        const nextResultsMap = { ...latestMap, [rule.id]: updatedRuleEntry };
 
-      return updated;
-    });
-  } catch (err) {
-    alert(`AI QC check error: ${err.message}`);
-  } finally {
-    setCheckingRuleIds(prev => prev.filter(id => id !== rule.id));
-  }
-};
+        const allCleared = unitQcRules.every(r => ['passed', 'bypassed'].includes(nextResultsMap[r.id]?.status));
+        const anyBypassed = unitQcRules.some(r => nextResultsMap[r.id]?.status === 'bypassed');
+        const overallStatus = allCleared ? (anyBypassed ? 'bypassed' : 'passed') : 'failed';
+
+        const statusBadge = passed
+          ? `✅ AI QC Passed [${rule.area_name} — ${rule.rule_title}]: ${feedback}`
+          : `❌ AI QC Failed [${rule.area_name} — ${rule.rule_title}] (Attempt ${nextFailCount}): ${feedback}`;
+
+        const fileNote = `📎 QC Photo (${rule.area_name}) by ${currentUserName} [${getCurrentTimestamp()}]:\n${publicUrl}\n${statusBadge}`;
+        const updatedComments = [...(prevTask.comments || []), fileNote];
+
+        const updated = {
+          ...prevTask,
+          comments: updatedComments,
+          aiQcStatus: overallStatus,
+          aiQcResults: nextResultsMap
+        };
+
+        setTasks(prevTasks => prevTasks.map(t => t.id === updated.id ? updated : t));
+        
+        // Persist immediately to Supabase
+        supabase.from('tasks').update({
+          ...mapToDb(updated),
+          ai_qc_status: overallStatus,
+          ai_qc_results: nextResultsMap
+        }).eq('id', updated.id);
+
+        return updated;
+      });
+    } catch (err) {
+      alert(`AI QC check error: ${err.message}`);
+    } finally {
+      setCheckingRuleIds(prev => prev.filter(id => id !== rule.id));
+    }
+  };
 
   // Bypass a specific rule after 2+ failed attempts and alert Admin for manual review
   const handleBypassSingleRule = async (rule) => {
@@ -411,33 +413,57 @@ export default function TaskInspectorModal({
                       return (
                         <div
                           key={rule.id}
-                          onDragOver={(e) => {
-                            if (!isCurrentInstanceCompleted) {
+                          onDragEnter={(e) => {
+                            if (!isCurrentInstanceCompleted && !isCheckingThis) {
                               e.preventDefault();
+                              e.stopPropagation();
                               setDraggingRuleId(rule.id);
                             }
                           }}
-                          onDragLeave={() => setDraggingRuleId(null)}
+                          onDragOver={(e) => {
+                            if (!isCurrentInstanceCompleted && !isCheckingThis) {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              e.dataTransfer.dropEffect = 'copy';
+                              if (draggingRuleId !== rule.id) setDraggingRuleId(rule.id);
+                            }
+                          }}
+                          onDragLeave={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (!e.currentTarget.contains(e.relatedTarget)) {
+                              setDraggingRuleId(null);
+                            }
+                          }}
                           onDrop={(e) => {
                             e.preventDefault();
+                            e.stopPropagation();
                             setDraggingRuleId(null);
-                            if (!isCurrentInstanceCompleted && e.dataTransfer.files?.[0]) {
+                            if (!isCurrentInstanceCompleted && !isCheckingThis && e.dataTransfer.files?.[0]) {
                               handleRulePhotoUpload(rule, e.dataTransfer.files[0]);
                             }
                           }}
-                          className={`p-3 rounded-lg border transition flex flex-col gap-2 ${
+                          className={`p-3 rounded-lg border transition flex flex-col gap-2.5 relative ${
                             isDraggingThis
-                              ? 'border-blue-600 bg-blue-100/70'
+                              ? 'border-2 border-dashed border-blue-600 bg-blue-100/80 shadow-sm'
                               : isPassed
                               ? 'bg-emerald-50/70 border-emerald-300'
                               : isBypassed
                               ? 'bg-amber-50/80 border-amber-300'
                               : isFailed
                               ? 'bg-red-50/60 border-red-300'
-                              : 'bg-gray-50 border-gray-200 hover:bg-gray-100/70'
+                              : 'bg-gray-50 border-gray-200 hover:border-blue-300'
                           }`}
                         >
-                          <div className="flex justify-between items-center gap-3">
+                          {isDraggingThis && (
+                            <div className="absolute inset-0 bg-blue-600/10 backdrop-blur-[1px] rounded-lg flex items-center justify-center z-10 pointer-events-none">
+                              <span className="bg-blue-700 text-white px-3 py-1.5 rounded-full text-xs font-bold shadow">
+                                📥 Drop photo to inspect "{rule.area_name}"
+                              </span>
+                            </div>
+                          )}
+
+                          <div className="flex justify-between items-start gap-3">
                             <div className="flex items-start gap-2.5 min-w-0">
                               <span className="mt-0.5 text-base shrink-0">
                                 {isCheckingThis ? '⏳' : isPassed ? '✅' : isBypassed ? '⚠️' : isFailed ? '❌' : '⬜'}
@@ -454,38 +480,58 @@ export default function TaskInspectorModal({
                                 <p className="text-[11px] text-gray-600 mt-0.5">{rule.rule_description}</p>
                               </div>
                             </div>
+                          </div>
 
-                            {!isCurrentInstanceCompleted && (
-                              <label className={`shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg cursor-pointer transition shadow-2xs flex items-center gap-1.5 ${
+                          {/* DEDICATED DRAG-AND-DROP + MOBILE CAMERA/GALLERY DROPZONE */}
+                          {!isCurrentInstanceCompleted && (
+                            <label
+                              className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-dashed cursor-pointer transition ${
                                 isCheckingThis
-                                  ? 'bg-blue-200 text-blue-900 animate-pulse cursor-wait'
+                                  ? 'bg-blue-100/80 border-blue-300 text-blue-900 cursor-wait'
                                   : isPassed
-                                  ? 'bg-white text-emerald-800 border border-emerald-300 hover:bg-emerald-100'
-                                  : 'bg-[#333333] text-white hover:bg-black'
-                              }`}>
+                                  ? 'bg-white/90 border-emerald-300 hover:bg-emerald-50 text-emerald-900'
+                                  : 'bg-white border-gray-300 hover:border-blue-500 hover:bg-blue-50/40 text-gray-800'
+                              }`}
+                            >
+                              <span className="text-[11px] text-gray-500 font-medium truncate">
+                                {isCheckingThis
+                                  ? '⏳ Compressing & analyzing photo with AI...'
+                                  : 'Drag & drop an image here, or tap to take/choose a photo'}
+                              </span>
+
+                              <span
+                                className={`shrink-0 text-xs font-bold px-3 py-1.5 rounded-md shadow-2xs flex items-center gap-1.5 ${
+                                  isCheckingThis
+                                    ? 'bg-blue-200 text-blue-900 animate-pulse'
+                                    : isPassed
+                                    ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                                    : 'bg-[#333333] text-white'
+                                }`}
+                              >
                                 <span>📷</span>
                                 <span>
                                   {isCheckingThis
                                     ? 'Checking...'
                                     : isPassed || isFailed
-                                    ? 'Retake Photo'
+                                    ? 'Retake / Drop Photo'
                                     : 'Take / Upload Photo'}
                                 </span>
-                                <input
-                                  type="file"
-                                  accept="*/*"
-                                  disabled={isCheckingThis}
-                                  className="hidden"
-                                  onChange={(e) => {
-                                    if (e.target.files?.[0]) {
-                                      handleRulePhotoUpload(rule, e.target.files[0]);
-                                      e.target.value = '';
-                                    }
-                                  }}
-                                />
-                              </label>
-                            )}
-                          </div>
+                              </span>
+
+                              <input
+                                type="file"
+                                accept="*/*"
+                                disabled={isCheckingThis}
+                                className="hidden"
+                                onChange={(e) => {
+                                  if (e.target.files?.[0]) {
+                                    handleRulePhotoUpload(rule, e.target.files[0]);
+                                    e.target.value = '';
+                                  }
+                                }}
+                              />
+                            </label>
+                          )}
 
                           {/* SUBMITTED PHOTO THUMBNAIL + AI FEEDBACK */}
                           {(rState.imageUrl || rState.feedback) && (

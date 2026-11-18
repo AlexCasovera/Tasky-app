@@ -1,3 +1,4 @@
+// src/utils.ts
 // @ts-nocheck
 import { supabase } from './supabaseClient';
 
@@ -165,6 +166,8 @@ export const mapToDb = (t) => {
     priority: dbPriority,
     type: t.type || 'flexible',
     status: t.status || 'pending',
+    require_checklist: t.requireChecklist ?? false,
+    checklist: t.checklist || [],
     requires_photo: t.requiresPhoto ?? false,
     requires_comment: t.requiresComment ?? false,
     allow_deadline_change: t.allowAssigneeDeadlineChange ?? false,
@@ -184,7 +187,12 @@ export const mapToDb = (t) => {
     exception_dates: t.exceptionDates || [],
     is_overdue: t.isOverdue ?? false,
     overdue_notified: t.overdueNotified ?? false,
-    is_long_term: t.isLongTerm ?? false
+    is_long_term: t.isLongTerm ?? false,
+    property_name: t.propertyName || '',
+    unit_name: t.unitName || '',
+    require_ai_qc: Boolean(t.requireAiQc),
+    ai_qc_status: t.aiQcStatus || 'none',
+    ai_qc_results: t.aiQcResults || {}
   };
 };
 
@@ -209,6 +217,8 @@ export const mapFromDb = (r) => {
     priority: mappedPriority,
     type: r.type || 'flexible',
     status: r.status || 'pending',
+    requireChecklist: r.require_checklist ?? false,
+    checklist: typeof r.checklist === 'string' ? JSON.parse(r.checklist) : (r.checklist || []),
     requiresPhoto: r.requires_photo ?? false,
     requiresComment: r.requires_comment ?? false,
     allowAssigneeDeadlineChange: r.allow_deadline_change ?? false,
@@ -228,7 +238,12 @@ export const mapFromDb = (r) => {
     exceptionDates: r.exception_dates || [],
     isOverdue: r.is_overdue ?? false,
     overdueNotified: r.overdue_notified ?? false,
-    isLongTerm: r.is_long_term ?? false
+    isLongTerm: r.is_long_term ?? false,
+    propertyName: r.property_name || '',
+    unitName: r.unit_name || '',
+    requireAiQc: Boolean(r.require_ai_qc),
+    aiQcStatus: r.ai_qc_status || 'none',
+    aiQcResults: typeof r.ai_qc_results === 'string' ? JSON.parse(r.ai_qc_results) : (r.ai_qc_results || {})
   };
 };
 
