@@ -127,7 +127,6 @@ export default async function handler(req, res) {
 
   const supabase = createClient(supabaseUrl, supabaseKey);
 
-  // Target date (defaults to Arizona local time if not passed)
   const targetDate = date ? date.split('T')[0] : new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Phoenix' }).format(new Date());
   const parsedTargetDate = parseDateToUTC(targetDate);
   const targetDayStr = daysOfWeek[parsedTargetDate.getUTCDay()];
@@ -139,7 +138,30 @@ export default async function handler(req, res) {
 
     if (taskError) throw taskError;
 
+    // 1. Tasks currently marked Paused or In Progress / Carried Over
+    const carriedOverTasks = (allTasks || []).filter(task => {
+      if (!matchesMember(task.assignees, targetMemberName)) return false;
+      if (onlyHighPriority && task.priority !== 'High') return false;
+
+      const completedDates = Array.isArray(task.completed_dates) ? task.completed_dates : [];
+      if (task.recurrence_type === 'once' && task.status === 'completed') return false;
+      if (task.recurrence_type === 'fixed' && completedDates.includes(targetDate)) return false;
+
+      const inProgDates = Array.isArray(task.in_progress_dates) ? task.in_progress_dates : [];
+      const pausedDates = Array.isArray(task.paused_dates) ? task.paused_dates : [];
+      return (
+        task.status === 'in_progress' ||
+        task.status === 'paused' ||
+        inProgDates.length > 0 ||
+        pausedDates.length > 0
+      );
+    });
+
+    const carriedOverIds = new Set(carriedOverTasks.map(t => String(t.id)));
+
+    // 2. Remaining tasks scheduled today or overdue
     const filteredTasks = (allTasks || []).filter(task => {
+      if (carriedOverIds.has(String(task.id))) return false;
       if (!matchesMember(task.assignees, targetMemberName)) return false;
       if (onlyHighPriority && task.priority !== 'High') return false;
 
@@ -152,6 +174,8 @@ export default async function handler(req, res) {
 
       return isScheduledToday || isPastDue;
     });
+
+    const totalDispatchCount = carriedOverTasks.length + filteredTasks.length;
 
     const parsedDate = new Date(targetDate + 'T12:00:00Z');
     const options = { weekday: 'long', month: 'short', day: 'numeric' };
@@ -171,12 +195,58 @@ export default async function handler(req, res) {
       { type: 'divider' }
     ];
 
-    if (filteredTasks.length === 0) {
+    if (carriedOverTasks.length > 0) {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*⏸️ CARRIED OVER / IN PROGRESS (${carriedOverTasks.length}):*`
+        }
+      });
+
+      carriedOverTasks.forEach(t => {
+        const companyBadge = t.company ? ` • [${t.company}]` : '';
+        const isPaused = t.status === 'paused' || (Array.isArray(t.paused_dates) && t.paused_dates.length > 0);
+        const stateTag = isPaused ? '⏸️ *PAUSED*' : '▶️ *IN PROGRESS*';
+        const comments = Array.isArray(t.comments) ? t.comments : [];
+        const latestStatusNote = [...comments].reverse().find(c => c.includes('⏸️') || c.includes('▶️')) || '';
+        const cleanNote = latestStatusNote ? `\n      _${latestStatusNote.replace(/\n/g, ' ')}_` : '';
+
+        blocks.push({
+          type: 'section',
+          block_id: `inprog_${t.id}`,
+          text: {
+            type: 'mrkdwn',
+            text: `• *${t.title}*${companyBadge} ${stateTag}${cleanNote}`
+          },
+          accessory: {
+            type: 'button',
+            action_id: 'complete_task',
+            text: {
+              type: 'plain_text',
+              text: 'Done ✅',
+              emoji: true
+            },
+            style: 'primary',
+            value: JSON.stringify({
+              taskId: t.id,
+              date: targetDate
+            })
+          }
+        });
+      });
+
+      if (filteredTasks.length > 0) {
+        blocks.push({ type: 'divider' });
+      }
+    }
+
+    if (totalDispatchCount === 0) {
       blocks.push({
         type: 'section',
         text: { type: 'mrkdwn', text: `🎉 *All clear!* No pending tasks found for ${targetMemberName} today.` }
       });
-    } else {
+    } else if (filteredTasks.length > 0) {
       blocks.push({
         type: 'section',
         text: { type: 'mrkdwn', text: `*Here is the agenda for today (${filteredTasks.length} task${filteredTasks.length > 1 ? 's' : ''}):*` }
@@ -222,7 +292,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         channel: slackUserId,
-        text: `☀️ Daily Dispatch for ${targetMemberName}: ${dateFormatted} (${filteredTasks.length} tasks)`,
+        text: `☀️ Daily Dispatch for ${targetMemberName}: ${dateFormatted} (${totalDispatchCount} tasks)`,
         blocks: blocks
       })
     });
@@ -231,72 +301,48 @@ export default async function handler(req, res) {
       const errorData = await slackResponse.json();
       throw new Error(`Slack API error: ${errorData.error}`);
     }
-// --- PART 2: OVERDUE TASK AUDIT & BATCHED ADMIN PUSH ---
-try {
-  const todayStr = new Date().toISOString().split('T')[0];
 
-  // 1. Fetch uncompleted tasks with past dates
-  const { data: overdueTasks } = await supabase
-    .from('tasks')
-    .select('id, title, date, assignees')
-    .neq('status', 'completed')
-    .lt('date', todayStr)
-    .not('date', 'is', null);
+    // --- PART 2: OVERDUE TASK AUDIT & BATCHED ADMIN PUSH ---
+    try {
+      const todayStr = new Date().toISOString().split('T')[0];
 
-  const newlyOverdue = [];
-  if (overdueTasks && overdueTasks.length > 0) {
-    for (const t of overdueTasks) {
-      // Idempotent insert: only succeeds if not already logged today
-      const { error: insErr } = await supabase
-        .from('overdue_alerts_log')
-        .insert({ task_id: String(t.id), alert_date: todayStr, recipient_role: 'admin' });
+      const { data: overdueTasks } = await supabase
+        .from('tasks')
+        .select('id, title, date, assignees')
+        .neq('status', 'completed')
+        .lt('date', todayStr)
+        .not('date', 'is', null);
 
-      if (!insErr) newlyOverdue.push(t);
+      const newlyOverdue = [];
+      if (overdueTasks && overdueTasks.length > 0) {
+        for (const t of overdueTasks) {
+          const { error: insErr } = await supabase
+            .from('overdue_alerts_log')
+            .insert({ task_id: String(t.id), alert_date: todayStr, recipient_role: 'admin' });
+
+          if (!insErr) newlyOverdue.push(t);
+        }
+      }
+
+      if (newlyOverdue.length > 0) {
+        const summaryTitle = `⚠️ Overdue Task Alert (${newlyOverdue.length})`;
+        const summaryMessage = newlyOverdue.length === 1 
+          ? `"${newlyOverdue[0].title}" was due before today.` 
+          : `${newlyOverdue.length} tasks remain uncompleted from previous days.`;
+
+        await supabase.from('notifications').insert({
+          text: `${summaryTitle}: ${summaryMessage}`,
+          type: 'overdue',
+          target_type: 'role',
+          target_value: 'admin',
+          read: false
+        });
+      }
+    } catch (overdueErr) {
+      console.error("Overdue check failed during dispatch:", overdueErr);
     }
-  }
 
-  // 2. If there are new overdue tasks, send ONE batched summary push
-  if (newlyOverdue.length > 0) {
-    const summaryTitle = `⚠️ Overdue Task Alert (${newlyOverdue.length})`;
-    const summaryMessage = newlyOverdue.length === 1 
-      ? `"${newlyOverdue[0].title}" was due before today.` 
-      : `${newlyOverdue.length} tasks remain uncompleted from previous days.`;
-
-    // Write to in-app notifications
-    await supabase.from('notifications').insert({
-      text: `${summaryTitle}: ${summaryMessage}`,
-      type: 'overdue',
-      target_type: 'role',
-      target_value: 'admin',
-      read: false
-    });
-
-    // Send single web push to all admins with a 4-hour expiration TTL
-    const { data: adminSubs } = await supabase
-      .from('push_subscriptions')
-      .select('*')
-      .eq('role', 'admin');
-
-    if (adminSubs && adminSubs.length > 0) {
-      const payload = JSON.stringify({
-        title: summaryTitle,
-        body: summaryMessage,
-        url: '/',
-        tag: 'overdue-summary'
-      });
-
-      await Promise.allSettled(
-        adminSubs.map(s => 
-          webpush.sendNotification(JSON.parse(s.subscription), payload, { TTL: 14400 })
-        )
-      );
-    }
-  }
-} catch (overdueErr) {
-  console.error("Overdue check failed during dispatch:", overdueErr);
-}
-
-    return res.status(200).json({ success: true, count: filteredTasks.length });
+    return res.status(200).json({ success: true, count: totalDispatchCount });
   } catch (error) {
     console.error('Dispatch API error:', error);
     return res.status(500).json({ error: error.message });

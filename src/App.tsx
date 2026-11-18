@@ -117,7 +117,8 @@ export default function App() {
           slackUserId: p.slack_user_id || '',
           inventoryAccess: Boolean(p.inventory_access),
           supplySheetAccess: Boolean(p.supply_sheet_access),
-          supplySheetCompanies: p.supply_sheet_companies || []
+          supplySheetCompanies: p.supply_sheet_companies || [],
+          allowInProgress: Boolean(p.allow_in_progress)
         }));
         setTeamMembers(mappedMembers);
         if (activeEmployeeFilters.length === 0) setActiveEmployeeFilters(mappedMembers.map(m => m.name));
@@ -142,7 +143,8 @@ export default function App() {
             slackUserId: myProfile.slack_user_id || '',
             inventoryAccess: Boolean(myProfile.inventory_access),
             supplySheetAccess: Boolean(myProfile.supply_sheet_access),
-            supplySheetCompanies: myProfile.supply_sheet_companies || []
+            supplySheetCompanies: myProfile.supply_sheet_companies || [],
+            allowInProgress: Boolean(myProfile.allow_in_progress)
           });
         }
       }
@@ -156,7 +158,6 @@ export default function App() {
 
   const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
 
-  // Global Fetch for Pending Supply Requests (for the designated company manager)
   const fetchGlobalRequests = async () => {
     if (!session || companiesData.length === 0) return;
 
@@ -281,7 +282,6 @@ export default function App() {
     setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
     await supabase.from('notifications').update({ read: true }).eq('id', notif.id);
     
-    // Jump straight to inventory for supply sheet alerts
     if (['supply_request', 'inventory_low', 'supply_approved', 'supply_rejected'].includes(notif.type)) {
       setCurrentView('inventory');
       setIsNotifOpen(false);
@@ -349,7 +349,6 @@ export default function App() {
   const [checklist, setChecklist] = useState([]);
   const [checklistException, setChecklistException] = useState('');
 
-  // Property, Unit & AI QC States
   const [propertyName, setPropertyName] = useState('');
   const [unitName, setUnitName] = useState('');
   const [requireAiQc, setRequireAiQc] = useState(false);
@@ -505,7 +504,9 @@ export default function App() {
       unitName: d.unit_name || '',
       requireAiQc: Boolean(d.require_ai_qc),
       aiQcStatus: d.ai_qc_status || 'none',
-      aiQcResults: typeof d.ai_qc_results === 'string' ? JSON.parse(d.ai_qc_results) : (d.ai_qc_results || {})
+      aiQcResults: typeof d.ai_qc_results === 'string' ? JSON.parse(d.ai_qc_results) : (d.ai_qc_results || {}),
+      inProgressDates: d.in_progress_dates || [],
+      createdBy: d.created_by || ''
     };
   };
 
@@ -547,7 +548,6 @@ export default function App() {
             .select('*')
             .or(`date.gte.${cutoffStr},date.is.null,status.neq.completed`);
 
-      // Safety fallback: if the filtered query ever errors, load all tasks
       if (error) {
         console.warn('Filtered task fetch failed, falling back to full fetch:', error.message);
         const fallback = await supabase.from('tasks').select('*');
@@ -560,12 +560,6 @@ export default function App() {
       } else if (data) {
         const mapped = data.map(mapRawTask);
         setTasks(mapped);
-
-        const missingCompanies = [...new Set(mapped.map(t => t.company).filter(c => c && !companies.includes(c)))];
-if (missingCompanies.length > 0) {
-  setCompanies(prev => [...new Set([...prev, ...missingCompanies])]);
-  setActiveCompanyFilters(prev => [...new Set([...prev, ...missingCompanies])]);
-}
       }
       setIsDbLoading(false);
     };
@@ -588,7 +582,6 @@ if (missingCompanies.length > 0) {
     };
   }, [session, companies, hasLoadedFullHistory]);
 
-  // Automatically hydrate older archived tasks when inspecting Completed tab, searching, or browsing past 4 weeks
   useEffect(() => {
     if (!session || hasLoadedFullHistory) return;
 
@@ -1340,6 +1333,8 @@ if (missingCompanies.length > 0) {
       cadenceDays: Number(cadenceDays),
       completedDates: [],
       exceptionDates: [],
+      inProgressDates: [],
+      createdBy: currentUserName,
       chainedSteps: chainedSteps.filter(s => s.title.trim() !== ''),
       type: hasSpecificTime ? 'timed' : 'flexible',
       status: 'pending',
@@ -1380,7 +1375,9 @@ if (missingCompanies.length > 0) {
       property_name: newTask.propertyName,
       unit_name: newTask.unitName,
       require_ai_qc: newTask.requireAiQc,
-      ai_qc_status: newTask.aiQcStatus
+      ai_qc_status: newTask.aiQcStatus,
+      in_progress_dates: [],
+      created_by: currentUserName
     };
 
     const { error } = await supabase.from('tasks').insert(dbPayload);
@@ -1705,11 +1702,20 @@ if (missingCompanies.length > 0) {
           ? [...(t.comments || []), noteText, completionNote] 
           : [...(t.comments || []), completionNote];
 
+        const cleanedInProgress = (t.inProgressDates || []).filter(d => d !== selectedInstanceDate);
+
         if (t.recurrenceType === 'once') {
-          return { ...t, status: 'completed', isOverdue: false, completedDates: [todayStrForCompletion], comments: newComments };
+          return { ...t, status: 'completed', isOverdue: false, inProgressDates: [], completedDates: [todayStrForCompletion], comments: newComments };
         } else {
           const updatedCompletedDates = [...new Set([...(t.completedDates || []), selectedInstanceDate])];
-          return { ...t, completedDates: updatedCompletedDates, isOverdue: false, comments: newComments };
+          return {
+            ...t,
+            status: cleanedInProgress.length > 0 ? 'in_progress' : 'pending',
+            inProgressDates: cleanedInProgress,
+            completedDates: updatedCompletedDates,
+            isOverdue: false,
+            comments: newComments
+          };
         }
       }
       return t;
@@ -1755,6 +1761,8 @@ if (missingCompanies.length > 0) {
         cadenceDays: 14,
         completedDates: [],
         exceptionDates: [],
+        inProgressDates: [],
+        createdBy: currentUserName,
         chainedSteps: [],
         type: 'flexible',
         status: 'pending',
@@ -1800,6 +1808,7 @@ if (missingCompanies.length > 0) {
         date: nextDueDate,
         completedDates: [],
         exceptionDates: [],
+        inProgressDates: [],
         status: 'pending',
         isOverdue: false,
         aiQcStatus: selectedTask.requireAiQc ? 'pending' : 'none',
@@ -1837,6 +1846,8 @@ if (missingCompanies.length > 0) {
         cadenceDays: 14,
         completedDates: [],
         exceptionDates: [],
+        inProgressDates: [],
+        createdBy: currentUserName,
         chainedSteps: selectedTask.chainedSteps.slice(1),
         type: 'timed',
         status: 'pending',
@@ -2025,16 +2036,36 @@ if (missingCompanies.length > 0) {
   const renderPriorityPill = (task, instanceDateStr) => {
     const isPastDue = isTaskPastDue(task);
     const isDueToday = !isPastDue && isTaskDueToday(task, instanceDateStr);
-    
-    if (isPastDue) {
-      return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-200 animate-pulse uppercase">Overdue</span>;
-    }
-    if (isDueToday) {
-      return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 shadow-sm uppercase">Due Today</span>;
-    }
-    
-    const style = getPriorityStyle(task.priority);
-    return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${style.badge} uppercase`}>{task.priority}</span>;
+    const checkDate = instanceDateStr || task.date;
+    const isPaused =
+      task.status !== 'completed' &&
+      (task.status === 'paused' || (task.pausedDates || []).includes(checkDate));
+    const isActiveInProgress =
+      task.status !== 'completed' &&
+      !isPaused &&
+      (task.status === 'in_progress' || (task.inProgressDates || []).includes(checkDate));
+
+    return (
+      <div className="flex items-center gap-1 flex-wrap">
+        {isPaused && (
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-700 text-white shadow-2xs uppercase">
+            ⏸️ Paused
+          </span>
+        )}
+        {isActiveInProgress && (
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500 text-white shadow-2xs uppercase">
+            ▶️ In Progress
+          </span>
+        )}
+        {isPastDue ? (
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-200 animate-pulse uppercase">Overdue</span>
+        ) : isDueToday ? (
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 shadow-sm uppercase">Due Today</span>
+        ) : (
+          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${getPriorityStyle(task.priority).badge} uppercase`}>{task.priority}</span>
+        )}
+      </div>
+    );
   };
 
   const visibleMembers = userRole === 'admin' 
@@ -2163,6 +2194,50 @@ if (missingCompanies.length > 0) {
             setActiveEmployeeFilters={setActiveEmployeeFilters}
           />
         )}
+
+        {/* ADMIN-ONLY TODAY'S QUICK VIEW STRIP */}
+        {userRole === 'admin' && currentView !== 'inventory' && currentView !== 'create' && (() => {
+          const todayStr = formatDateKey(new Date());
+          const todayDayName = daysOfWeek[new Date().getDay()];
+          const todaysTasks = visibleTasks.filter(t => isTaskScheduledOnDay(t, todayDayName, todayStr));
+          const completedCount = todaysTasks.filter(t => isTaskCompletedOnDay(t, todayStr)).length;
+          const pausedCount = todaysTasks.filter(t =>
+            !isTaskCompletedOnDay(t, todayStr) &&
+            (t.status === 'paused' || (t.pausedDates || []).includes(todayStr))
+          ).length;
+          const inProgressCount = todaysTasks.filter(t =>
+            !isTaskCompletedOnDay(t, todayStr) &&
+            t.status !== 'paused' &&
+            !(t.pausedDates || []).includes(todayStr) &&
+            (t.status === 'in_progress' || (t.inProgressDates || []).includes(todayStr))
+          ).length;
+          const untouchedCount = Math.max(0, todaysTasks.length - completedCount - pausedCount - inProgressCount);
+
+          if (todaysTasks.length === 0) return null;
+
+          return (
+            <div className="bg-white border border-gray-200 rounded-lg px-4 py-2.5 mb-3 flex items-center justify-between flex-wrap gap-2 shadow-2xs">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-gray-500">📊 Today’s Quick View:</span>
+                <span className="text-xs font-bold text-gray-900">{todaysTasks.length} Due Today</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-bold flex-wrap">
+                <span className="bg-emerald-100 text-emerald-900 px-2.5 py-0.5 rounded-full">
+                  ✅ {completedCount} Completed
+                </span>
+                <span className="bg-amber-100 text-amber-900 px-2.5 py-0.5 rounded-full border border-amber-300">
+                  ▶️ {inProgressCount} In Progress
+                </span>
+                <span className="bg-purple-100 text-purple-900 px-2.5 py-0.5 rounded-full border border-purple-300">
+                  ⏸️ {pausedCount} Paused
+                </span>
+                <span className="bg-gray-100 text-gray-700 px-2.5 py-0.5 rounded-full">
+                  ⬜ {untouchedCount} Not Started
+                </span>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* GLOBAL PENDING REQUESTS BANNER (ONLY VISIBLE TO THE ASSIGNED INVENTORY/SUPPLY MANAGER) */}
         {currentView !== 'inventory' && (() => {

@@ -70,6 +70,7 @@ export default function SettingsModal({
   const [memberInventoryAccess, setMemberInventoryAccess] = useState(false);
   const [memberSupplyAccess, setMemberSupplyAccess] = useState(false);
   const [memberSupplyCompanies, setMemberSupplyCompanies] = useState([]);
+  const [memberAllowInProgress, setMemberAllowInProgress] = useState(false);
 
   // Properties & AI QC Manager Modal State
   const [isQcManagerOpen, setIsQcManagerOpen] = useState(false);
@@ -217,7 +218,7 @@ export default function SettingsModal({
   const handleCreateUnit = async () => {
     const parentProp = properties.find(p => p.id === selectedPropForUnit);
     if (!parentProp) return alert('Please select a parent property.');
-    if (!newUnitName.trim()) return alert('Enter a unit/room name (e.g., Main Office or Mesquite (S1)).');
+    if (!newUnitName.trim()) return alert('Enter a unit/room name (e.g., Mesquite (S1)).');
 
     const finalTags = newBlueprintTagInput.trim()
       ? [...new Set([...newUnitBlueprints, newBlueprintTagInput.trim()])]
@@ -292,7 +293,6 @@ export default function SettingsModal({
     if (!file || !file.type.startsWith('image/')) return alert('Please select or drop an image file.');
     setIsUploadingRefImg(true);
     try {
-      // Compresses Golden Reference Photo to max 1280px @ 75% JPEG quality before storage upload
       const compressed = await compressImage(file, 1280, 1280, 0.75);
       const ext = compressed.name?.split('.').pop() || 'jpg';
       const fileName = `qc-ref-${Date.now()}-${Math.random().toString(36).substring(2, 6)}.${ext}`;
@@ -369,6 +369,7 @@ export default function SettingsModal({
     handleOpenEditMember(member);
     setMemberInventoryAccess(Boolean(member.inventoryAccess));
     setMemberSupplyAccess(Boolean(member.supplySheetAccess));
+    setMemberAllowInProgress(Boolean(member.allowInProgress || member.allow_in_progress));
     const rawComps = member.supplySheetCompanies || [];
     setMemberSupplyCompanies(Array.isArray(rawComps) ? rawComps : JSON.parse(rawComps || '[]'));
   };
@@ -377,6 +378,7 @@ export default function SettingsModal({
     resetMemberForm();
     setMemberInventoryAccess(false);
     setMemberSupplyAccess(false);
+    setMemberAllowInProgress(false);
     setMemberSupplyCompanies([]);
   };
 
@@ -487,7 +489,8 @@ export default function SettingsModal({
       slack_user_id: memberSlackId.trim() || null,
       inventory_access: memberInventoryAccess,
       supply_sheet_access: memberSupplyAccess,
-      supply_sheet_companies: memberSupplyCompanies
+      supply_sheet_companies: memberSupplyCompanies,
+      allow_in_progress: memberAllowInProgress
     };
 
     if (editingMemberId) {
@@ -516,7 +519,8 @@ export default function SettingsModal({
         slackUserId: p.slack_user_id || '',
         inventoryAccess: Boolean(p.inventory_access),
         supplySheetAccess: Boolean(p.supply_sheet_access),
-        supplySheetCompanies: p.supply_sheet_companies || []
+        supplySheetCompanies: p.supply_sheet_companies || [],
+        allowInProgress: Boolean(p.allow_in_progress)
       })));
     }
 
@@ -812,6 +816,11 @@ export default function SettingsModal({
                       <div>
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-bold text-xs text-gray-800">{member.name} ({member.role.toUpperCase()})</span>
+                          {member.allowInProgress && (
+                            <span className="text-[9px] font-bold bg-amber-100 text-amber-900 px-1 py-0.2 rounded uppercase">
+                              ▶️ In-Progress
+                            </span>
+                          )}
                           {member.inventoryAccess && (
                             <span className="text-[9px] font-bold bg-blue-100 text-blue-800 px-1 py-0.2 rounded uppercase">
                               📦 Inventory
@@ -925,6 +934,16 @@ export default function SettingsModal({
 
               {/* PERMISSION CONTROLS */}
               <div className="mt-2 pt-2 border-t border-gray-100 flex flex-col gap-2.5">
+                <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={memberAllowInProgress} 
+                    onChange={(e) => setMemberAllowInProgress(e.target.checked)} 
+                    className="accent-amber-600 w-3.5 h-3.5 cursor-pointer" 
+                  />
+                  <span className="font-bold">Allow "In Progress" & EOD Carryover Status</span>
+                </label>
+
                 <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
                   <input 
                     type="checkbox" 
@@ -1149,7 +1168,6 @@ export default function SettingsModal({
 
             {qcTab === 'rules' ? (
               <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-4">
-                {/* ADD / EDIT RULE FORM */}
                 <div className="bg-white p-4 rounded-lg border border-blue-200 flex flex-col gap-3 shadow-2xs">
                   <div className="flex justify-between items-center border-b border-gray-100 pb-1.5">
                     <span className="text-xs font-bold uppercase tracking-wider text-blue-950">
@@ -1212,7 +1230,6 @@ export default function SettingsModal({
                     />
                   </div>
 
-                  {/* DRAG-AND-DROP GOLDEN REFERENCE PHOTO UPLOADER */}
                   <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 pt-1">
                     <div
                       onDragOver={(e) => { e.preventDefault(); setIsDraggingRefImg(true); }}
@@ -1286,7 +1303,6 @@ export default function SettingsModal({
                   </div>
                 </div>
 
-                {/* EXISTING RULES LIST */}
                 <div className="flex flex-col gap-2">
                   {qcRules.map(rule => (
                     <div key={rule.id} className="bg-white p-3 rounded-lg border border-gray-200 flex justify-between items-start gap-3 text-xs shadow-2xs">
@@ -1323,7 +1339,6 @@ export default function SettingsModal({
               </div>
             ) : (
               <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-4">
-                {/* ADD PARENT PROPERTY */}
                 <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-2 text-xs">
                   <span className="font-bold uppercase tracking-wider text-gray-700">+ Add Parent Property (Hotel / Office / Client)</span>
                   <div className="flex gap-2">
@@ -1351,7 +1366,6 @@ export default function SettingsModal({
                   </div>
                 </div>
 
-                {/* ADD CHILD UNIT / ROOM WITH MULTI-TAG BLUEPRINTS */}
                 <div className="bg-white p-4 rounded-lg border border-gray-200 flex flex-col gap-2.5 text-xs">
                   <span className="font-bold uppercase tracking-wider text-gray-700">+ Add Child Unit / Room</span>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1373,7 +1387,6 @@ export default function SettingsModal({
                     />
                   </div>
 
-                  {/* MULTI-TAG BLUEPRINT PICKER */}
                   <div className="bg-blue-50/50 p-2.5 rounded border border-blue-200 flex flex-col gap-2">
                     <div className="flex items-center justify-between flex-wrap gap-1">
                       <span className="text-[10px] font-bold uppercase tracking-wider text-blue-950">
@@ -1447,7 +1460,6 @@ export default function SettingsModal({
                   </div>
                 </div>
 
-                {/* GROUPED PROPERTIES & UNITS LIST */}
                 <div className="flex flex-col gap-3">
                   {properties.map(prop => {
                     const childUnits = propertyUnits.filter(u => u.property_id === prop.id || u.property_name === prop.name);
@@ -1539,7 +1551,6 @@ export default function SettingsModal({
                                       />
                                     </div>
 
-                                    {/* EDIT UNIT MULTI-TAG PICKER */}
                                     <div className="bg-white p-2 rounded border border-blue-200 flex flex-col gap-1.5">
                                       <div className="flex flex-wrap gap-1">
                                         {distinctBlueprints.filter(bp => !editUnitBlueprints.includes(bp)).map(bp => (

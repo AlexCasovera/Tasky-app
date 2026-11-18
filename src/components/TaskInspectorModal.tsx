@@ -15,12 +15,16 @@ export default function TaskInspectorModal({
   const [unitQcRules, setUnitQcRules] = useState([]);
   const [properties, setProperties] = useState([]);
   const [propertyUnits, setPropertyUnits] = useState([]);
+  const [isPausingTask, setIsPausingTask] = useState(false);
+  const [eodPauseReason, setEodPauseReason] = useState('');
 
   useEffect(() => {
     if (!selectedTask) return;
     setCheckingRuleIds([]);
     setDraggingRuleId(null);
     setRuleBypassNotes({});
+    setIsPausingTask(false);
+    setEodPauseReason('');
 
     if (selectedTask.requireAiQc && selectedTask.propertyName && selectedTask.unitName) {
       loadUnitRules(selectedTask.propertyName, selectedTask.unitName);
@@ -74,6 +78,126 @@ export default function TaskInspectorModal({
 
   const qcResultsMap = selectedTask.aiQcResults || {};
 
+  const currentUserProfile = (teamMembers || []).find(m => m.name === currentUserName);
+  const canUseInProgress = userRole === 'admin' || Boolean(currentUserProfile?.allowInProgress || currentUserProfile?.allow_in_progress);
+
+  const isCurrentInstancePaused =
+    !isCurrentInstanceCompleted &&
+    (selectedTask.status === 'paused' || (selectedTask.pausedDates || []).includes(selectedInstanceDate));
+
+  const isCurrentInstanceInProgress =
+    !isCurrentInstanceCompleted &&
+    !isCurrentInstancePaused &&
+    (selectedTask.status === 'in_progress' || (selectedTask.inProgressDates || []).includes(selectedInstanceDate));
+
+  const latestPauseNote = [...(selectedTask.comments || [])]
+    .reverse()
+    .find(c => c.includes('⏸️ Paused'));
+
+  const handleStartOrResumeInProgress = async () => {
+    const isResuming = isCurrentInstancePaused;
+    const actionLabel = isResuming ? 'Resumed Work' : 'Marked In Progress';
+    const startNote = `▶️ ${actionLabel} by ${currentUserName} [${getCurrentTimestamp()}]`;
+
+    const nextInProgressDates = [...new Set([...(selectedTask.inProgressDates || []), selectedInstanceDate])];
+    const nextPausedDates = (selectedTask.pausedDates || []).filter(d => d !== selectedInstanceDate);
+
+    const updated = {
+      ...selectedTask,
+      status: 'in_progress',
+      inProgressDates: nextInProgressDates,
+      pausedDates: nextPausedDates,
+      comments: [...(selectedTask.comments || []), startNote]
+    };
+
+    setSelectedTask(updated);
+    setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
+
+    const { error } = await supabase
+      .from('tasks')
+      .update({
+        status: 'in_progress',
+        in_progress_dates: nextInProgressDates,
+        paused_dates: nextPausedDates,
+        comments: updated.comments
+      })
+      .eq('id', updated.id);
+
+    if (error) {
+      alert(`Sync error saving In Progress status: ${error.message}`);
+      return;
+    }
+
+    const targetAdmin = selectedTask.createdBy && selectedTask.createdBy !== currentUserName
+      ? selectedTask.createdBy
+      : null;
+
+    await dispatchNotification(
+      targetAdmin ? 'userName' : 'role',
+      targetAdmin || 'admin',
+      'in_progress',
+      `▶️ ${actionLabel}: ${currentUserName} is working on "${selectedTask.title}" (${selectedTask.company})`,
+      `▶️ Task ${isResuming ? 'Resumed' : 'In Progress'}`,
+      `${currentUserName} ${isResuming ? 'resumed' : 'started'} "${selectedTask.title}".`,
+      selectedTask.id,
+      selectedInstanceDate
+    );
+  };
+
+  const handleConfirmEodPause = async () => {
+    const reason = eodPauseReason.trim();
+    if (!reason) {
+      return alert('Please enter a brief update explaining what was completed and why it is paused/carrying over.');
+    }
+
+    const pauseNote = `⏸️ Paused / EOD Update by ${currentUserName} [${getCurrentTimestamp()}]: ${reason}`;
+    const nextPausedDates = [...new Set([...(selectedTask.pausedDates || []), selectedInstanceDate])];
+    const nextInProgressDates = (selectedTask.inProgressDates || []).filter(d => d !== selectedInstanceDate);
+
+    const updated = {
+      ...selectedTask,
+      status: 'paused',
+      pausedDates: nextPausedDates,
+      inProgressDates: nextInProgressDates,
+      comments: [...(selectedTask.comments || []), pauseNote]
+    };
+
+    setSelectedTask(updated);
+    setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
+    setIsPausingTask(false);
+    setEodPauseReason('');
+
+    const { error } = await supabase
+      .from('tasks')
+      .update({
+        status: 'paused',
+        paused_dates: nextPausedDates,
+        in_progress_dates: nextInProgressDates,
+        comments: updated.comments
+      })
+      .eq('id', updated.id);
+
+    if (error) {
+      alert(`Sync error saving Paused status: ${error.message}`);
+      return;
+    }
+
+    const targetAdmin = selectedTask.createdBy && selectedTask.createdBy !== currentUserName
+      ? selectedTask.createdBy
+      : null;
+
+    await dispatchNotification(
+      targetAdmin ? 'userName' : 'role',
+      targetAdmin || 'admin',
+      'comment',
+      `⏸️ Task Paused on "${selectedTask.title}" by ${currentUserName}: ${reason}`,
+      '⏸️ Task Paused (EOD Update)',
+      `${currentUserName}: ${reason}`,
+      selectedTask.id,
+      selectedInstanceDate
+    );
+  };
+
   // Upload and evaluate a photo specifically for ONE AI QC rule slot
   const handleRulePhotoUpload = async (rule, rawFile) => {
     if (!rawFile || !rawFile.type.startsWith('image/')) {
@@ -107,7 +231,6 @@ export default function TaskInspectorModal({
         selectedRuleIds: [rule.id]
       });
 
-      // Automatic retry loop if Google AI Studio briefly rate-limits (429/503)
       let qcData = null;
       for (let attempt = 0; attempt < 3; attempt++) {
         let qcRes;
@@ -281,6 +404,16 @@ export default function TaskInspectorModal({
                   🏨 {selectedTask.propertyName}{selectedTask.unitName ? ` — ${selectedTask.unitName}` : ''}
                 </span>
               )}
+              {isCurrentInstanceInProgress && (
+                <span className="bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase">
+                  ▶️ In Progress
+                </span>
+              )}
+              {isCurrentInstancePaused && (
+                <span className="bg-purple-700 text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase">
+                  ⏸️ Paused
+                </span>
+              )}
               {isTaskPastDue(selectedTask) && <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded">OVERDUE</span>}
             </div>
           </div>
@@ -312,6 +445,103 @@ export default function TaskInspectorModal({
                 <strong> {isCurrentInstanceCompleted && selectedTask.recurrenceType === 'once' && selectedTask.completedDates?.length > 0 ? selectedTask.completedDates[0] : selectedInstanceDate}</strong>
               </span>
             </div>
+
+            {/* 3-STATE EXECUTION STATUS CONTROLS (NOT STARTED / IN PROGRESS / PAUSED) */}
+            {(canUseInProgress || isCurrentInstanceInProgress || isCurrentInstancePaused) && !isCurrentInstanceCompleted && (
+              <div className={`p-3 rounded-lg border flex flex-col gap-2.5 ${
+                isCurrentInstancePaused
+                  ? 'bg-purple-50/90 border-purple-300'
+                  : isCurrentInstanceInProgress
+                  ? 'bg-amber-50/90 border-amber-300'
+                  : 'bg-white border-gray-200'
+              }`}>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wide ${
+                      isCurrentInstancePaused
+                        ? 'bg-purple-700 text-white'
+                        : isCurrentInstanceInProgress
+                        ? 'bg-amber-500 text-white animate-pulse'
+                        : 'bg-gray-200 text-gray-700'
+                    }`}>
+                      {isCurrentInstancePaused
+                        ? '⏸️ Paused / Carried Over'
+                        : isCurrentInstanceInProgress
+                        ? '▶️ Currently In Progress'
+                        : '⬜ Not Started Yet'}
+                    </span>
+                    <span className="text-[11px] text-gray-600">
+                      {isCurrentInstancePaused
+                        ? 'Work paused with EOD update — tap Resume when picking back up'
+                        : isCurrentInstanceInProgress
+                        ? 'Actively underway — pause with a note if carrying over'
+                        : 'Tap Start when you begin working on this'}
+                    </span>
+                  </div>
+
+                  {canUseInProgress && (
+                    !isCurrentInstanceInProgress ? (
+                      <button
+                        type="button"
+                        onClick={handleStartOrResumeInProgress}
+                        className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3.5 py-1.5 rounded shadow-2xs transition flex items-center gap-1.5"
+                      >
+                        <span>▶️</span>
+                        <span>{isCurrentInstancePaused ? 'Resume Task' : 'Mark In Progress'}</span>
+                      </button>
+                    ) : (
+                      !isPausingTask && (
+                        <button
+                          type="button"
+                          onClick={() => setIsPausingTask(true)}
+                          className="bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold px-3.5 py-1.5 rounded shadow-2xs transition flex items-center gap-1.5"
+                        >
+                          <span>⏸️</span>
+                          <span>Pause / Log EOD Update</span>
+                        </button>
+                      )
+                    )
+                  )}
+                </div>
+
+                {isCurrentInstancePaused && latestPauseNote && (
+                  <div className="bg-white/90 border border-purple-200 rounded px-2.5 py-1.5 text-[11px] text-purple-950 font-medium">
+                    {latestPauseNote}
+                  </div>
+                )}
+
+                {isPausingTask && (
+                  <div className="bg-white p-2.5 rounded border border-purple-300 flex flex-col gap-2">
+                    <label className="text-[11px] font-bold text-purple-950">
+                      Required EOD Context — What stage is this at & why is it paused?
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={eodPauseReason}
+                      onChange={(e) => setEodPauseReason(e.target.value)}
+                      placeholder="e.g., First coat of paint applied; letting wall dry overnight before second coat tomorrow..."
+                      className="w-full p-2 text-xs border border-purple-300 rounded focus:outline-none"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { setIsPausingTask(false); setEodPauseReason(''); }}
+                        className="text-xs font-bold text-gray-500 hover:text-gray-800 px-2 py-1"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleConfirmEodPause}
+                        className="bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold px-3 py-1 rounded"
+                      >
+                        Save EOD Update & Pause Task
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {selectedTask.allowAssigneeDeadlineChange && !isCurrentInstanceCompleted && (
               <div className="bg-blue-50 p-3 rounded border border-blue-200 flex flex-col gap-2">
