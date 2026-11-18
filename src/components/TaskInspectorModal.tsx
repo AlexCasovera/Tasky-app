@@ -156,9 +156,7 @@ export default function TaskInspectorModal({
         updatedAt: new Date().toISOString()
       };
 
-      setSelectedTask(prevTask => {
-        if (!prevTask || prevTask.id !== selectedTask.id) return prevTask;
-        const latestMap = selectedTask.aiQcResults || {};
+      const latestMap = selectedTask.aiQcResults || {};
       const nextResultsMap = { ...latestMap, [rule.id]: updatedRuleEntry };
 
       const allCleared = unitQcRules.every(r => ['passed', 'bypassed'].includes(nextResultsMap[r.id]?.status));
@@ -194,9 +192,6 @@ export default function TaskInspectorModal({
       if (dbErr) {
         alert(`Database save error: ${dbErr.message}`);
       }
-
-        return updated;
-      });
     } catch (err) {
       alert(`AI QC check error: ${err.message}`);
     } finally {
