@@ -41,7 +41,7 @@ export const compressImage = (file: File, maxWidth: number, maxHeight: number, q
             if (blob) {
               resolve(new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() }));
             } else {
-              resolve(file); 
+              resolve(file);
             }
           },
           'image/jpeg',
@@ -68,6 +68,42 @@ export function urlBase64ToUint8Array(base64String: string) {
   return outputArray;
 }
 
+const saveSubscriptionToProfile = async (userName: string, subscription: any) => {
+  const subJson = typeof subscription?.toJSON === 'function' ? subscription.toJSON() : subscription;
+  if (!subJson?.endpoint) return { error: new Error('Invalid push subscription object.') };
+
+  const { data: profile, error: fetchErr } = await supabase
+    .from('profiles')
+    .select('id, push_subscription, push_subscriptions')
+    .eq('name', userName)
+    .single();
+
+  if (fetchErr || !profile) {
+    return { error: fetchErr || new Error('Profile not found.') };
+  }
+
+  let existingList = Array.isArray(profile.push_subscriptions) ? [...profile.push_subscriptions] : [];
+
+  // Preserve legacy single subscription if not already in the array
+  if (profile.push_subscription?.endpoint && !existingList.some(s => s?.endpoint === profile.push_subscription.endpoint)) {
+    existingList.push(profile.push_subscription);
+  }
+
+  // Replace existing entry for this device endpoint or append new device
+  const filtered = existingList.filter(s => s?.endpoint && s.endpoint !== subJson.endpoint);
+  const updatedList = [...filtered, subJson].slice(-6); // Cap at 6 devices per user
+
+  const { error: updateErr } = await supabase
+    .from('profiles')
+    .update({
+      push_subscription: subJson,
+      push_subscriptions: updatedList
+    })
+    .eq('id', profile.id);
+
+  return { error: updateErr };
+};
+
 export const enableNativePush = async (userName: string) => {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     alert('Native Push notifications are not supported on this browser.');
@@ -84,15 +120,15 @@ export const enableNativePush = async (userName: string) => {
       return;
     }
 
-    const subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-    });
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
 
-    const { error } = await supabase
-      .from('profiles')
-      .update({ push_subscription: subscription })
-      .eq('name', userName);
+    const { error } = await saveSubscriptionToProfile(userName, subscription);
 
     if (error) {
       console.error('Failed to save push subscription to Supabase:', error);
@@ -106,9 +142,51 @@ export const enableNativePush = async (userName: string) => {
   }
 };
 
+// Silently auto-heals dropped/rotated iOS push subscriptions when the app opens
+export const syncPushSubscriptionSilently = async (userName: string) => {
+  if (!userName) return;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
+  if (Notification.permission !== 'granted') return;
+
+  try {
+    const registration = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+
+    let subscription = await registration.pushManager.getSubscription();
+
+    // If iOS cleared or dropped the subscription while permission is still granted, silently re-subscribe
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
+
+    const subJson = typeof subscription?.toJSON === 'function' ? subscription.toJSON() : subscription;
+    if (!subJson?.endpoint) return;
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('push_subscriptions')
+      .eq('name', userName)
+      .single();
+
+    const savedList = Array.isArray(profile?.push_subscriptions) ? profile.push_subscriptions : [];
+    const alreadySynced = savedList.some(
+      s => s?.endpoint === subJson.endpoint && s?.keys?.p256dh === subJson.keys?.p256dh
+    );
+
+    if (!alreadySynced) {
+      await saveSubscriptionToProfile(userName, subJson);
+    }
+  } catch (err) {
+    console.warn('Silent push auto-heal skipped:', err.message);
+  }
+};
+
 export const sendNativePush = async ({ targetType, targetValue, title, message }) => {
   try {
-    let query = supabase.from('profiles').select('push_subscription');
+    let query = supabase.from('profiles').select('id, push_subscription, push_subscriptions');
     if (targetType === 'role') {
       query = query.eq('role', targetValue);
     } else {
@@ -119,17 +197,32 @@ export const sendNativePush = async ({ targetType, targetValue, title, message }
     if (error || !data) return;
 
     for (const profile of data) {
-      if (profile.push_subscription) {
-        await fetch('/api/notify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            subscription: profile.push_subscription,
-            title,
-            message
-          })
+      const subsMap = new Map();
+
+      if (Array.isArray(profile.push_subscriptions)) {
+        profile.push_subscriptions.forEach(s => {
+          if (s?.endpoint) subsMap.set(s.endpoint, s);
         });
       }
+      if (profile.push_subscription?.endpoint && !subsMap.has(profile.push_subscription.endpoint)) {
+        subsMap.set(profile.push_subscription.endpoint, profile.push_subscription);
+      }
+
+      const subscriptions = Array.from(subsMap.values());
+      await Promise.allSettled(
+        subscriptions.map(subscription =>
+          fetch('/api/notify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              subscription,
+              profileId: profile.id,
+              title,
+              message
+            })
+          })
+        )
+      );
     }
   } catch (err) {
     console.error('Push Notification Error:', err);

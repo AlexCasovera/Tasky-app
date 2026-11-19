@@ -8,6 +8,7 @@ import {
   minuteSubSlots,
   compressImage,
   enableNativePush,
+  syncPushSubscriptionSilently,
   sendNativePush,
   formatDateKey,
   mapToDb,
@@ -36,17 +37,46 @@ const generateTaskId = () =>
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
 
   useEffect(() => {
+    let mounted = true;
+
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
+      if (mounted) {
+        setSession(session);
+        setIsAuthChecking(false);
+      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+      if (mounted) {
+        setSession(session);
+        setIsAuthChecking(false);
+      }
     });
 
-    return () => subscription.unsubscribe();
+    // Pause background refresh timers when iOS suspends the PWA; resume cleanly on wake
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        supabase.auth.startAutoRefresh();
+      } else {
+        supabase.auth.stopAutoRefresh();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    // Ask iOS/Safari to protect localStorage from automatic eviction
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().catch(() => {});
+    }
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, []);
 
   const [currentView, setCurrentView] = useState('list');
@@ -157,6 +187,20 @@ export default function App() {
   }, [session]);
 
   const currentUserName = currentProfile?.name || session?.user?.email?.split('@')[0] || '';
+  useEffect(() => {
+  if (!session || !currentUserName) return;
+
+  syncPushSubscriptionSilently(currentUserName);
+
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible') {
+      syncPushSubscriptionSilently(currentUserName);
+    }
+  };
+
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+}, [session, currentUserName]);
 
   const fetchGlobalRequests = async () => {
     if (!session || companiesData.length === 0) return;
@@ -2145,6 +2189,14 @@ export default function App() {
   if (gridEndHour > 23) gridEndHour = 23;
 
   const dynamicTimeSlots = Array.from({ length: gridEndHour - gridStartHour + 1 }, (_, i) => gridStartHour + i);
+
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-[#A9B1A6] flex items-center justify-center font-bold text-white tracking-widest uppercase">
+        Restoring Session...
+      </div>
+    );
+  }
 
   if (!session) {
     return <Auth />
